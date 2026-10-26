@@ -12,15 +12,22 @@
  * persistiti in data/agents.json e letti realmente dall'orchestratore prima
  * di ogni richiesta: disattivare un agente qui cambia davvero il risultato
  * (vedi orchestrator.js).
+ *
+ * L'accesso proprietario (data/owner.json) permette al fondatore di impostare
+ * da sé, tramite una pagina del sito, un nome utente e una password che solo
+ * lui conosce: la password non viene mai salvata in chiaro, solo come hash
+ * salato (scrypt), e non transita mai per lo sviluppatore o per Pazi.
  */
 
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 const DATA_DIR = path.join(__dirname, "data");
 const LEDGER_PATH = path.join(DATA_DIR, "ledger.json");
 const OUTBOX_PATH = path.join(DATA_DIR, "outbox.json");
 const AGENTS_PATH = path.join(DATA_DIR, "agents.json");
+const OWNER_PATH = path.join(DATA_DIR, "owner.json");
 
 const DEFAULT_AGENTS = [
   {
@@ -50,6 +57,9 @@ function init() {
   ensureFile(LEDGER_PATH, []);
   ensureFile(OUTBOX_PATH, []);
   ensureFile(AGENTS_PATH, DEFAULT_AGENTS);
+  // Nota: owner.json NON viene creato qui di proposito: la sua assenza è lo
+  // stato "nessun proprietario ancora configurato" che abilita la pagina di
+  // auto-configurazione protetta dal token.
 }
 
 function readJson(p) {
@@ -116,6 +126,46 @@ function updateAgent(id, changes) {
   return updated;
 }
 
+// --- Accesso proprietario (owner) --------------------------------------
+
+function getOwner() {
+  if (!fs.existsSync(OWNER_PATH)) return null;
+  try {
+    return readJson(OWNER_PATH);
+  } catch (e) {
+    return null;
+  }
+}
+
+function setOwner(username, password) {
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  const salt = crypto.randomBytes(16).toString("hex");
+  const hash = crypto.scryptSync(password, salt, 64).toString("hex");
+  const owner = {
+    username: String(username),
+    salt,
+    hash,
+    impostatoIl: new Date().toISOString()
+  };
+  writeJson(OWNER_PATH, owner);
+  return { username: owner.username, impostatoIl: owner.impostatoIl };
+}
+
+function verifyOwner(username, password) {
+  const owner = getOwner();
+  if (!owner) return false;
+  if (owner.username !== username) return false;
+  let candidate;
+  try {
+    candidate = crypto.scryptSync(password, owner.salt, 64);
+  } catch (e) {
+    return false;
+  }
+  const stored = Buffer.from(owner.hash, "hex");
+  if (candidate.length !== stored.length) return false;
+  return crypto.timingSafeEqual(candidate, stored);
+}
+
 module.exports = {
   init,
   listRequests,
@@ -126,7 +176,11 @@ module.exports = {
   listAgents,
   getAgent,
   updateAgent,
+  getOwner,
+  setOwner,
+  verifyOwner,
   LEDGER_PATH,
   OUTBOX_PATH,
-  AGENTS_PATH
+  AGENTS_PATH,
+  OWNER_PATH
 };
