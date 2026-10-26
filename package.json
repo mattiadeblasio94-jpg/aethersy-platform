@@ -1,0 +1,14 @@
+{
+  "name": "aethersy-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Aethersy — fase 1: orchestrazione multiagente con revisione umana (dati sintetici).",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/smoke.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
