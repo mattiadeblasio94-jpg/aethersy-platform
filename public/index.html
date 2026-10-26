@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Ambiente di prova — Orchestrazione multiagente Aethersy</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="banner">Ambiente di prova locale — dati sintetici, nessun invio reale verso l'esterno, esecuzione server reale solo su disco locale</div>
+  <header class="top">
+    <span class="name">Aethersy — Piattaforma</span>
+    <span class="sub">— prima fetta verticale di orchestrazione multiagente</span>
+  </header>
+
+  <main>
+    <section class="intro">
+      <h1>Prova l'orchestrazione reale tra due agenti con revisione umana</h1>
+      <p>Invia una richiesta cliente sintetica. Il <strong>TriageAgent</strong> la classifica, passa il risultato strutturato al <strong>DraftingAgent</strong> che propone un'azione concreta (bozza email o conferma di prenotazione con controllo conflitti reale sull'agenda). Nessuna azione viene eseguita finché non la approvi tu: l'approvazione scatena una scrittura reale e verificabile su disco lato server.</p>
+      <div class="legend">
+        <span class="l-ok">Reale: classificazione eseguita dal server, passaggio dati tra agenti, controllo conflitti su file, cancello di approvazione, persistenza su disco dopo l'approvazione</span>
+        <span class="l-sim">Simulato: il "ragionamento" è a parole chiave (non un modello linguistico); l'agenda è sintetica; nessuna email o prenotazione viene davvero inviata a un sistema esterno</span>
+      </div>
+    </section>
+
+    <div class="card">
+      <h2 style="margin-top:0;color:var(--indigo);font-size:1.05rem;">Nuova richiesta cliente (dati sintetici)</h2>
+      <div class="chips" id="req-chips"></div>
+      <form id="req-form">
+        <div class="form-row">
+          <input type="text" id="req-sender" placeholder="Nome mittente (es: Giulia Fontana)" />
+        </div>
+        <div class="form-row">
+          <textarea id="req-text" placeholder="Scrivi qui il testo della richiesta..."></textarea>
+        </div>
+        <button class="primary" type="submit">Invia alla piattaforma</button>
+      </form>
+    </div>
+
+    <h2 style="color:var(--indigo);font-size:1.05rem;">Richieste e azioni proposte</h2>
+    <div id="req-list"></div>
+  </main>
+
+  <footer>
+    Ambiente di prova tecnico di Aethersy · esecuzione reale solo in locale, nessun invio esterno ·
+    <a href="https://aethersy.pazi.dev/" target="_blank" rel="noopener">sito pubblico</a>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
