@@ -7,6 +7,11 @@
  * e, per le azioni eseguite, anche in data/outbox.json (registro delle
  * "azioni eseguite" — simulazione esplicita di invio/conferma reale verso
  * l'esterno, nessuna chiamata di rete in uscita viene effettuata).
+ *
+ * Gli agenti configurabili (nome, ruolo, abilitato, istruzioni) sono
+ * persistiti in data/agents.json e letti realmente dall'orchestratore prima
+ * di ogni richiesta: disattivare un agente qui cambia davvero il risultato
+ * (vedi orchestrator.js).
  */
 
 const fs = require("fs");
@@ -15,6 +20,24 @@ const path = require("path");
 const DATA_DIR = path.join(__dirname, "data");
 const LEDGER_PATH = path.join(DATA_DIR, "ledger.json");
 const OUTBOX_PATH = path.join(DATA_DIR, "outbox.json");
+const AGENTS_PATH = path.join(DATA_DIR, "agents.json");
+
+const DEFAULT_AGENTS = [
+  {
+    id: "triage",
+    nome: "TriageAgent",
+    ruolo: "Classifica la richiesta cliente (prenotazione, reclamo, preventivo, FAQ) ed estrae data/ora quando presenti.",
+    abilitato: true,
+    istruzioni: "Classifica come prenotazione, preventivo, reclamo o domanda informativa; estrai data e ora se il testo le contiene."
+  },
+  {
+    id: "drafting",
+    nome: "DraftingAgent",
+    ruolo: "Riceve l'output del TriageAgent, controlla l'agenda sintetica e propone un'azione con bozza di testo modificabile.",
+    abilitato: true,
+    istruzioni: "Se la classificazione è una prenotazione, controlla l'agenda sintetica per conflitti; proponi sempre un testo di bozza modificabile prima dell'approvazione umana."
+  }
+];
 
 function ensureFile(p, initial) {
   if (!fs.existsSync(p)) {
@@ -26,6 +49,7 @@ function init() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
   ensureFile(LEDGER_PATH, []);
   ensureFile(OUTBOX_PATH, []);
+  ensureFile(AGENTS_PATH, DEFAULT_AGENTS);
 }
 
 function readJson(p) {
@@ -67,4 +91,42 @@ function listOutbox() {
   return readJson(OUTBOX_PATH);
 }
 
-module.exports = { init, listRequests, getRequest, saveRequest, appendOutbox, listOutbox, LEDGER_PATH, OUTBOX_PATH };
+function listAgents() {
+  init();
+  return readJson(AGENTS_PATH);
+}
+
+function getAgent(id) {
+  return listAgents().find((a) => a.id === id) || null;
+}
+
+function updateAgent(id, changes) {
+  init();
+  changes = changes || {};
+  const all = readJson(AGENTS_PATH);
+  const idx = all.findIndex((a) => a.id === id);
+  if (idx === -1) return null;
+  const updated = Object.assign({}, all[idx]);
+  if (typeof changes.abilitato === "boolean") updated.abilitato = changes.abilitato;
+  if (typeof changes.istruzioni === "string" && changes.istruzioni.trim()) {
+    updated.istruzioni = changes.istruzioni.trim().slice(0, 500);
+  }
+  all[idx] = updated;
+  writeJson(AGENTS_PATH, all);
+  return updated;
+}
+
+module.exports = {
+  init,
+  listRequests,
+  getRequest,
+  saveRequest,
+  appendOutbox,
+  listOutbox,
+  listAgents,
+  getAgent,
+  updateAgent,
+  LEDGER_PATH,
+  OUTBOX_PATH,
+  AGENTS_PATH
+};

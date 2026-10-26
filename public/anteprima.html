@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Anteprima sicura — Piattaforma Aethersy</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="banner">Anteprima pubblica senza credenziali · dati dimostrativi fissi, non reali · nessuna scrittura possibile da questa pagina</div>
+  <header class="top">
+    <span class="name">Aethersy — Anteprima del workspace</span>
+    <span class="sub">· sola lettura, dati sintetici</span>
+  </header>
+
+  <main>
+    <div class="intro">
+      <h1>Come funziona il workspace Aethersy</h1>
+      <p>Questa pagina mostra un esempio dimostrativo fisso del workspace reale (dashboard, agenti configurabili, cronologia e coda di approvazione). I dati qui sotto sono inventati a scopo illustrativo: non riflettono lo stato attuale del workspace e questa pagina non permette di modificare nulla.</p>
+    </div>
+
+    <div class="stat-grid">
+      <div class="stat-card"><div class="stat-value">12</div><div class="stat-label">Richieste totali (esempio)</div></div>
+      <div class="stat-card"><div class="stat-value">2</div><div class="stat-label">In attesa di approvazione (esempio)</div></div>
+      <div class="stat-card"><div class="stat-value">9</div><div class="stat-label">Eseguite (esempio)</div></div>
+      <div class="stat-card"><div class="stat-value">1</div><div class="stat-label">Rifiutate (esempio)</div></div>
+    </div>
+
+    <h2 style="color:var(--indigo);font-size:1.05rem;">Agenti configurabili (esempio)</h2>
+    <div class="card agent-card">
+      <div class="meta"><span><strong>TriageAgent</strong></span><span class="status-pill done">Abilitato</span></div>
+      <div style="font-size:.88rem;color:#453f66;">Classifica la richiesta cliente (prenotazione, reclamo, preventivo, FAQ) ed estrae data/ora quando presenti.</div>
+    </div>
+    <div class="card agent-card">
+      <div class="meta"><span><strong>DraftingAgent</strong></span><span class="status-pill done">Abilitato</span></div>
+      <div style="font-size:.88rem;color:#453f66;">Controlla l'agenda sintetica e propone un'azione con bozza di testo modificabile.</div>
+    </div>
+
+    <h2 style="color:var(--indigo);font-size:1.05rem;">Esempio di richiesta con revisione umana</h2>
+    <div class="req-item">
+      <div class="meta"><span><strong>Giulia Fontana (esempio)</strong> — 26/10/2026, 09:00</span><span class="status-pill pending">In attesa di revisione umana</span></div>
+      <div style="font-size:.9rem;color:#453f66;margin-bottom:.4rem;">"Vorrei prenotare una consulenza arredo per il 29/10/2026 alle ore 10:00."</div>
+      <div class="agent-trace"><span class="agent-name">1 · TriageAgent</span> → Richiesta di appuntamento/prenotazione (urgenza: normale)</div>
+      <div class="agent-trace"><span class="agent-name">2 · DraftingAgent</span> → Proposta di conferma per 29/10/2026 ore 10:00</div>
+      <div class="conflict-box">Conflitto con l'agenda sintetica rilevato (esempio): servirebbe conferma esplicita prima di approvare.</div>
+    </div>
+
+    <p style="color:#8a85a8;font-size:.85rem;">Per usare il workspace reale con i tuoi dati serve accedere con le credenziali del workspace, non disponibili da questa pagina pubblica.</p>
+  </main>
+
+  <footer>
+    Anteprima statica di Aethersy · nessun dato reale, nessuna azione eseguibile ·
+    <a href="https://aethersy.pazi.dev/" target="_blank" rel="noopener">sito pubblico</a>
+  </footer>
+</body>
+</html>

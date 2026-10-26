@@ -4,7 +4,11 @@
  * Server HTTP reale (solo moduli nativi Node.js, nessuna dipendenza esterna).
  * Espone:
  *  - API REST per inviare richieste, vederle, approvarle o rifiutarle
- *  - l'interfaccia di prova statica (cartella public/)
+ *  - API REST per leggere/configurare gli agenti (/api/agenti)
+ *  - il dashboard statico (cartella public/)
+ *  - /anteprima: un'anteprima statica NON autenticata con dati dimostrativi
+ *    fissi (nessuna lettura di dati reali), per mostrare il prodotto senza
+ *    condividere le credenziali del workspace.
  *
  * Avvio: node server.js  (porta di default 8787, sovrascrivibile con PORT)
  */
@@ -20,11 +24,15 @@ const PUBLIC_DIR = path.join(__dirname, "public");
 
 // Protezione opzionale con Basic Auth: se BASIC_AUTH_USER e BASIC_AUTH_PASS
 // sono impostate (es. su un deploy pubblico reale), ogni rotta tranne
-// /api/salute richiede quelle credenziali. Senza quelle variabili d'ambiente
-// (uso locale, come nei test di questa fase) il server resta aperto come già
-// verificato: il comportamento locale non cambia.
+// /api/salute e /anteprima richiede quelle credenziali. Senza quelle variabili
+// d'ambiente (uso locale, come nei test di questa fase) il server resta
+// aperto come già verificato: il comportamento locale non cambia.
 const BASIC_AUTH_USER = process.env.BASIC_AUTH_USER;
 const BASIC_AUTH_PASS = process.env.BASIC_AUTH_PASS;
+
+// Rotte accessibili senza credenziali: la sonda di salute e l'anteprima
+// sicura pubblica (solo dati dimostrativi statici, nessuna scrittura).
+const ROTTE_SENZA_AUTH = new Set(["/api/salute", "/anteprima", "/anteprima/", "/anteprima.html"]);
 
 function isAuthorized(req) {
   if (!BASIC_AUTH_USER || !BASIC_AUTH_PASS) return true;
@@ -101,9 +109,13 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const p = url.pathname;
 
-  if (p !== "/api/salute" && !isAuthorized(req)) {
+  if ((p === "/anteprima" || p === "/anteprima/") && req.method === "GET") {
+    return serveStatic(req, res, "/anteprima.html");
+  }
+
+  if (!ROTTE_SENZA_AUTH.has(p) && !isAuthorized(req)) {
     res.writeHead(401, {
-      "WWW-Authenticate": 'Basic realm="Aethersy - ambiente di prova"',
+      "WWW-Authenticate": 'Basic realm="Aethersy - workspace"',
       "Content-Type": "application/json; charset=utf-8"
     });
     return res.end(JSON.stringify({ error: "non_autorizzato" }));
@@ -151,6 +163,18 @@ const server = http.createServer(async (req, res) => {
 
     if (p === "/api/outbox" && req.method === "GET") {
       return sendJson(res, 200, store.listOutbox());
+    }
+
+    if (p === "/api/agenti" && req.method === "GET") {
+      return sendJson(res, 200, store.listAgents());
+    }
+
+    const matchAgentUpdate = p.match(/^\/api\/agenti\/([^/]+)$/);
+    if (matchAgentUpdate && req.method === "PUT") {
+      const body = await readBody(req);
+      const updated = store.updateAgent(matchAgentUpdate[1], body);
+      if (!updated) return sendJson(res, 404, { error: "agente_non_trovato" });
+      return sendJson(res, 200, updated);
     }
 
     if (p === "/api/salute" && req.method === "GET") {

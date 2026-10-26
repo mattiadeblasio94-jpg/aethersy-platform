@@ -2,10 +2,13 @@
   "use strict";
 
   var listEl = document.getElementById("req-list");
+  var approvazioniEl = document.getElementById("approvazioni-list");
   var formEl = document.getElementById("req-form");
   var textEl = document.getElementById("req-text");
   var senderEl = document.getElementById("req-sender");
   var chipsEl = document.getElementById("req-chips");
+  var agentiEl = document.getElementById("agenti-list");
+  var statGridEl = document.getElementById("stat-grid");
 
   var ESEMPI = [
     { mittente: "Giulia Fontana", testo: "Vorrei prenotare una consulenza arredo per il 29/10/2026 alle ore 10:00." },
@@ -71,7 +74,8 @@
     }
 
     if (azione.testoProposto) {
-      html += '<textarea class="draft-box" data-id="' + r.id + '" ' + (r.stato !== "in_attesa_revisione_umana" ? "disabled" : "") + '>' + escapeHtml(r.revisione && r.revisione.testoFinaleApprovato || azione.testoProposto) + '</textarea>';
+      html += '<textarea class="draft-box" data-id="' + r.id + '" ' + (r.stato !== "in_attesa_revisione_umana" ? "disabled" : "") + '>' +
+        escapeHtml((r.revisione && r.revisione.testoFinaleApprovato) || azione.testoProposto) + '</textarea>';
     }
 
     if (r.stato === "in_attesa_revisione_umana") {
@@ -92,42 +96,14 @@
     return el;
   }
 
-  function loadRequests() {
-    fetch("/api/richieste")
-      .then(function (r) { return r.json(); })
-      .then(function (data) {
-        listEl.innerHTML = "";
-        if (!data.length) {
-          listEl.innerHTML = '<p class="empty-state">Nessuna richiesta ancora. Invia la prima richiesta sopra.</p>';
-          return;
-        }
-        data.forEach(function (r) { listEl.appendChild(renderRequest(r)); });
-      });
-  }
-
-  formEl.addEventListener("submit", function (e) {
-    e.preventDefault();
-    var testo = textEl.value.trim();
-    if (!testo) return;
-    fetch("/api/richieste", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ testo: testo, mittente: senderEl.value.trim() || "Cliente sintetico" })
-    })
-      .then(function (r) { return r.json(); })
-      .then(function () {
-        textEl.value = "";
-        loadRequests();
-      });
-  });
-
-  listEl.addEventListener("click", function (e) {
+  function handleListClick(e) {
     var approva = e.target.closest(".btn-approva");
     var rifiuta = e.target.closest(".btn-rifiuta");
+    var container = e.currentTarget;
     if (approva) {
       var id = approva.getAttribute("data-id");
-      var textarea = listEl.querySelector('.draft-box[data-id="' + id + '"]');
-      var ack = listEl.querySelector('.ack-conflitto[data-id="' + id + '"]');
+      var textarea = container.querySelector('.draft-box[data-id="' + id + '"]');
+      var ack = container.querySelector('.ack-conflitto[data-id="' + id + '"]');
       fetch("/api/richieste/" + id + "/approva", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -153,8 +129,111 @@
         .then(function (r) { return r.json(); })
         .then(function () { loadRequests(); });
     }
+  }
+  listEl.addEventListener("click", handleListClick);
+  approvazioniEl.addEventListener("click", handleListClick);
+
+  function loadRequests() {
+    fetch("/api/richieste")
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        listEl.innerHTML = "";
+        approvazioniEl.innerHTML = "";
+        if (!data.length) {
+          listEl.innerHTML = '<p class="empty-state">Nessuna richiesta ancora. Invia la prima richiesta sopra.</p>';
+        } else {
+          data.forEach(function (r) { listEl.appendChild(renderRequest(r)); });
+        }
+        var pending = data.filter(function (r) { return r.stato === "in_attesa_revisione_umana"; });
+        if (!pending.length) {
+          approvazioniEl.innerHTML = '<p class="empty-state">Nessuna richiesta in attesa di approvazione.</p>';
+        } else {
+          pending.forEach(function (r) { approvazioniEl.appendChild(renderRequest(r)); });
+        }
+        renderDashboard(data);
+      });
+  }
+
+  function renderDashboard(data) {
+    data = data || [];
+    var pending = data.filter(function (r) { return r.stato === "in_attesa_revisione_umana"; }).length;
+    var eseguite = data.filter(function (r) { return r.stato === "eseguita"; }).length;
+    var rifiutate = data.filter(function (r) { return r.stato === "rifiutata"; }).length;
+    var stats = [
+      { label: "Richieste totali", value: data.length },
+      { label: "In attesa di approvazione", value: pending },
+      { label: "Eseguite (reale su disco)", value: eseguite },
+      { label: "Rifiutate", value: rifiutate }
+    ];
+    statGridEl.innerHTML = stats.map(function (s) {
+      return '<div class="stat-card"><div class="stat-value">' + s.value + '</div><div class="stat-label">' + escapeHtml(s.label) + '</div></div>';
+    }).join("");
+  }
+
+  function renderAgents(agents) {
+    agentiEl.innerHTML = "";
+    agents.forEach(function (a) {
+      var card = document.createElement("div");
+      card.className = "card agent-card";
+      card.innerHTML =
+        '<div class="meta"><span><strong>' + escapeHtml(a.nome) + '</strong></span>' +
+        '<label class="ack-row"><input type="checkbox" class="agent-toggle" data-id="' + a.id + '" ' + (a.abilitato ? "checked" : "") + ' /> Abilitato</label></div>' +
+        '<div style="font-size:.88rem;color:#453f66;margin-bottom:.5rem;">' + escapeHtml(a.ruolo) + '</div>' +
+        '<textarea class="draft-box agent-instr" data-id="' + a.id + '">' + escapeHtml(a.istruzioni) + '</textarea>' +
+        '<div class="action-row"><button class="primary btn-salva-agente" data-id="' + a.id + '">Salva configurazione</button></div>';
+      agentiEl.appendChild(card);
+    });
+  }
+
+  function loadAgents() {
+    fetch("/api/agenti")
+      .then(function (r) { return r.json(); })
+      .then(function (agents) { renderAgents(agents); });
+  }
+
+  agentiEl.addEventListener("click", function (e) {
+    var btn = e.target.closest(".btn-salva-agente");
+    if (!btn) return;
+    var id = btn.getAttribute("data-id");
+    var toggle = agentiEl.querySelector('.agent-toggle[data-id="' + id + '"]');
+    var instr = agentiEl.querySelector('.agent-instr[data-id="' + id + '"]');
+    fetch("/api/agenti/" + id, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ abilitato: toggle.checked, istruzioni: instr.value })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function () { loadAgents(); });
+  });
+
+  formEl.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var testo = textEl.value.trim();
+    if (!testo) return;
+    fetch("/api/richieste", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ testo: testo, mittente: senderEl.value.trim() || "Cliente sintetico" })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function () {
+        textEl.value = "";
+        loadRequests();
+      });
+  });
+
+  var tabButtons = document.querySelectorAll(".tab-btn");
+  var tabPanels = document.querySelectorAll(".tab-panel");
+  tabButtons.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      tabButtons.forEach(function (b) { b.classList.remove("active"); });
+      tabPanels.forEach(function (p) { p.classList.remove("active"); });
+      btn.classList.add("active");
+      document.getElementById("tab-" + btn.getAttribute("data-tab")).classList.add("active");
+    });
   });
 
   loadRequests();
+  loadAgents();
   setInterval(loadRequests, 4000);
 })();

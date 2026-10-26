@@ -4,6 +4,10 @@
  * Orchestratore — coordina i due agenti specializzati su una richiesta reale
  * dell'utente e applica il cancello di revisione umana obbligatorio:
  * nessuna azione viene eseguita senza un'approvazione esplicita.
+ *
+ * Gli agenti sono configurabili da data/agents.json tramite /api/agenti:
+ * disattivare un agente qui cambia davvero il comportamento (non è
+ * cosmetico), vedi i rami "disattivato" sotto.
  */
 
 const crypto = require("crypto");
@@ -11,9 +15,43 @@ const { triage } = require("./agents/triageAgent");
 const { draft } = require("./agents/draftingAgent");
 const store = require("./store");
 
+function triageDisattivato(testo, meta) {
+  return {
+    agente: "TriageAgent",
+    reale: "nessuna classificazione eseguita: l'agente è disattivato nella configurazione (/api/agenti)",
+    simulato: "n/d",
+    classification: { type: "manuale", label: "Non classificata (TriageAgent disattivato)", urgency: "normale", confidence: 0 },
+    entities: { mittente: (meta && meta.mittente) || "Mittente sconosciuto", dataOraRichiesta: null },
+    testoOriginale: testo
+  };
+}
+
+function draftingDisattivato() {
+  return {
+    agente: "DraftingAgent",
+    reale: "nessuna bozza generata: l'agente è disattivato nella configurazione (/api/agenti)",
+    simulato: "n/d",
+    azioneProposta: {
+      tipo: "da_valutare_manualmente",
+      titolo: "DraftingAgent disattivato: richiede valutazione diretta del titolare",
+      conflitto: false,
+      richiedeConfermaEsplicita: false,
+      testoProposto: null
+    }
+  };
+}
+
 function handleNewRequest(testo, mittente) {
-  const triageResult = triage(testo, { mittente });
-  const draftResult = draft(triageResult);
+  const triageCfg = store.getAgent("triage");
+  const draftingCfg = store.getAgent("drafting");
+
+  const triageResult = (triageCfg && triageCfg.abilitato === false)
+    ? triageDisattivato(testo, { mittente })
+    : triage(testo, { mittente });
+
+  const draftResult = (draftingCfg && draftingCfg.abilitato === false)
+    ? draftingDisattivato()
+    : draft(triageResult);
 
   const needsReview = draftResult.azioneProposta.tipo !== "nessuna_azione" &&
     draftResult.azioneProposta.tipo !== "da_valutare_manualmente";

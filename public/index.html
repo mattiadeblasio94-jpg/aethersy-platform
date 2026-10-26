@@ -4,46 +4,83 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta name="robots" content="noindex, nofollow" />
-<title>Ambiente di prova — Orchestrazione multiagente Aethersy</title>
+<title>Workspace — Piattaforma Aethersy</title>
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="banner">Ambiente di prova locale — dati sintetici, nessun invio reale verso l'esterno, esecuzione server reale solo su disco locale</div>
+  <div class="banner">Workspace reale · dati sintetici · nessun invio reale verso l'esterno · esecuzione server reale solo su disco locale</div>
   <header class="top">
-    <span class="name">Aethersy — Piattaforma</span>
-    <span class="sub">— prima fetta verticale di orchestrazione multiagente</span>
+    <span class="name">Aethersy — Workspace</span>
+    <span class="sub">· dashboard, agenti configurabili, cronologia e approvazioni</span>
   </header>
 
+  <nav class="tabs" id="tabs">
+    <button class="tab-btn active" data-tab="dashboard" type="button">Dashboard</button>
+    <button class="tab-btn" data-tab="agenti" type="button">Agenti</button>
+    <button class="tab-btn" data-tab="approvazioni" type="button">Coda di approvazione</button>
+    <button class="tab-btn" data-tab="cronologia" type="button">Cronologia</button>
+  </nav>
+
   <main>
-    <section class="intro">
-      <h1>Prova l'orchestrazione reale tra due agenti con revisione umana</h1>
-      <p>Invia una richiesta cliente sintetica. Il <strong>TriageAgent</strong> la classifica, passa il risultato strutturato al <strong>DraftingAgent</strong> che propone un'azione concreta (bozza email o conferma di prenotazione con controllo conflitti reale sull'agenda). Nessuna azione viene eseguita finché non la approvi tu: l'approvazione scatena una scrittura reale e verificabile su disco lato server.</p>
-      <div class="legend">
-        <span class="l-ok">Reale: classificazione eseguita dal server, passaggio dati tra agenti, controllo conflitti su file, cancello di approvazione, persistenza su disco dopo l'approvazione</span>
-        <span class="l-sim">Simulato: il "ragionamento" è a parole chiave (non un modello linguistico); l'agenda è sintetica; nessuna email o prenotazione viene davvero inviata a un sistema esterno</span>
+    <section id="tab-dashboard" class="tab-panel active">
+      <div class="intro">
+        <h1>Stato del workspace</h1>
+        <p>Riepilogo reale, calcolato dai dati effettivamente salvati su disco (nessun numero inventato).</p>
+      </div>
+      <div class="stat-grid" id="stat-grid"></div>
+      <div class="card">
+        <h2 style="margin-top:0;color:var(--indigo);font-size:1.05rem;">Anteprima sicura condivisibile</h2>
+        <p style="margin:.3rem 0;color:#453f66;">Pagina pubblica, senza credenziali, con dati dimostrativi fissi — non riflette lo stato reale del workspace: <a href="/anteprima" target="_blank" rel="noopener">apri /anteprima</a></p>
       </div>
     </section>
 
-    <div class="card">
-      <h2 style="margin-top:0;color:var(--indigo);font-size:1.05rem;">Nuova richiesta cliente (dati sintetici)</h2>
-      <div class="chips" id="req-chips"></div>
-      <form id="req-form">
-        <div class="form-row">
-          <input type="text" id="req-sender" placeholder="Nome mittente (es: Giulia Fontana)" />
-        </div>
-        <div class="form-row">
-          <textarea id="req-text" placeholder="Scrivi qui il testo della richiesta..."></textarea>
-        </div>
-        <button class="primary" type="submit">Invia alla piattaforma</button>
-      </form>
-    </div>
+    <section id="tab-agenti" class="tab-panel">
+      <div class="intro">
+        <h1>Agenti configurabili</h1>
+        <p>Disattivare un agente qui cambia davvero il comportamento dell'orchestrazione sulla prossima richiesta: non è un semplice interruttore grafico.</p>
+      </div>
+      <div id="agenti-list"></div>
+    </section>
 
-    <h2 style="color:var(--indigo);font-size:1.05rem;">Richieste e azioni proposte</h2>
-    <div id="req-list"></div>
+    <section id="tab-approvazioni" class="tab-panel">
+      <div class="intro">
+        <h1>Coda di approvazione umana</h1>
+        <p>Solo le richieste in attesa di revisione: nessuna azione parte senza la tua approvazione esplicita.</p>
+      </div>
+      <div id="approvazioni-list"></div>
+    </section>
+
+    <section id="tab-cronologia" class="tab-panel">
+      <div class="intro">
+        <h1>Cronologia completa e nuova richiesta</h1>
+        <p>Invia una richiesta cliente sintetica. Il <strong>TriageAgent</strong> la classifica, passa il risultato strutturato al <strong>DraftingAgent</strong> che propone un'azione concreta (bozza email o conferma prenotazione con controllo conflitti reale sull'agenda). Nessuna azione viene eseguita finché non la approvi tu.</p>
+        <div class="legend">
+          <span class="l-ok">Reale: classificazione eseguita dal server, passaggio dati tra agenti, controllo conflitti su file, cancello di approvazione, persistenza su disco dopo l'approvazione</span>
+          <span class="l-sim">Simulato: il "ragionamento" è a parole chiave (non un modello linguistico); l'agenda è sintetica; nessuna email o prenotazione viene davvero inviata a un sistema esterno</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 style="margin-top:0;color:var(--indigo);font-size:1.05rem;">Nuova richiesta cliente (dati sintetici)</h2>
+        <div class="chips" id="req-chips"></div>
+        <form id="req-form">
+          <div class="form-row">
+            <input type="text" id="req-sender" placeholder="Nome mittente (es: Giulia Fontana)" />
+          </div>
+          <div class="form-row">
+            <textarea id="req-text" placeholder="Scrivi qui il testo della richiesta..."></textarea>
+          </div>
+          <button class="primary" type="submit">Invia alla piattaforma</button>
+        </form>
+      </div>
+
+      <h2 style="color:var(--indigo);font-size:1.05rem;">Tutte le richieste e azioni proposte</h2>
+      <div id="req-list"></div>
+    </section>
   </main>
 
   <footer>
-    Ambiente di prova tecnico di Aethersy · esecuzione reale solo in locale, nessun invio esterno ·
+    Workspace tecnico di Aethersy · esecuzione reale solo in locale, nessun invio esterno ·
     <a href="https://aethersy.pazi.dev/" target="_blank" rel="noopener">sito pubblico</a>
   </footer>
 

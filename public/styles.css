@@ -20,6 +20,13 @@ body{margin:0;background:var(--ivory);color:var(--ink);}
 header.top{display:flex;align-items:center;gap:.75rem;padding:1.1rem 1.5rem;background:var(--ink);color:var(--ivory);flex-wrap:wrap;}
 header.top .name{font-weight:700;letter-spacing:.02em;}
 header.top .sub{opacity:.75;font-size:.9rem;}
+
+nav.tabs{display:flex;gap:.4rem;flex-wrap:wrap;max-width:1100px;margin:1rem auto 0;padding:0 1.25rem;}
+.tab-btn{background:var(--panel);border:1px solid var(--border);border-radius:999px;padding:.5rem 1.1rem;font-weight:700;font-size:.88rem;color:var(--indigo);cursor:pointer;}
+.tab-btn.active{background:var(--indigo);color:var(--ivory);border-color:var(--indigo);}
+.tab-panel{display:none;}
+.tab-panel.active{display:block;}
+
 main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 3rem;}
 .intro{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:1.25rem 1.4rem;margin-bottom:1.5rem;}
 .intro h1{color:var(--indigo);margin:0 0 .4rem;font-size:1.5rem;}
@@ -28,9 +35,16 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 3rem;}
 .legend span{font-size:.76rem;font-weight:700;padding:.2rem .6rem;border-radius:999px;}
 .l-ok{background:#e4f5ec;color:var(--green-ink);}
 .l-sim{background:#fbead1;color:var(--amber-ink);}
+
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(10rem,1fr));gap:.8rem;margin-bottom:1.5rem;}
+.stat-card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:1rem 1.1rem;text-align:center;}
+.stat-value{font-size:1.8rem;font-weight:700;color:var(--indigo);}
+.stat-label{font-size:.8rem;color:#5c577c;margin-top:.2rem;}
+
 .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:1.1rem 1.2rem;margin-bottom:1rem;}
+.agent-card{margin-bottom:1rem;}
 .form-row{display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.8rem;}
-.form-row input, .form-row textarea{flex:1 1 16rem;padding:.6rem .8rem;border:1px solid var(--border);border-radius:10px;font-size:.95rem;font-family:inherit;}
+.form-row input,.form-row textarea{flex:1 1 16rem;padding:.6rem .8rem;border:1px solid var(--border);border-radius:10px;font-size:.95rem;font-family:inherit;}
 textarea{min-height:5rem;resize:vertical;}
 button.primary{background:var(--indigo);color:var(--ivory);border:none;border-radius:10px;padding:.6rem 1.2rem;font-weight:700;cursor:pointer;}
 button.primary:hover{background:var(--indigo-700);}
