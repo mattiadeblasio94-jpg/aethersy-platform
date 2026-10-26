@@ -1,0 +1,4 @@
+node_modules/
+data/ledger.json
+data/outbox.json
+.DS_Store
