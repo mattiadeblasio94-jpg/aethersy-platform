@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: aethersy-platform
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: BASIC_AUTH_USER
+        value: aethersy-team
+      - key: BASIC_AUTH_PASS
+        generateValue: true
+    # Avvertenza: su questo piano il file system del container non è persistente tra
+    # i deploy/riavvii. data/ledger.json e data/outbox.json verranno rigenerati vuoti
+    # a ogni riavvio finché non si collega un disco persistente o un database esterno.
+    # BASIC_AUTH_USER/BASIC_AUTH_PASS proteggono con autenticazione Basic ogni rotta
+    # tranne /api/salute: la password è generata automaticamente da Render e visibile
+    # solo nella scheda Environment del servizio su dashboard.render.com.
