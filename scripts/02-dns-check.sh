@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # 02-dns-check.sh — Fase 2
 # Scopo: verificare che i sottodomini puntino all'IP del VPS prima di emettere TLS.
-# Prerequisiti: record A per app./mcp. creati sul DNS di aethersy.com (Vercel); IP del VPS noto.
+# Prerequisiti: record A per app./mcp. creati sul DNS di aethersy.online (GoDaddy); IP del VPS noto.
 #   Uso: ./02-dns-check.sh <IP_VPS> [dominio_base]
 # Effetto: sola lettura, nessuna modifica. Esce != 0 se la propagazione e' incompleta.
 set -euo pipefail
 
 IP="${1:-}"
-BASE_DOMAIN="${2:-aethersy.com}"
+BASE_DOMAIN="${2:-aethersy.online}"
 
 if [[ -z "${IP}" ]]; then
   echo "Uso: $0 <IP_VPS> [dominio_base]" >&2

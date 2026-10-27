@@ -16,7 +16,7 @@ Health check:
 
 ```bash
 curl -fsS http://127.0.0.1:8080/api/v1/health
-curl -fsS https://app.aethersy.com/api/v1/health
+curl -fsS https://app.aethersy.online/api/v1/health
 ```
 
 Smoke test completo (container + health locale + health pubblico + MCP):
@@ -95,9 +95,8 @@ openssl rand -hex 32   # AP_JWT_SECRET, AP_POSTGRES_PASSWORD, AP_REDIS_PASSWORD
 
 ## 6. Primo accesso admin (Fase 4)
 
-1. Apri `https://app.aethersy.com` e crea il primo account: diventa **admin di piattaforma**.
-2. Chiudi le registrazioni pubbliche (Platform Admin → impostazioni; opzionalmente Turnstile/ZeroBounce).
-   `AP_SIGN_UP_ENABLED` **non esiste**: non impostarla.
+1. Apri `https://app.aethersy.online` e crea il primo account: diventa **admin di piattaforma**.
+2. Le registrazioni pubbliche sono **chiuse per default** su una piattaforma esistente: il gate è `AP_ALLOW_OPEN_SIGN_UP` (assente ≠ `true`). Senza invito il signup risponde `INVITATION_ONLY_SIGN_UP`. Per aggiungere utenti: **Platform Admin → Users → Invite**. Solo se serve un signup aperto, impostare temporaneamente `AP_ALLOW_OPEN_SIGN_UP=true` (sconsigliato in produzione). `AP_SIGN_UP_ENABLED` **non esiste**: non impostarla.
 3. Registra qui **solo** il riferimento al gestore password, mai la password in chiaro:
 
    | Voce | Valore |

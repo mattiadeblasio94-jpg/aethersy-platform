@@ -19,8 +19,8 @@ Agisci come **lead platform engineer**. Costruisci, deploya e documenta l'infras
 
 Piattaforma di automazione self-hosted basata su **Activepieces** (open source), brandizzata `aethersy`, esposta su due sottodomini pubblici:
 
-- `app.aethersy.com` → interfaccia web + API REST di Activepieces
-- `mcp.aethersy.com` → endpoint MCP (Model Context Protocol), per pilotare Activepieces da client AI esterni (Claude, ChatGPT, Droid stesso)
+- `app.aethersy.online` → interfaccia web + API REST di Activepieces
+- `mcp.aethersy.online` → endpoint MCP (Model Context Protocol), per pilotare Activepieces da client AI esterni (Claude, ChatGPT, Droid stesso)
 
 Provider AI dei flow: **OpenRouter** (primario, gateway con failover) e **Venice.ai** (endpoint compatibile OpenAI, opzionale).
 Notifiche operative: **Slack**.
@@ -29,19 +29,17 @@ Obiettivo: piattaforma stabile, sicura, aggiornabile, con segreti fuori dal codi
 
 ## 2. Infrastruttura
 
-> **Decisione architetturale (27/10/2026, confermata dall'utente):**
-> - **Web/frontend → Render** (workspace `My Workspace`, owner `mattiadeblasio94@gmail.com`).
-> - **Activepieces + worker → VPS Aruba** (`195.231.79.221`).
-> - **DNS `aethersy.com` → Vercel** (i record `app.`/`mcp.` vengono creati qui).
-> - Il servizio Render preesistente `aethersy-platform` (repo `mattiadeblasio94-jpg/aethersy-platform`, orchestrazione multiagente "fase 1") va **sostituito** dal piano Activepieces di questa spec.
+> **Decisione architetturale (27/10/2026, aggiornata):**
+> - **Activepieces + worker → VPS Aruba** (`195.231.79.221`), con **Caddy** in TLS termination sullo stesso VPS.
+> - **DNS `aethersy.online` → GoDaddy** (record A `@`/`app`/`mcp` → IP del VPS; `www` → apex). Il dominio `aethersy.com` (su Vercel) è **abbandonato**: l'account Vercel è limitato e non permetteva la creazione dei record.
+> - Il servizio Render preesistente `aethersy-platform` (repo `mattiadeblasio94-jpg/aethersy-platform`, orchestrazione multiagente "fase 1") è **sostituito** dal piano Activepieces di questa spec.
 
 | Voce | Valore |
 |---|---|
 | Provider VPS | Aruba Cloud |
 | OS | Ubuntu 24.04 LTS (installazione pulita) |
-| Dominio | `aethersy.com` — DNS gestito su **Vercel** (NS `ns1/ns2.vercel-dns.com`; verifica 27/10/2026) |
-| Sottodomini | `app.` e `mcp.` (record A → IP del VPS Aruba `195.231.79.221`) |
-| Web/hosting | **Render** (frontend/piattaforma); VPS Aruba per Activepieces/worker |
+| Dominio | `aethersy.online` — DNS gestito su **GoDaddy** (NS `ns59/ns60.domaincontrol.com`; registrato 27/10/2026) |
+| Sottodomini | `app.` e `mcp.` (record A → IP del VPS Aruba `195.231.79.221`); apex + `www` → 301 verso `app.` |
 | Accesso | SSH con chiave ed25519; utente `deploy` con sudo; root disabilitato al login |
 | Porte pubbliche | 22, 80, 443 — nient'altro |
 | Swap | 2 GB (file, non partizione) |
@@ -59,7 +57,7 @@ Obiettivo: piattaforma stabile, sicura, aggiornabile, con segreti fuori dal codi
         |   reverse proxy       |
         +-----+-----------+-----+
               |           |
-   app.aethersy.com   mcp.aethersy.com
+   app.aethersy.online   mcp.aethersy.online
               |           |
               v           v
         +-----------------------+
@@ -151,9 +149,9 @@ Se un input manca, esegui tutte le fasi possibili e marca le altre come `BLOCKED
 - login `ssh deploy@VPS` funziona, `ssh root@VPS` no
 
 ### Fase 2 — DNS e reverse proxy
-**Task:** `02-dns-check.sh` verifica che `app.aethersy.com` e `mcp.aethersy.com` risolvano sull'IP del VPS (record A, TTL basso). Scrivi `caddy/Caddyfile` (§8) e il servizio Caddy in compose. In questo momento l'app non esiste ancora: usa un `respond "ok"` temporaneo e verifica che il certificato venga emesso.
+**Task:** `02-dns-check.sh` verifica che `app.aethersy.online` e `mcp.aethersy.online` risolvano sull'IP del VPS (record A, TTL basso). Scrivi `caddy/Caddyfile` (§8) e il servizio Caddy in compose. In questo momento l'app non esiste ancora: usa un `respond "ok"` temporaneo e verifica che il certificato venga emesso.
 
-**Acceptance:** `curl -sI https://app.aethersy.com` → 200; `openssl s_client -connect app.aethersy.com:443` mostra un certificato valido emesso per il dominio; idem `mcp.`.
+**Acceptance:** `curl -sI https://app.aethersy.online` → 200; `openssl s_client -connect app.aethersy.online:443` mostra un certificato valido emesso per il dominio; idem `mcp.`.
 
 ### Fase 3 — Deploy dello stack Activepieces
 **Task:** scrivi `docker-compose.yml` e `.env.example` (§8). Genera `AP_ENCRYPTION_KEY` e `AP_JWT_SECRET`. Tira su postgres, redis, activepieces, worker, caddy. `03-deploy.sh` controlla che `.env` esista e che i segreti non siano i placeholder prima del `up -d`.
@@ -161,7 +159,7 @@ Se un input manca, esegui tutte le fasi possibili e marca le altre come `BLOCKED
 **Acceptance:** `docker compose ps` → tutti `running`/`healthy`; `curl -s http://127.0.0.1:8080/api/v1/health` (endpoint verificato, §11) → ok; nessuna porta di postgres/redis raggiungibile dall'esterno.
 
 ### Fase 4 — Primo accesso e chiusura registrazioni
-**Task:** apri il primo account admin su `https://app.aethersy.com`. Poi disabilita le registrazioni pubbliche (vedi §11: `AP_SIGN_UP_ENABLED` **non** è documentato; usare le impostazioni Platform Admin o Turnstile/ZeroBounce). Salva le credenziali admin in `docs/runbook.md` (senza password in chiaro nel repo).
+**Task:** apri il primo account admin su `https://app.aethersy.online`. Le registrazioni pubbliche sono già chiuse per default (gate `AP_ALLOW_OPEN_SIGN_UP`, assente ≠ `true`; `AP_SIGN_UP_ENABLED` **non** esiste — vedi §11). Per aggiungere utenti usa l'invito da Platform Admin → Users. Salva le credenziali admin in `docs/runbook.md` (senza password in chiaro nel repo).
 
 **Acceptance:** login riuscito; un secondo tentativo di signup è bloccato.
 
@@ -176,7 +174,7 @@ Se un input manca, esegui tutte le fasi possibili e marca le altre come `BLOCKED
 **Acceptance:** messaggio di test recapitato sul canale corretto.
 
 ### Fase 7 — Endpoint MCP
-**Task:** abilita il server MCP di Activepieces (vedi §11: `AP_MCP_URL`). Esponi l'hostname `mcp.aethersy.com` via Caddy preservando l'`Host`. Documenta come collegare Claude/ChatGPT con l'URL e il flusso OAuth.
+**Task:** abilita il server MCP di Activepieces (vedi §11: `AP_MCP_URL`). Esponi l'hostname `mcp.aethersy.online` via Caddy preservando l'`Host`. Documenta come collegare Claude/ChatGPT con l'URL e il flusso OAuth.
 
 **Acceptance:** `curl` sull'endpoint MCP risponde con handshake valido; un client AI esterno elenca almeno un tool Activepieces.
 
@@ -239,7 +237,7 @@ Esito della verifica (27/10/2026), fonti e dettagli in `docs/phases.md`:
 
 Il progetto è consegnato quando:
 
-1. `https://app.aethersy.com` e `https://mcp.aethersy.com` rispondono in HTTPS con certificato valido.
+1. `https://app.aethersy.online` e `https://mcp.aethersy.online` rispondono in HTTPS con certificato valido.
 2. Un flow di test usa un provider AI (OpenRouter, o Venice con credito) e funziona end-to-end.
 3. Slack riceve le notifiche configurate.
 4. Il worker esegue i flow e non è esposto pubblicamente.

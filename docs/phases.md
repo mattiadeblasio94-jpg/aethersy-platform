@@ -13,7 +13,7 @@
 | 1 | Bootstrap e hardening | `DONE` — Docker 29.9.2 + Compose v5.6.1, swap 2 GB, utente `deploy`, root/password SSH disabilitati, ufw 22/80/443, fail2ban attivo |
 | 2 | DNS e reverse proxy | `DONE` — dominio **aethersy.online** (GoDaddy); Caddy + Let's Encrypt attivi su `app.`, `mcp.`, apex e `www` (apex/www → 301 su `app.`) |
 | 3 | Deploy stack Activepieces | `DONE` — stack up e healthy; smoke test OK su `https://app.aethersy.online` |
-| 4 | Primo accesso e chiusura signup | `NOTE` — stack raggiungibile; creazione admin e chiusura signup da fare |
+| 4 | Primo accesso e chiusura signup | `DONE` — admin `mattiadeblasio94@gmail.com` (ADMIN, ACTIVE) su `app.aethersy.online`; registrazioni pubbliche chiuse (`AP_ALLOW_OPEN_SIGN_UP` assente → `INVITATION_ONLY_SIGN_UP`) |
 | 5 | Provider AI (OpenRouter/Venice) | `NOTE` — chiavi testate (OpenRouter ok, Venice senza credito), config UI `BLOCKED: input #1/#2` |
 | 6 | Slack | `BLOCKED: input #1/#5` |
 | 7 | Endpoint MCP | `BLOCKED: input #1` |
@@ -35,7 +35,7 @@ Data: **2026-10-27**. Metodo: doc ufficiali Activepieces (incluse le varianti `.
 | 6 | Provider AI (env) | **Nessuna env configura un provider AI.** Non esistono `AP_AI_PROVIDER` né env per le chiavi dei provider. I provider si configurano a runtime nella UI (**Platform Admin → AI Center → Providers**). Le uniche env attinenti: `AP_MODEL_CATALOG_URL` (metadati modelli, default CDN), `AP_AI_CREDIT_USD_VALUE`, `AP_OPENAI_API_KEY` (solo embedding per tool search) | `environment-variables.md`, `setup-ai-providers.md` |
 | 7 | Modelli Venice | `GET https://api.venice.ai/api/v1/models` (Bearer, OpenAI-compatible). Test 27/10/2026: **HTTP 200** (chiave valida) | doc Venice, test live |
 | 8 | Porta app | App in ascolto su **80** nel container (upstream: `'8080:80'`). `AP_HOST_PORT` = mapping host. **Non** impostare `AP_PORT` (porta interna: cambiarla rompe il mapping) | compose upstream, `environment-variables.md` |
-| 9 | Signup | **`AP_SIGN_UP_ENABLED` NON esiste.** Controllo: `AP_ZEROBOUNCE_API_KEY`, `AP_TURNSTILE_SITE_KEY`/`AP_TURNSTILE_SECRET_KEY`, o disattivazione da Platform Admin | `environment-variables.md` |
+| 9 | Signup | **`AP_SIGN_UP_ENABLED` NON esiste.** Il gate reale è **`AP_ALLOW_OPEN_SIGN_UP`** (default assente ≠ `true` → per una piattaforma esistente serve un invito: errore `INVITATION_ONLY_SIGN_UP`). In assenza di piattaforme il primo signup crea la piattaforma (`provisionOrOnboard`). Altri controlli: `AP_ZEROBOUNCE_API_KEY`, `AP_TURNSTILE_SITE_KEY`/`AP_TURNSTILE_SECRET_KEY` | sorgente `system-props.js` + `authentication.service.js` @ `0.92.3-hotfix.1`, test live |
 | 10 | Concorrenza worker | `AP_WORKER_CONCURRENCY` (default `5`). Il default 5 è una modalità di compatibilità: aumenta il blast radius di un OOM. Consigliato `1` + scale orizzontale per replica. `AP_REUSE_SANDBOX=true` con concorrenza 1 | `workers.md`, `production-setup.md`, `environment-variables.md` |
 | 11 | Egress di rete | `AP_NETWORK_MODE` = `UNRESTRICTED` (default) \| `STRICT` (guardia SSRF in-process). Eccezioni: `AP_SSRF_ALLOW_LIST` (IP/CIDR). Il layer server-side (OAuth/Vault/webhook/MCP) è **sempre** filtrato. Guardia best-effort: il confine reale va imposto a livello infrastrutturale | `network-security.md`, `environment-variables.md` |
 | 12 | Edizione | `AP_EDITION=ee` per la licenza Enterprise; con `ee`, `AP_EXECUTION_MODE=UNSANDBOXED` è **rifiutato all'avvio** → usare `SANDBOX_CODE_ONLY` | `docker-compose.md` (manual steps, step 3) |
@@ -130,8 +130,13 @@ Limiti confermati (default upstream, ora espliciti in `.env.example`): `AP_WEBHO
 - **Nota:** `deploy` non è nel gruppo `docker`; i comandi docker sul VPS richiedono `sudo` (nessuna password, come da hardening).
 
 ### Fase 4 — Primo accesso e chiusura registrazioni
-- **Esito:** `NOTE` — stack raggiungibile su `https://app.aethersy.online`; creazione admin da fare.
-- **Piano:** aprire il primo account admin su `https://app.aethersy.online`, poi chiudere le registrazioni. `AP_SIGN_UP_ENABLED` **non esiste**: usare Platform Admin (`/platform`) e/o Turnstile + ZeroBounce. Salvare le credenziali admin in un gestore password, non nel repo.
+- **Esito:** `DONE` — admin creato su `https://app.aethersy.online`; registrazioni pubbliche **già chiuse** (verificato).
+- **Admin creato:** `mattiadeblasio94@gmail.com`, `platformRole=ADMIN`, `status=ACTIVE`, creato 27/10/2026 21:58. Piattaforma `Mattia's Platform` (owner = lo stesso utente), 1 progetto. Utenti totali: **1**; identità: **1** (nessun account indesiderato).
+- **Perché il primo signup è passato:** al momento della registrazione **non esisteva alcuna piattaforma**; senza `platformId` il flusso cade in `authenticationUtils.provisionOrOnboard` (onboarding → crea la piattaforma). Da lì in poi `platformUtils.getPlatformIdForRequest` risolve sempre la piattaforma più vecchia, quindi ogni nuovo signup passa dal ramo "existing platform".
+- **Meccanismo di blocco (verificato sul sorgente dell'immagine `0.92.3-hotfix.1`):** in `authentication.service.signUp`, con `platformId` presente, se `system.get(AppSystemProp.ALLOW_OPEN_SIGN_UP) !== 'true'` viene chiamato `assertUserIsInvitedToPlatformOrProject` → senza invito lancia `INVITATION_ONLY_SIGN_UP`. La variabile d'ambiente è **`AP_ALLOW_OPEN_SIGN_UP`** (assente = default sicuro). `AP_SIGN_UP_ENABLED` **non esiste**.
+- **Prova live:** `POST /api/v1/authentication/sign-up` con email non invitata → `{"code":"INVITATION_ONLY_SIGN_UP","params":{"message":"User is not invited to the platform"}}`. `AP_ALLOW_OPEN_SIGN_UP` non è impostata nel container `app`.
+- **Aggiungere utenti:** invito da Platform Admin → Users (o `AP_ALLOW_OPEN_SIGN_UP=true` **temporaneamente**, sconsigliato in produzione).
+- **Nota:** il branding "Activepieces" è quello di default della Community; il nome/logo si cambiano in Fase 8. Salvare le credenziali admin in un gestore password, non nel repo.
 
 ### Fase 5 — Provider AI (OpenRouter + Venice)
 - **Esito:** `NOTE` — chiavi testate live il 27/10/2026, configurazione UI `BLOCKED: input #1/#2`.
@@ -150,7 +155,7 @@ Limiti confermati (default upstream, ora espliciti in `.env.example`): `AP_WEBHO
 
 ### Fase 7 — Endpoint MCP
 - **Esito:** `BLOCKED: input #1`.
-- **Piano:** `AP_MCP_URL=https://mcp.aethersy.com` (già in `.env.example`), Caddy già configurato con le route MCP esatte. Documentare il flusso OAuth per i client AI.
+- **Piano:** `AP_MCP_URL=https://mcp.aethersy.online` (già in `.env.example`), Caddy già configurato con le route MCP esatte. Documentare il flusso OAuth per i client AI.
 
 ### Fase 8 — Branding
 - **Esito:** `BLOCKED: input #1`.

@@ -7,14 +7,14 @@ Specifica operativa completa: [`AGENTS.md`](AGENTS.md).
 ## Architettura
 
 ```
-Internet ──▶ ufw (22/80/443) ──▶ caddy (TLS) ──┬─▶ app.aethersy.com ─┐
-                                               └─▶ mcp.aethersy.com ─┤
-                                                                     ▼
-                                            app:80 (UI + API + MCP) ─┬─▶ postgres
-                                                                    └─▶ redis ◀─ worker
-                                                                                   │
-                                                       api.openrouter.ai ◀─────────┤
-                                                        api.venice.ai ◀────────────┘
+Internet ──▶ ufw (22/80/443) ──▶ caddy (TLS) ──┬─▶ app.aethersy.online ─┐
+                                               └─▶ mcp.aethersy.online ─┤
+                                                                        ▼
+                                                app:80 (UI + API + MCP) ─┬─▶ postgres
+                                                                        └─▶ redis ◀─ worker
+                                                                                       │
+                                                             api.openrouter.ai ◀───────┤
+                                                              api.venice.ai ◀──────────┘
 ```
 
 - **caddy** — unico ingresso pubblico, TLS Let's Encrypt, route MCP dedicate.
@@ -76,7 +76,7 @@ chmod 600 .env
 ./scripts/04-smoke-test.sh
 ```
 
-Primo accesso: apri `https://app.aethersy.com` e crea l'account admin, poi chiudi le registrazioni pubbliche (vedi `docs/runbook.md` §6).
+Primo accesso: apri `https://app.aethersy.online` e crea l'account admin, poi chiudi le registrazioni pubbliche (vedi `docs/runbook.md` §6).
 
 ### Aggiornamento versione
 
