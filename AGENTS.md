@@ -124,10 +124,10 @@ Tutti gli script: `set -euo pipefail`, idempotenti, con `usage()` se serve un ar
 |---|---|---|---|
 | 1 | IP pubblico del VPS | pannello Aruba | 0 — **ricevuto: `195.231.79.221`** |
 | 2 | Accesso SSH iniziale (utente + chiave o password) | pannello Aruba | 0 — **ricevuto e funzionante**: VPS Aruba `195.231.79.221`; chiave `aethersy_deploy_ed25519` installata; utente `deploy` (root/password disabilitati dopo hardening) |
-| 3 | Chiavi provider AI: OpenRouter (primario) e/o Venice | openrouter.ai/keys, venice.ai/settings/api | 5 |
-| 4 | Email per TLS + alert | — | 2 |
-| 5 | Webhook Slack (o workspace dove installare l'app) | api.slack.com | 6 |
-| 6 | Accesso DNS (pannello **Vercel** / token API) | vercel.com dashboard → Domains | 2 — **account accessibile ma deploy bloccato**; record A `app.`/`mcp.` da impostare verso `195.231.79.221` |
+| 3 | Chiavi provider AI: OpenRouter (primario) e/o Venice | openrouter.ai/keys, venice.ai/settings/api | 5 — **ricevuto**: OpenRouter configurato e funzionante; Venice valido ma senza credito |
+| 4 | Email per TLS + alert | — | 2 — **ricevuto** |
+| 5 | Webhook Slack (o workspace dove installare l'app) | api.slack.com | 6 — **mancante** (`SLACK_WEBHOOK_URL` vuoto) |
+| 6 | Accesso DNS (pannello **Vercel** / token API) | vercel.com dashboard → Domains | 2 — **superato**: dominio su **GoDaddy** (`aethersy.online`), record A `app.`/`mcp.`/apex/www → `195.231.79.221` attivi |
 
 Se un input manca, esegui tutte le fasi possibili e marca le altre come `BLOCKED: input #N` in `docs/phases.md`.
 
@@ -178,17 +178,23 @@ Se un input manca, esegui tutte le fasi possibili e marca le altre come `BLOCKED
 ### Fase 7 — Endpoint MCP
 **Task:** abilita il server MCP di Activepieces (vedi §11: `AP_MCP_URL`). Esponi l'hostname `mcp.aethersy.online` via Caddy preservando l'`Host`. Documenta come collegare Claude/ChatGPT con l'URL e il flusso OAuth.
 
-**Acceptance:** `curl` sull'endpoint MCP risponde con handshake valido; un client AI esterno elenca almeno un tool Activepieces.
+**Stato:** `DONE` (27/10/2026). Caddy instrada `/mcp`, `/mcp/platform`, gli endpoint OAuth (`/authorize`, `/token`, `/register`, `/revoke`, `/userinfo`) e i `.well-known/*` su `app:80`. Verificato live: `POST /mcp` → 401 con `WWW-Authenticate: Bearer resource_metadata=...`; metadata OAuth (`oauth-protected-resource/mcp`, `oauth-authorization-server`, `openid-configuration`, `jwks.json`) tutti 200; PKCE S256 e dynamic client registration attivi.
+
+**Acceptance:** `curl` sull'endpoint MCP risponde con handshake valido ✔ (401 + `WWW-Authenticate`); un client AI esterno elenca almeno un tool Activepieces — **da confermare** collegando un client reale (Claude/ChatGPT) via URL `https://mcp.aethersy.online/mcp`.
 
 ### Fase 8 — Branding
 **Task:** nome `aethersy`, logo, colori, favicon dove Activepieces lo consente via env o asset. Se una personalizzazione richiede la versione Enterprise, documenta chiaramente cosa è community e cosa no.
+
+**Stato:** `BLOCKED` — serve una decisione del committente su nome definitivo/logo/colori (non è un input infrastrutturale mancante).
 
 **Acceptance:** l'header dell'app mostra `aethersy`; nessun placeholder "Activepieces" residuo nella UI principale.
 
 ### Fase 9 — Backup e monitoraggio
 **Task:** `backup.sh` → `pg_dump` + tar dei volumi rilevanti, cifratura opzionale, rotazione 7 giornalieri + 4 settimanali, destinazione fuori dal VPS (almeno copia locale in `backups/` con istruzioni per lo scarico). Cron notturno. Scrivi `docs/restore.md` con procedura di restore **testata davvero** su un secondo database.
 
-**Acceptance:** il dump esiste, ha dimensione plausibile, e un restore su DB temporaneo restituisce tabelle popolate. `docker compose config` non emette warning.
+**Stato:** `DONE` (27/10/2026). `backup.sh` corretto (rotazione robusta a glob vuoto) ed eseguito: dump 28 MB + tar Redis. Restore testato su DB temporaneo (83 tabelle, dati coerenti, poi rimosso). Fix collaterale: `deploy` aggiunto al gruppo `docker` in `01-hardening.sh`. Vedi `docs/restore.md` §6.
+
+**Acceptance:** il dump esiste, ha dimensione plausibile, e un restore su DB temporaneo restituisce tabelle popolate ✔. `docker compose config` non emette warning — **da verificare in Fase 10**.
 
 ### Fase 10 — Review, hardening finale e consegna
 **Task:** rileggi tutto lo stack. Verifica: nessun segreto nel git history, porte esposte minime, `unattended-upgrades` attivo, log con rotazione, immagini pinnate. Scrivi `docs/security.md` e `docs/runbook.md` con: deploy, update di versione, rollback, restore, troubleshooting. Prepara una checklist per il passaggio di consegne.

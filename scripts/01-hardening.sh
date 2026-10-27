@@ -26,6 +26,11 @@ if ! id -u "${DEPLOY_USER}" >/dev/null 2>&1; then
   adduser --disabled-password --gecos "" "${DEPLOY_USER}"
 fi
 usermod -aG sudo "${DEPLOY_USER}"
+# Membro del gruppo docker: gli script (backup.sh, 04-smoke-test.sh) invocano
+# `docker compose` senza sudo. Il gruppo esiste dopo 00-bootstrap.sh.
+if getent group docker >/dev/null 2>&1; then
+  usermod -aG docker "${DEPLOY_USER}"
+fi
 # sudo senza password per l'utente di deploy (chiave SSH gia' protetta).
 echo "${DEPLOY_USER} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/90-${DEPLOY_USER}"
 chmod 440 "/etc/sudoers.d/90-${DEPLOY_USER}"

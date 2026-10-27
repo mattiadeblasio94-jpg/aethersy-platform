@@ -1,8 +1,6 @@
 # restore.md — Procedura di ripristino
 
-> **Stato: NON ANCORA TESTATA.** La procedura va eseguita almeno una volta su un
-> database temporaneo e la data del test va annotata in fondo, prima di
-> considerare il backup affidabile (`BLOCKED: input #1` — serve il VPS).
+> **Stato: TESTATA il 27/10/2026** su database temporaneo (`activepieces_restore_test`) — esito positivo, dettagli in §6. La procedura di restore di produzione (§3) resta da eseguire solo in caso di reale necessità.
 
 ## 0. Prerequisiti
 
@@ -21,7 +19,7 @@ AP_POSTGRES_DATABASE   # es. activepieces
 ## 1. Verifica integrità del dump
 
 ```bash
-cd ~/aethersy-infra
+cd ~/aethersy
 DUMP=backups/daily/postgres-<stamp>.sql.gz
 
 ls -lh "$DUMP"
@@ -64,7 +62,7 @@ Atteso: `\dt` elenca le tabelle e i `count(*)` restituiscono valori plausibili (
 > Distruttivo: sostituisce i dati correnti. Eseguire solo con conferma esplicita.
 
 ```bash
-cd ~/aethersy-infra
+cd ~/aethersy
 DUMP=backups/daily/postgres-<stamp>.sql.gz
 
 # 1. Backup di sicurezza dello stato attuale (nel caso il restore peggiori le cose)
@@ -93,7 +91,7 @@ docker compose up -d
 Redis contiene le code (job pending/attivi). Il dump Redis è secondario: il peggio che può capitare è perdere i job in coda, non i dati dei flow.
 
 ```bash
-cd ~/aethersy-infra
+cd ~/aethersy
 TAR=backups/daily/redis-<stamp>.tar.gz
 
 docker compose stop redis
@@ -114,6 +112,6 @@ docker compose up -d redis
 
 | Data | Dump usato | Esito | Note |
 |---|---|---|---|
-| _(da compilare)_ | | | |
+| 2026-10-27 | `postgres-20261027-230835.sql.gz` (28 MB) | **POSITIVO** | `gzip -t` OK, 81 `CREATE TABLE`; restore su `activepieces_restore_test` → 83 tabelle; `user=1`, `platform=1`, `project=1`, `ai_provider=1` (`KGJ2h1RWYJSUIUZFQpyFQ`/openrouter/active), `flow=0`; DB di test rimosso. Redis: `gzip -t` OK (`appendonlydir/` + `dump.rdb`). |
 
-> Non dichiarare il backup "affidabile" finché questa tabella non ha almeno una riga con esito positivo.
+> Non dichiarare il backup "affidabile" finché questa tabella non ha almeno una riga con esito positivo. **Soddisfatto.**

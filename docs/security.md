@@ -1,8 +1,9 @@
 # security.md — Modello di minaccia e hardening
 
 > Riferimento per la checklist di §9 di `AGENTS.md`.
-> Stato: documento redatto in fase di scaffolding; le voci "verificato" vanno
-> spuntate **solo** dopo esecuzione sul VPS (attualmente `BLOCKED: input #1/#2`).
+> Stato: **verificato sul VPS il 27/10/2026** (vedi §8, tutte le voci positive).
+> Restano azioni manuali dell'utente: rotazione delle credenziali esposte in chat (§6.1)
+> e backup offline dei segreti critici.
 
 ## 1. Modello di minaccia (sintesi)
 
@@ -119,7 +120,7 @@ Regole:
 
 | Credenziale | Dove è stata esposta | Azione di rotazione | Stato |
 |---|---|---|---|
-| Password SSH VPS Aruba (`J18nyq2z`) | chat | cambiare la password root dal pannello Aruba / `passwd`; in alternativa disabilitare il login a password e usare solo chiavi | **da fare** |
+| Password SSH VPS Aruba (valore **redatto** da questo documento il 27/10/2026) | chat | cambiare la password root dal pannello Aruba / `passwd`; in alternativa disabilitare il login a password e usare solo chiavi (già fatto: `PasswordAuthentication no`) | **da fare** (rotazione) |
 | Password pannello SiteGround | chat | cambiare da Site Tools → Account → Password | **da fare** |
 | Chiave privata SSH SiteGround (`aethersy_sg_ed25519`, con passphrase) | chat | rigenerare la coppia da Site Tools → SSH Keys Manager e reimportare la vecchia pubblica | **da fare** |
 | `VENICE_API_KEY` | chat | revocare e rigenerare da venice.ai → Settings → API | **da fare** |
@@ -145,19 +146,24 @@ sudo unattended-upgrade --dry-run -d | tail -n 20
 
 ## 8. Checklist §9 AGENTS.md
 
+Verificata sul VPS il 27/10/2026.
+
 | Voce | Stato |
 |---|---|
-| ufw default deny, allow 22/80/443 | definito in `01-hardening.sh` — da eseguire sul VPS |
-| fail2ban jail `sshd` attiva | definito in `01-hardening.sh` |
-| `PasswordAuthentication no`, `PermitRootLogin no` | definito in `01-hardening.sh` |
-| utente `deploy` con sudo | definito in `01-hardening.sh` |
-| `unattended-upgrades` attivo | definito in `00-bootstrap.sh` |
-| log driver con `max-size` | definito in `docker-compose.yml` |
-| nessun `network_mode: host` | verificato nel compose |
-| porte pubbliche = solo Caddy | verificato nel compose (app su 127.0.0.1) |
-| nessun segreto nel compose | verificato (solo `${...}`) |
-| `.env` 600 owner `deploy` | da applicare sul VPS (`chmod 600 .env`) |
-| backup segreti critici offline | da fare manualmente |
+| ufw default deny, allow 22/80/443 | **OK** — `Status: active`, default deny incoming, allow 22/80/443 |
+| fail2ban jail `sshd` attiva | **OK** — `active`, jail sshd (110 tentativi falliti totali) |
+| `PasswordAuthentication no`, `PermitRootLogin no` | **OK** — confermato via `sshd -T` (anche `maxauthtries 3`) |
+| utente `deploy` con sudo (+ gruppo `docker`) | **OK** — sudo NOPASSWD; aggiunto a `docker` (fix 27/10/2026) |
+| `unattended-upgrades` attivo | **OK** — `active` |
+| log driver con `max-size` | **OK** — `json-file` `max-size=10m`/`max-file=5` su tutti i servizi |
+| nessun `network_mode: host` | **OK** — 0 occorrenze nel compose |
+| porte pubbliche = solo Caddy | **OK** — in ascolto solo 22/80/443; 5432/6379 assenti |
+| nessun segreto nel compose | **OK** — solo `${...}`; audit history senza chiavi reali |
+| `.env` 600 owner `deploy` | **OK** — `-rw------- deploy deploy` |
+| swap 2 GB | **OK** — `/swapfile` 2G |
+| backup segreti critici offline | **da fare manualmente** (azione utente) |
+
+Nota: il documento conteneva la password SSH in chiaro; **redatta** il 27/10/2026. Il valore resta nella history git locale (repo non pubblicato, nessun remote): va comunque **ruotato** (§6.1).
 
 ## 9. Audit segreti (da eseguire prima della consegna)
 

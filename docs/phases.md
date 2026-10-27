@@ -15,11 +15,11 @@
 | 3 | Deploy stack Activepieces | `DONE` — stack up e healthy; smoke test OK su `https://app.aethersy.online` |
 | 4 | Primo accesso e chiusura signup | `DONE` — admin `mattiadeblasio94@gmail.com` (ADMIN, ACTIVE) su `app.aethersy.online`; registrazioni pubbliche chiuse (`AP_ALLOW_OPEN_SIGN_UP` assente → `INVITATION_ONLY_SIGN_UP`) |
 | 5 | Provider AI (OpenRouter/Venice) | `DONE` — **OpenRouter** creato via API admin, `status=active`, `enabledForChat=true`, 464 modelli; test end-to-end "Ask AI" → risposta reale. Venice: chiave valida ma senza credito → non aggiunto (opzionale) |
-| 6 | Slack | `BLOCKED: input #1/#5` |
-| 7 | Endpoint MCP | `BLOCKED: input #1` |
-| 8 | Branding | `BLOCKED: input #1` |
-| 9 | Backup e monitoraggio | `NOTE` — `backup.sh` pronto, restore da testare `BLOCKED: input #1` |
-| 10 | Review finale e consegna | `BLOCKED: input #1` |
+| 6 | Slack | `BLOCKED: input #5` — `SLACK_WEBHOOK_URL` vuoto |
+| 7 | Endpoint MCP | `DONE` — hostname `mcp.aethersy.online` esposto via Caddy; discovery OAuth + handshake verificati (401 con `WWW-Authenticate` → resource metadata) |
+| 8 | Branding | `BLOCKED` — richiede decisione utente su nome/logo/colori (non è un input infrastrutturale) |
+| 9 | Backup e monitoraggio | `DONE` — `backup.sh` corretto (rotazione robusta a glob vuoto) ed eseguito; **restore testato** su DB temporaneo (83 tabelle, dati coerenti) |
+| 10 | Review finale e consegna | `IN CORSO` — audit finale |
 
 ## Verifica §11 — nomi variabili, versioni, route
 
@@ -157,18 +157,29 @@ Limiti confermati (default upstream, ora espliciti in `.env.example`): `AP_WEBHO
 - **Piano:** creare l'app Slack, salvare il webhook in `.env` (`SLACK_WEBHOOK_URL`). Flow di notifica + alert su `04-smoke-test.sh` in cron.
 
 ### Fase 7 — Endpoint MCP
-- **Esito:** `BLOCKED: input #1`.
-- **Piano:** `AP_MCP_URL=https://mcp.aethersy.online` (già in `.env.example`), Caddy già configurato con le route MCP esatte. Documentare il flusso OAuth per i client AI.
+- **Esito:** `DONE` (27/10/2026).
+- **Configurazione:** `AP_MCP_URL=https://mcp.aethersy.online` (in `.env` VPS). Caddy instrada su `app:80` preservando `Host`: `@mcp` (`/mcp`, `/mcp/platform`), `@oauth` (`/authorize`, `/token`, `/register`, `/revoke`, `/userinfo`), `@wellknown` (`/.well-known/oauth-authorization-server`, `openid-configuration`, `jwks.json`), `@protected` (`/.well-known/oauth-protected-resource/*`). La consent screen `/mcp-authorize` resta **sull'host dell'app** (`AP_FRONTEND_URL`), non sull'hostname MCP.
+- **Verifica live (27/10/2026):**
+  - `POST https://mcp.aethersy.online/mcp` (senza token) → **HTTP 401** con header `WWW-Authenticate: Bearer resource_metadata="https://mcp.aethersy.online/.well-known/oauth-protected-resource/mcp"` → il flusso OAuth è correttamente annunciato.
+  - `/.well-known/oauth-protected-resource/mcp` → **200**: `resource=https://mcp.aethersy.online/mcp`, `authorization_servers=[https://mcp.aethersy.online]`, `scopes_supported=[mcp,openid,email,profile]`.
+  - `/.well-known/oauth-authorization-server` → **200**: `authorization_endpoint=/authorize`, `token_endpoint=/token`, `registration_endpoint=/register` (dynamic client registration), `revocation_endpoint=/revoke`, `grant_types=[authorization_code,refresh_token]`, `code_challenge_methods=[S256]` (PKCE).
+  - `/.well-known/openid-configuration` → **200**; `/.well-known/jwks.json` → **200**.
+- **Collegamento client AI (Claude / ChatGPT / altri client MCP):** usare l'URL `https://mcp.aethersy.online/mcp`. Il client scopre automaticamente i metadata (protected-resource → authorization-server), registra un client dinamico su `/register`, esegue il flusso `authorization_code` + PKCE verso `/authorize` (consent su `/mcp-authorize` sull'host principale `app.aethersy.online`) e ottiene il token da `/token`. Nessun token statico: l'auth è OAuth con account Activepieces.
+- **Nota:** il consent screen viene servito sull'host principale (`AP_FRONTEND_URL`); serve una sessione già autenticata su `app.aethersy.online` nel browser.
 
 ### Fase 8 — Branding
-- **Esito:** `BLOCKED: input #1`.
+- **Esito:** `BLOCKED` — serve una decisione del committente su nome definitivo/logo/colori (l'input #1 — IP del VPS — è già stato ricevuto; qui non manca un input infrastrutturale).
 - **Piano:** nome/logo/colori via Platform Admin (Community). Documentare esplicitamente cosa richiede Enterprise.
 
 ### Fase 9 — Backup e monitoraggio
-- **Esito:** `NOTE`. `scripts/backup.sh` scritto (pg_dump + tar Redis, rotazione 7 giornalieri + 4 settimanali, copia settimanale la domenica).
-- **Bloccante:** test di restore reale `BLOCKED: input #1`. Procedura in `docs/restore.md` (da marcare "testata" solo dopo averla eseguita).
-- **Acceptance:** dump non vuoto con dimensione plausibile; restore su DB temporaneo restituisce tabelle popolate; `docker compose config` senza warning.
+- **Esito:** `DONE` (27/10/2026). `scripts/backup.sh` (pg_dump + tar Redis, rotazione 7 giornalieri + 4 settimanali, copia settimanale la domenica) **eseguito con successo**; **restore testato** su DB temporaneo.
+- **Bug corretto:** la rotazione usava `ls -1t <glob> | tail | xargs` che, con glob vuoto (es. `weekly/` prima della prima domenica), fa uscire `ls` con codice 2 e — per `set -e`/`pipefail` — abortiva lo script **dopo** aver creato il dump (exit 1). Sostituito con una funzione `rotate()` che tratta l'assenza di file come caso non errore.
+- **Corretto anche:** l'utente `deploy` non era nel gruppo `docker` (lo assumevano `backup.sh` e `04-smoke-test.sh`). Aggiunto in `01-hardening.sh` (`usermod -aG docker deploy`) e applicato a caldo sul VPS.
+- **Test di restore (dettagli in `docs/restore.md` §6):** dump `postgres-20261027-230835.sql.gz` (28 MB, `gzip -t` OK, 81 `CREATE TABLE`); restore su `activepieces_restore_test` → **83 tabelle**, `user=1`, `platform=1`, `project=1`, `ai_provider=1` (id/status coerenti con produzione), `flow=0`; DB di test rimosso. Archive Redis integro (`gzip -t` OK; `appendonlydir/` + `dump.rdb`).
+- **Acceptance:** dump non vuoto con dimensione plausibile ✔; restore su DB temporaneo restituisce tabelle popolate ✔; smoke test `04-smoke-test.sh` OK ✔.
 
 ### Fase 10 — Review finale e consegna
-- **Esito:** `BLOCKED: input #1`.
-- **Piano:** audit segreti (`git log`, `grep`), porte minime, `unattended-upgrades` attivo, log con rotazione, immagini pinnate; completare `docs/security.md` e `docs/runbook.md`; checklist di consegna.
+- **Esito:** `IN CORSO` — audit infrastrutturale completato (27/10/2026).
+- **Verifiche eseguite sul VPS (tutte OK):** ufw default-deny con allow 22/80/443; fail2ban attivo; `sshd -T` → `permitrootlogin no`/`passwordauthentication no`/`maxauthtries 3`; `unattended-upgrades` active; swap 2 GB; porte in ascolto solo 22/80/443 (5432/6379 assenti); `.env` `-rw------- deploy`; `docker compose config --quiet` senza warning; immagini **pinnate** (`caddy:2.8-alpine`, `pgvector/pgvector:0.8.0-pg14`, `redis:7.0.7`, `activepieces:${AP_VERSION}`=`0.92.3-hotfix.1`); log driver `json-file` `max-size=10m`/`max-file=5`; nessun `network_mode: host` né mount di `docker.sock`.
+- **Audit segreti:** `.env`/`.env.secrets` mai committati (fuori da `git ls-files`); nessuna chiave reale (`sk-…`, `ghp_…`, webhook Slack, PEM) nei file tracciati o nella history. **Defect trovato e corretto:** `docs/security.md` conteneva la password SSH in chiaro → **redatta**; il valore resta nella history git locale (repo **senza remote**, non pubblicato) e va comunque **ruotato** (§6.1 di `docs/security.md`).
+- **Prossimi passi:** (1) rotazione credenziali esposte in chat (azione utente); (2) backup offline dei segreti critici; (3) collegare un client MCP reale per chiudere l'acceptance di Fase 7; (4) decisione branding (Fase 8); (5) `SLACK_WEBHOOK_URL` (Fase 6).

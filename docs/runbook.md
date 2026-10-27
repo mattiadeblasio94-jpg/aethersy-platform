@@ -1,7 +1,7 @@
 # runbook.md — Operazioni quotidiane
 
 > Comandi da eseguire sul VPS, come utente `deploy`, nella root del repo.
-> Convenzione: `cd ~/aethersy-infra` prima di ogni blocco.
+> Convenzione: `cd ~/aethersy` prima di ogni blocco (percorso reale sul VPS: `/home/deploy/aethersy`).
 
 ## 1. Stato dello stack
 
@@ -121,6 +121,37 @@ curl -s https://api.venice.ai/api/v1/models -H "Authorization: Bearer $VENICE_AP
 ```
 
 
+## 6.2 Server MCP (Fase 7)
+
+Il server MCP è esposto su `https://mcp.aethersy.online` (hostname dedicato, diverso da `AP_FRONTEND_URL`). L'autenticazione è **OAuth** (nessun token statico): il client MCP scopre i metadata e completa il flusso `authorization_code` + PKCE.
+
+**Collegare un client (Claude / ChatGPT / altri client MCP):**
+
+1. Aggiungi un server MCP remoto con URL: `https://mcp.aethersy.online/mcp`
+2. Il client esegue da sé:
+   - `GET /.well-known/oauth-protected-resource/mcp` → scopre l'authorization server;
+   - `POST /register` → registrazione dinamica del client;
+   - `/authorize` (+ PKCE `S256`) → apre il consent sull'host principale `app.aethersy.online` (`/mcp-authorize`); **serve una sessione già autenticata** nel browser;
+   - `POST /token` → ottiene access + refresh token (scope `mcp openid email profile`).
+3. Fatto: il client elenca e invoca i tool Activepieces.
+
+**Verifica rapida:**
+
+```bash
+# Senza token deve rispondere 401 con l'header WWW-Authenticate (annuncio OAuth)
+curl -si -X POST https://mcp.aethersy.online/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}' \
+  | grep -i '^www-authenticate'
+
+curl -s https://mcp.aethersy.online/.well-known/oauth-authorization-server | jq .
+curl -s https://mcp.aethersy.online/.well-known/oauth-protected-resource/mcp | jq .
+```
+
+Troubleshooting: `/mcp` risponde 404 pubblico → Caddy non instrada (verifica `AP_MCP_URL` e le route nel Caddyfile; l'hostname MCP deve differire da `AP_FRONTEND_URL`). Il consent screen va servito su `AP_FRONTEND_URL`, quindi il dominio MCP **non** deve essere lo stesso dell'app.
+
+
 ## 7. Backup
 
 ```bash
@@ -133,10 +164,12 @@ Cron notturno consigliato (eseguito come `deploy`):
 ```bash
 crontab -e
 # 03:30 ogni notte
-30 3 * * * cd /home/deploy/aethersy-infra && ./scripts/backup.sh >> /home/deploy/aethersy-infra/backups/backup.log 2>&1
+30 3 * * * cd /home/deploy/aethersy && ./scripts/backup.sh >> /home/deploy/aethersy/backups/backup.log 2>&1
 # smoke test ogni 15 minuti
-*/15 * * * * cd /home/deploy/aethersy-infra && ./scripts/04-smoke-test.sh >> /home/deploy/aethersy-infra/backups/smoke.log 2>&1
+*/15 * * * * cd /home/deploy/aethersy && ./scripts/04-smoke-test.sh >> /home/deploy/aethersy/backups/smoke.log 2>&1
 ```
+
+> Prerequisito: `deploy` deve essere nel gruppo `docker` (`usermod -aG docker deploy`, fatto da `01-hardening.sh`), altrimenti `docker compose` fallisce con *permission denied*.
 
 Scarica i backup **fuori dal VPS** (rsync/rclone verso storage esterno). Un backup solo sul server non è un backup.
 

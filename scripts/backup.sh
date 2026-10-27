@@ -48,12 +48,20 @@ if [[ "${DAY}" == "7" ]]; then
 fi
 
 echo "==> [4/4] Rotazione"
-# Giornalieri: tieni gli ultimi N.
-ls -1t "${BACKUP_DIR}/daily"/postgres-*.sql.gz 2>/dev/null | tail -n +$((KEEP_DAILY + 1)) | xargs -r rm -f
-ls -1t "${BACKUP_DIR}/daily"/redis-*.tar.gz    2>/dev/null | tail -n +$((KEEP_DAILY + 1)) | xargs -r rm -f
-# Settimanali: tieni gli ultimi N.
-ls -1t "${BACKUP_DIR}/weekly"/postgres-*.sql.gz 2>/dev/null | tail -n +$((KEEP_WEEKLY + 1)) | xargs -r rm -f
-ls -1t "${BACKUP_DIR}/weekly"/redis-*.tar.gz    2>/dev/null | tail -n +$((KEEP_WEEKLY + 1)) | xargs -r rm -f
+# Tiene gli ultimi N file per pattern. Un glob che non matcha nulla NON e' un
+# errore (es. weekly/ vuoto prima della prima domenica): `ls` esce 2 e con
+# `set -e`/`pipefail` abortirebbe lo script. Gestiamo l'assenza esplicitamente.
+rotate() {
+  local pattern="$1" keep="$2"
+  local files
+  files="$(ls -1t ${pattern} 2>/dev/null || true)"
+  [[ -z "${files}" ]] && return 0
+  echo "${files}" | tail -n +$((keep + 1)) | xargs -r rm -f
+}
+rotate "${BACKUP_DIR}/daily/postgres-*.sql.gz" "${KEEP_DAILY}"
+rotate "${BACKUP_DIR}/daily/redis-*.tar.gz"    "${KEEP_DAILY}"
+rotate "${BACKUP_DIR}/weekly/postgres-*.sql.gz" "${KEEP_WEEKLY}"
+rotate "${BACKUP_DIR}/weekly/redis-*.tar.gz"    "${KEEP_WEEKLY}"
 
 echo
 echo "Backup completato in ${BACKUP_DIR}."
