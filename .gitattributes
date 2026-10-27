@@ -1,0 +1,6 @@
+# Normalizza i line ending: LF nel repo (evita CRLF su script destinati a Linux).
+* text=auto eol=lf
+*.sh text eol=lf
+*.png binary
+*.jpg binary
+*.pem binary

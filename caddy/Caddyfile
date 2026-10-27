@@ -1,0 +1,90 @@
+# Caddyfile — reverse proxy + TLS per aethersy
+#
+# Due hostname pubblici:
+#   app.aethersy.com  -> app Activepieces (UI + API + webhook)
+#   mcp.aethersy.com  -> solo le route MCP/ OAuth
+#
+# Entrambi puntano allo stesso container `app` (porta interna 80).
+# Activepieces riconosce le richieste MCP dall'hostname, quindi l'header
+# Host pubblico viene preservato (vedi header_up Host {host}).
+
+{
+	email {$ACME_EMAIL}
+}
+
+# -----------------------------------------------------------------------------
+# App: UI, API, webhook, e la consent screen MCP (/mcp-authorize).
+# -----------------------------------------------------------------------------
+app.aethersy.com {
+	encode zstd gzip
+
+	# Consenti upload fino a 25 MB (default AP_MAX_FILE_SIZE_MB / webhook payload).
+	request_body {
+		max_size 25MB
+	}
+
+	reverse_proxy app:80 {
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+}
+
+# -----------------------------------------------------------------------------
+# MCP: solo le route documentate. Tutto il resto risponde 404.
+# Riferimento: docs Activepieces -> "Serving MCP from its own hostname".
+# -----------------------------------------------------------------------------
+mcp.aethersy.com {
+	encode zstd gzip
+
+	# Match esatto: /mcp e /mcp/platform.
+	# (una regola di prefisso /mcp matcherebbe anche /mcp-authorize, che questo
+	#  hostname NON deve servire)
+	@mcp path /mcp /mcp/platform
+	handle @mcp {
+		reverse_proxy app:80 {
+			header_up Host {host}
+			header_up X-Forwarded-Host {host}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
+	# Endpoint OAuth.
+	@oauth path /authorize /token /register /revoke /userinfo
+	handle @oauth {
+		reverse_proxy app:80 {
+			header_up Host {host}
+			header_up X-Forwarded-Host {host}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
+	# Well-known statici.
+	@wellknown path /.well-known/oauth-authorization-server /.well-known/openid-configuration /.well-known/jwks.json
+	handle @wellknown {
+		reverse_proxy app:80 {
+			header_up Host {host}
+			header_up X-Forwarded-Host {host}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
+	# Well-known con wildcard.
+	@protected path /.well-known/oauth-protected-resource/*
+	handle @protected {
+		reverse_proxy app:80 {
+			header_up Host {host}
+			header_up X-Forwarded-Host {host}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
+	# Nessuna route MCP nota: 404 esplicito.
+	handle {
+		respond "Not found" 404
+	}
+}

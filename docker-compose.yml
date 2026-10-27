@@ -1,0 +1,135 @@
+name: aethersy
+
+# Stack Activepieces self-hosted per aethersy.
+# - app: UI + API + endpoint MCP (porta interna 80)
+# - worker: esecuzione dei flow (AP_CONTAINER_TYPE=WORKER)
+# - postgres / redis: solo rete interna, nessuna porta pubblicata
+# - caddy: unico ingresso pubblico (80/443), TLS automatico
+#
+# Nessun segreto qui: tutto via .env (vedi .env.example).
+
+services:
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: aethersy-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - ACME_EMAIL=${ACME_EMAIL}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/data:/data
+      - ./caddy/config:/config
+    depends_on:
+      - app
+    networks:
+      - aethersy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  app:
+    image: ghcr.io/activepieces/activepieces:${AP_VERSION}
+    container_name: aethersy-app
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - AP_CONTAINER_TYPE=APP
+    ports:
+      # Esposto solo su localhost: serve per gli health check locali e il debug.
+      # Il traffico pubblico passa esclusivamente da Caddy.
+      - "127.0.0.1:${AP_HOST_PORT:-8080}:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./cache:/usr/src/app/cache
+    networks:
+      - aethersy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  worker:
+    image: ghcr.io/activepieces/activepieces:${AP_VERSION}
+    container_name: aethersy-worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - AP_CONTAINER_TYPE=WORKER
+      # Il worker deve raggiungere l'app sul nome di servizio interno,
+      # NON sul dominio pubblico (che per lui non risolve).
+      - AP_FRONTEND_URL=http://app
+    depends_on:
+      - app
+    volumes:
+      - ./cache:/usr/src/app/cache
+    networks:
+      - aethersy
+    deploy:
+      replicas: 1
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  postgres:
+    image: pgvector/pgvector:0.8.0-pg14
+    container_name: aethersy-postgres
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - POSTGRES_DB=${AP_POSTGRES_DATABASE}
+      - POSTGRES_USER=${AP_POSTGRES_USERNAME}
+      - POSTGRES_PASSWORD=${AP_POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - aethersy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${AP_POSTGRES_USERNAME} -d ${AP_POSTGRES_DATABASE}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  redis:
+    image: redis:7.0.7
+    container_name: aethersy-redis
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${AP_REDIS_PASSWORD}", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - aethersy
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"${AP_REDIS_PASSWORD}\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  aethersy:
+    driver: bridge

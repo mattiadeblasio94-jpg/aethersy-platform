@@ -1,0 +1,19 @@
+# Segreti
+.env
+.env.*
+!.env.example
+
+# Backup e dati runtime
+backups/
+cache/
+caddy/data/
+caddy/config/
+
+# Log
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
