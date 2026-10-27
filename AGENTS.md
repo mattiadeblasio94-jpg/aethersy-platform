@@ -166,7 +166,9 @@ Se un input manca, esegui tutte le fasi possibili e marca le altre come `BLOCKED
 ### Fase 5 — Provider AI (OpenRouter + Venice)
 **Task:** configura i provider AI a runtime in **Platform Admin → AI Center → Providers** (Activepieces non li legge da env, vedi §11 voce 6). Aggiungi **OpenRouter** come provider primario (gateway nativo, funzionante) e, opzionalmente, **Venice** come "Other (OpenAI Compatible)" con base URL `https://api.venice.ai/api/v1` (utilizzabile solo dopo aver caricato credito). Delega il failover a OpenRouter. Verifica il catalogo Venice con `GET https://api.venice.ai/api/v1/models`. Crea un flow di test "Ask AI" che risponde a un prompt.
 
-**Acceptance:** il flow di test restituisce una risposta reale dal provider configurato, senza errori di auth, e il run appare verde nella cronologia.
+**Stato:** `DONE` (27/10/2026). OpenRouter inserito via `POST /api/v1/ai-providers` (`provider=openrouter`, `config={}`, `auth={apiKey}`), `status=active`, `enabledForChat=true`, 464 modelli. Test end-to-end `POST /api/v1/ai/execute` (`action=ASK_AI`, `openai/gpt-4o-mini`) → risposta reale. Venice non aggiunto: chiave valida ma senza credito.
+
+**Acceptance:** il flow di test restituisce una risposta reale dal provider configurato, senza errori di auth, e il run appare verde nella cronologia. (Verificato a livello API; il flow di test UI va confermato in Fase 10.)
 
 ### Fase 6 — Slack
 **Task:** crea l'app Slack, prendi il webhook (o token bot), salva in `.env`. Aggiungi: (a) un flow Activepieces che notifica un evento, (b) un alert di sistema se `04-smoke-test.sh` fallisce via cron.
@@ -228,9 +230,9 @@ Esito della verifica (27/10/2026), fonti e dettagli in `docs/phases.md`:
 3. **Tag stabile:** `0.92.3-hotfix.1` (marcata *Latest* su GitHub releases, 23/10/2026).
 4. **Branding community:** nessuna variabile env di branding documentata per la Community edition; logo/nome via Platform Admin (UI). White-label completo = Enterprise.
 5. **Health check:** `GET /api/v1/health`.
-6. **Provider AI:** Activepieces **non** legge i provider da env (nessun `AP_AI_PROVIDER` né env per le chiavi). Config a runtime in **Platform Admin → AI Center → Providers**: OpenRouter = provider *Gateway* nativo; Venice = **Other (OpenAI Compatible)** con base URL `https://api.venice.ai/api/v1`. Nessun failover automatico tra provider: delegarlo a OpenRouter (array `models`). Test 27/10/2026: chiave Venice valida (`GET /models` 200) ma **senza credito** (inferenza → `Insufficient USD or Diem balance`); OpenRouter funzionante.
+6. **Provider AI:** Activepieces **non** legge i provider da env (nessun `AP_AI_PROVIDER` né env per le chiavi). Config a runtime in **Platform Admin → AI Center → Providers**: OpenRouter = provider *Gateway* nativo; Venice = **Other (OpenAI Compatible)** con base URL `https://api.venice.ai/api/v1`. Nessun failover automatico tra provider: delegarlo a OpenRouter (array `models`). **OpenRouter configurato** (27/10/2026, `id=KGJ2h1RWYJSUIUZFQpyFQ`, active, chat-enabled, 464 modelli; test end-to-end OK). Venice: chiave valida (`GET /models` 200) ma **senza credito** (inferenza → `Insufficient USD or Diem balance`), non aggiunto.
 7. **Modelli Venice:** `GET https://api.venice.ai/api/v1/models` (Bearer auth, OpenAI-compatible).
-8. **Porta app:** l'app ascolta su `8080`; `AP_PORT` = porta interna (non cambiarla), `AP_HOST_PORT` = mapping host.
+8. **Porta app:** l'app ascolta su **`80`** dentro il container; il mapping host è `AP_HOST_PORT` (default `8080`). **Non** impostare `AP_PORT` (porta interna: cambiarla rompe il mapping).
 9. **`AP_SIGN_UP_ENABLED` NON esiste** nelle doc attuali. Controllo registrazioni = ZeroBounce (`AP_ZEROBOUNCE_API_KEY`) + Cloudflare Turnstile (`AP_TURNSTILE_SITE_KEY`/`AP_TURNSTILE_SECRET_KEY`), e/o disattivazione dall'area Platform Admin.
 
 ## 12. Definition of Done globale

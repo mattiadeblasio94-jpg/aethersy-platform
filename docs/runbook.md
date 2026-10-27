@@ -110,7 +110,7 @@ openssl rand -hex 32   # AP_JWT_SECRET, AP_POSTGRES_PASSWORD, AP_REDIS_PASSWORD
 
 **Platform Admin → AI Center → Providers**
 
-1. **OpenRouter (provider primario, funzionante).** È un provider *Gateway* nativo: aggiungilo e incolla la chiave `OPENROUTER_API_KEY`. Testato il 27/10/2026: chat completata con successo.
+1. **OpenRouter (provider primario) — GIÀ CONFIGURATO.** È un provider *Gateway* nativo. Configurato il 27/10/2026: `status=active`, `enabledForChat=true`, 464 modelli disponibili; test end-to-end "Ask AI" (`openai/gpt-4o-mini`) → risposta reale. Per ricrearlo/modificarlo: **Add Provider → OpenRouter**, incollare `OPENROUTER_API_KEY`, salvare, abilitare "Enabled for chat".
 2. **Venice (opzionale).** Rientra in **Other (OpenAI Compatible)**: base URL `https://api.venice.ai/api/v1`, chiave `VENICE_API_KEY`. Testato il 27/10/2026: la chiave autentica (`GET /models` → 200) ma **ogni inferenza risponde `Insufficient USD or Diem balance`** → serve ricaricare credito su https://venice.ai/settings/api prima di usarla.
 3. **Failover.** Activepieces **non** fa failover automatico tra provider: ogni step/agente sceglie un provider+modello. Il failover si delega a **OpenRouter** (provider failover automatico + model fallback opt-in via array `models` nel payload). Quindi OpenRouter è la scelta robusta come provider primario.
 

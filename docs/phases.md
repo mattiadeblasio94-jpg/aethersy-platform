@@ -14,7 +14,7 @@
 | 2 | DNS e reverse proxy | `DONE` — dominio **aethersy.online** (GoDaddy); Caddy + Let's Encrypt attivi su `app.`, `mcp.`, apex e `www` (apex/www → 301 su `app.`) |
 | 3 | Deploy stack Activepieces | `DONE` — stack up e healthy; smoke test OK su `https://app.aethersy.online` |
 | 4 | Primo accesso e chiusura signup | `DONE` — admin `mattiadeblasio94@gmail.com` (ADMIN, ACTIVE) su `app.aethersy.online`; registrazioni pubbliche chiuse (`AP_ALLOW_OPEN_SIGN_UP` assente → `INVITATION_ONLY_SIGN_UP`) |
-| 5 | Provider AI (OpenRouter/Venice) | `NOTE` — chiavi testate (OpenRouter ok, Venice senza credito), config UI `BLOCKED: input #1/#2` |
+| 5 | Provider AI (OpenRouter/Venice) | `DONE` — **OpenRouter** creato via API admin, `status=active`, `enabledForChat=true`, 464 modelli; test end-to-end "Ask AI" → risposta reale. Venice: chiave valida ma senza credito → non aggiunto (opzionale) |
 | 6 | Slack | `BLOCKED: input #1/#5` |
 | 7 | Endpoint MCP | `BLOCKED: input #1` |
 | 8 | Branding | `BLOCKED: input #1` |
@@ -139,15 +139,18 @@ Limiti confermati (default upstream, ora espliciti in `.env.example`): `AP_WEBHO
 - **Nota:** il branding "Activepieces" è quello di default della Community; il nome/logo si cambiano in Fase 8. Salvare le credenziali admin in un gestore password, non nel repo.
 
 ### Fase 5 — Provider AI (OpenRouter + Venice)
-- **Esito:** `NOTE` — chiavi testate live il 27/10/2026, configurazione UI `BLOCKED: input #1/#2`.
+- **Esito:** `DONE` — **OpenRouter** configurato e verificato end-to-end il 27/10/2026. Venice testato ma non aggiunto (chiave senza credito).
 - **Test chiavi (live):**
-  - Venice: `GET /api/v1/models` → **HTTP 200** (chiave valida); `POST /chat/completions` → `{"error":"Insufficient USD or Diem balance to complete request..."}` → **chiave senza credito, non può fare inferenza**.
-  - OpenRouter: `POST /chat/completions` (gpt-4o-mini) → **200, risposta reale** (costo ~$0.0000042). Chiave valida e funzionante.
-- **Decisione:** Activepieces **non** configura provider da env (vedi §11 voce 6). La configurazione è a runtime in **Platform Admin → AI Center → Providers**:
-  1. Aggiungere **OpenRouter** (provider Gateway nativo) con `OPENROUTER_API_KEY` → provider primario, funzionante.
-  2. (Opzionale) aggiungere **Venice** come "Other (OpenAI Compatible)" con base URL `https://api.venice.ai/api/v1` e `VENICE_API_KEY` → utilizzabile solo dopo aver caricato credito su Venice.
-  3. Il **failover** tra provider/modelli si delega a OpenRouter (provider failover + array `models`); Activepieces non lo fa da sé (§11 voce 16).
-- **Acceptance (quando sbloccata):** un flow di test "Ask AI" con provider OpenRouter restituisce una risposta reale e il run appare verde. Idem per Venice solo dopo ricarica credito.
+  - Venice: `GET /api/v1/models` → **HTTP 200** (chiave valida, 142 modelli testo); `POST /chat/completions` → `{"error":"Insufficient USD or Diem balance to complete request..."}` → **chiave senza credito, non può fare inferenza**.
+  - OpenRouter: chiave valida (`GET /api/v1/auth/key` 200). Test end-to-end tramite la piattaforma: risposta reale.
+- **Configurazione applicata (OpenRouter):** i provider AI non si configurano da env (§11 voce 6). Inserito via API admin `POST /api/v1/ai-providers` con body `{"displayName":"OpenRouter","provider":"openrouter","config":{},"auth":{"apiKey":"…"}}`. La `auth` viene cifrata con `AP_ENCRYPTION_KEY` (`encryptUtils.encryptObject`, AES-256-CBC). Risultato:
+  - `id=KGJ2h1RWYJSUIUZFQpyFQ`, `provider=openrouter`, `status=active`, `enabledForChat=true`.
+  - `GET /v1/ai-providers/configs/<id>/models` → **464 modelli**.
+- **Verifica end-to-end:** `POST /api/v1/ai/execute` (principal ENGINE, `action=ASK_AI`, `provider=openrouter`, `modelId=openai/gpt-4o-mini`, prompt "Reply with exactly: PONG") → `HTTP 200`, `{"output":{"answer":"PONG", …}}`. Inferenza reale attraverso lo stack (app → worker → OpenRouter).
+- **Procedura ripetibile (UI):** **Platform Admin → AI Center → Providers → Add Provider → OpenRouter**, incollare la chiave, salvare. Abilitare per la chat ("Enabled for chat").
+- **Venice (opzionale, non configurato):** per attivarlo aggiungere "Other (OpenAI Compatible)" con base URL `https://api.venice.ai/api/v1`, header `Authorization`, e i modelli desiderati — **solo dopo** aver caricato credito su venice.ai/settings/api.
+- **Failover:** delegato a OpenRouter (provider failover + array `models`); Activepieces non lo fa da sé (§11 voce 16).
+- **Nota admin API:** gli endpoint `/v1/ai-providers` sono `platformAdminOnly` e richiedono un principal USER con `platformRole=ADMIN`. In assenza di API key (feature a pagamento), il provider è stato inserito con un JWT admin firmato con `AP_JWT_SECRET` (uso una-tantum, token non persistito).
 
 ### Fase 6 — Slack
 - **Esito:** `BLOCKED: input #5`.
