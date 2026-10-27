@@ -1,8 +1,12 @@
 # Caddyfile — reverse proxy + TLS per aethersy
 #
-# Due hostname pubblici:
-#   app.aethersy.com  -> app Activepieces (UI + API + webhook)
-#   mcp.aethersy.com  -> solo le route MCP/ OAuth
+# Due hostname pubblici (parametrizzati via .env, così il passaggio da
+# hostname temporaneo a dominio reale è una sola variabile):
+#   {$APP_DOMAIN}  -> app Activepieces (UI + API + webhook)
+#   {$MCP_DOMAIN}  -> solo le route MCP/ OAuth
+#
+# Default (docker-compose.yml): app.aethersy.com / mcp.aethersy.com.
+# Temporaneo (DNS bloccato): app.195.231.79.221.sslip.io / mcp.195.231.79.221.sslip.io
 #
 # Entrambi puntano allo stesso container `app` (porta interna 80).
 # Activepieces riconosce le richieste MCP dall'hostname, quindi l'header
@@ -15,7 +19,7 @@
 # -----------------------------------------------------------------------------
 # App: UI, API, webhook, e la consent screen MCP (/mcp-authorize).
 # -----------------------------------------------------------------------------
-app.aethersy.com {
+{$APP_DOMAIN} {
 	encode zstd gzip
 
 	# Consenti upload fino a 25 MB (default AP_MAX_FILE_SIZE_MB / webhook payload).
@@ -34,7 +38,7 @@ app.aethersy.com {
 # MCP: solo le route documentate. Tutto il resto risponde 404.
 # Riferimento: docs Activepieces -> "Serving MCP from its own hostname".
 # -----------------------------------------------------------------------------
-mcp.aethersy.com {
+{$MCP_DOMAIN} {
 	encode zstd gzip
 
 	# Match esatto: /mcp e /mcp/platform.

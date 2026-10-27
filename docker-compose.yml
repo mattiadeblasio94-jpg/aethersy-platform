@@ -18,6 +18,8 @@ services:
       - "443:443"
     environment:
       - ACME_EMAIL=${ACME_EMAIL}
+      - APP_DOMAIN=${APP_DOMAIN:-app.aethersy.com}
+      - MCP_DOMAIN=${MCP_DOMAIN:-mcp.aethersy.com}
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./caddy/data:/data

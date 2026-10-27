@@ -11,9 +11,9 @@
 |---|---|---|
 | 0 | Accesso SSH e preparazione repo | `DONE` — repo creato e committato (`be56668`); accesso SSH al VPS Aruba stabilito via chiave |
 | 1 | Bootstrap e hardening | `DONE` — Docker 29.9.2 + Compose v5.6.1, swap 2 GB, utente `deploy`, root/password SSH disabilitati, ufw 22/80/443, fail2ban attivo |
-| 2 | DNS e reverse proxy | `NOTE` — Caddyfile pronto; DNS su Vercel ma non punta al VPS, `BLOCKED: input #4/#6` |
-| 3 | Deploy stack Activepieces | `NOTE` — compose/env pronti, `BLOCKED: input #1/#2` |
-| 4 | Primo accesso e chiusura signup | `BLOCKED: input #1/#2` |
+| 2 | DNS e reverse proxy | `DONE (temporaneo)` — Caddy + TLS Let's Encrypt attivi su `app./mcp.195.231.79.221.sslip.io` (hostname temporanei). Passaggio a `app./mcp.aethersy.com` `BLOCKED: input #6` (account Vercel limitato) |
+| 3 | Deploy stack Activepieces | `DONE (temporaneo)` — stack up e healthy; smoke test OK su hostname sslip.io |
+| 4 | Primo accesso e chiusura signup | `NOTE` — stack raggiungibile via hostname temporaneo; chiusura signup da fare |
 | 5 | Provider AI (OpenRouter/Venice) | `NOTE` — chiavi testate (OpenRouter ok, Venice senza credito), config UI `BLOCKED: input #1/#2` |
 | 6 | Slack | `BLOCKED: input #1/#5` |
 | 7 | Endpoint MCP | `BLOCKED: input #1` |
@@ -101,15 +101,25 @@ Limiti confermati (default upstream, ora espliciti in `.env.example`): `AP_WEBHO
 - **Prossimo passo:** Fase 2 (record A su Vercel + Caddy TLS).
 
 ### Fase 2 — DNS e reverse proxy
-- **Esito:** `NOTE`. `caddy/Caddyfile` scritto con i due hostname e le route MCP esatte; servizio `caddy` presente in compose.
-- **Bloccante:** `BLOCKED: input #1/#4/#6`.
-- **Nota Fase 2:** lo spec suggeriva un `respond "ok"` temporaneo per validare il certificato prima che l'app esista. Con questo compose l'app viene su nella stessa fase, quindi il `respond` non serve. Se si vuole validare il solo TLS, avviare `caddy` da solo con un Caddyfile minimo; non introdurre configurazioni intermedie rotte.
-- **Acceptance:** `curl -sI https://app.aethersy.com` → 200; `openssl s_client -connect app.aethersy.com:443` mostra cert valido per il dominio; idem `mcp.`.
+- **Esito:** `DONE (temporaneo)` — TLS attivo su hostname `sslip.io`; `BLOCKED: input #6` per il dominio reale.
+- **Contesto (27/10/2026):** l'account Vercel è **limitato** (profilo accessibile ma deploy e **creazione record DNS bloccati**). Il dominio `aethersy.com` è registrato **tramite Vercel** (NS `ns1/ns2.vercel-dns.com`) e ha un record **wildcard `* ALIAS cname.vercel-dns-016.com`** che instrada tutti i sottodomini (`app`, `mcp`, `www`) su Vercel (`216.150.x.x`). Il CAA live autorizza Let's Encrypt (`0 issue "letsencrypt.org"`, `pki.goog`, `sectigo.com`), quindi Caddy può emettere TLS. Non essendo possibile creare i record A in Vercel, si è scelta la **strategia C**: hostname temporanei **`sslip.io`** (che risolvono sull'IP del VPS) per costruire e collaudare l'intero stack, con passaggio al dominio reale a una sola variabile.
+- **Implementazione:**
+  - `caddy/Caddyfile` **parametrizzato**: i blocchi usano `{$APP_DOMAIN}` e `{$MCP_DOMAIN}` (prima erano hardcoded).
+  - `docker-compose.yml`: il servizio `caddy` riceve `APP_DOMAIN`/`MCP_DOMAIN` (default `app./mcp.aethersy.com`).
+  - `.env.example`: aggiunte `APP_DOMAIN`/`MCP_DOMAIN` con nota sugli hostname temporanei.
+  - `.env` sul VPS: `AP_FRONTEND_URL`/`AP_MCP_URL`/`APP_DOMAIN`/`MCP_DOMAIN` = `*.195.231.79.221.sslip.io`.
+- **Acceptance verificata (27/10/2026):**
+  - `curl -sI https://app.195.231.79.221.sslip.io/api/v1/health` → `{"status":"Healthy"}`.
+  - Certificato Let's Encrypt valido per `app.195.231.79.221.sslip.io` (`issuer C=US, O=Let's Encrypt, CN=YE2`, `notAfter=Jan 25 2027`); Caddy ha emesso anche quello di `mcp.…`.
+  - `https://mcp.195.231.79.221.sslip.io/mcp` → HTTP 405 (`Use POST with Authorization: Bearer <token>`) = host raggiungibile e route MCP attiva.
+- **Per passare al dominio reale (quando Vercel è sbloccato):** creare in Vercel i record **A** `app` e `mcp` → `195.231.79.221` (i record A espliciti hanno precedenza sul wildcard), poi in `.env` impostare `AP_FRONTEND_URL=https://app.aethersy.com`, `AP_MCP_URL=https://mcp.aethersy.com`, `APP_DOMAIN=app.aethersy.com`, `MCP_DOMAIN=mcp.aethersy.com` e riavviare `caddy` + `app` + `worker`.
 
 ### Fase 3 — Deploy stack Activepieces
-- **Esito:** `NOTE`. `docker-compose.yml` + `.env.example` scritti. `scripts/03-deploy.sh` valida `.env` (placeholder `CHANGEME`, variabili obbligatorie) e lancia `docker compose config --quiet` prima di `up -d`.
-- **Bloccante:** `BLOCKED: input #1/#2`.
-- **Acceptance:** `docker compose ps` tutto `running`/`healthy`; `curl -s http://127.0.0.1:8080/api/v1/health` ok; nessuna porta di postgres/redis raggiungibile dall'esterno.
+- **Esito:** `DONE (temporaneo)` — stack avviato e healthy su hostname `sslip.io`.
+- **Contesto:** deploy eseguito dalla directory `/home/deploy/aethersy` sul VPS (posseduta da `deploy`); `.env` creato da `.env.example` con segreti generati (`openssl rand -hex 16` per `AP_ENCRYPTION_KEY`, `hex 32` per `AP_JWT_SECRET`/`AP_POSTGRES_PASSWORD`/`AP_REDIS_PASSWORD`), `chmod 600`.
+- **Comandi:** `sudo docker compose config --quiet` → OK; `sudo bash scripts/03-deploy.sh` (pull + up -d).
+- **Acceptance verificata:** `docker compose ps` → `app`, `worker`, `postgres`, `redis`, `caddy` tutti `running`/`healthy`; `curl http://127.0.0.1:8080/api/v1/health` → `{"status":"Healthy"}`; `scripts/04-smoke-test.sh` → **SMOKE TEST OK** (container, health locale, health pubblico HTTPS, endpoint MCP); postgres/redis **non** raggiungibili dall'esterno (nessuna porta pubblicata).
+- **Nota:** `deploy` non è nel gruppo `docker`; i comandi docker sul VPS richiedono `sudo` (nessuna password, come da hardening).
 
 ### Fase 4 — Primo accesso e chiusura registrazioni
 - **Esito:** `BLOCKED: input #1/#2`.
