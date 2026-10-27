@@ -14,8 +14,10 @@ fi
 
 echo "==> [1/7] Aggiornamento pacchetti"
 export DEBIAN_FRONTEND=noninteractive
+APT_OPTS=(-o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold")
 apt-get update -y
-apt-get upgrade -y
+apt-get "${APT_OPTS[@]}" upgrade -y
+dpkg --configure -a || true
 
 echo "==> [2/7] Pacchetti base"
 apt-get install -y \
@@ -27,8 +29,11 @@ echo "==> [3/7] Timezone Europe/Rome"
 timedatectl set-timezone Europe/Rome
 
 echo "==> [4/7] Swap 2 GB (file)"
-if [[ ! -f /swapfile ]]; then
-  fallocate -l 2G /swapfile
+SWAP_SIZE_MB=$(awk '/SwapTotal/{print int($2/1024)}' /proc/meminfo)
+if [[ "${SWAP_SIZE_MB}" -lt 2048 ]]; then
+  swapoff /swapfile 2>/dev/null || true
+  rm -f /swapfile
+  fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048
   chmod 600 /swapfile
   mkswap /swapfile
   swapon /swapfile
@@ -36,7 +41,7 @@ if [[ ! -f /swapfile ]]; then
   echo 'vm.swappiness=10' > /etc/sysctl.d/99-swappiness.conf
   sysctl -p /etc/sysctl.d/99-swappiness.conf
 else
-  echo "    /swapfile gia' presente, salto."
+  echo "    swap gia' >= 2 GB, salto."
 fi
 
 echo "==> [5/7] Aggiornamenti di sicurezza automatici"

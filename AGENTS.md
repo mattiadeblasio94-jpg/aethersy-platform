@@ -125,7 +125,7 @@ Tutti gli script: `set -euo pipefail`, idempotenti, con `usage()` se serve un ar
 | # | Input | Dove | Blocca la fase |
 |---|---|---|---|
 | 1 | IP pubblico del VPS | pannello Aruba | 0 — **ricevuto: `195.231.79.221`** |
-| 2 | Accesso SSH iniziale (utente + chiave o password) | pannello Aruba | 0 — **parziale**: credenziali ricevute; VPS Aruba `195.231.79.221` porta 22 **filtrata (ban)**; host SiteGround `ssh.matthewdeblas.com:18765` accetta **solo chiave** (pubblica da caricare in Site Tools) |
+| 2 | Accesso SSH iniziale (utente + chiave o password) | pannello Aruba | 0 — **ricevuto e funzionante**: VPS Aruba `195.231.79.221`; chiave `aethersy_deploy_ed25519` installata; utente `deploy` (root/password disabilitati dopo hardening) |
 | 3 | Chiavi provider AI: OpenRouter (primario) e/o Venice | openrouter.ai/keys, venice.ai/settings/api | 5 |
 | 4 | Email per TLS + alert | — | 2 |
 | 5 | Webhook Slack (o workspace dove installare l'app) | api.slack.com | 6 |

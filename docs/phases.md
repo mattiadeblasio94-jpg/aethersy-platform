@@ -9,8 +9,8 @@
 
 | Fase | Descrizione | Stato |
 |---|---|---|
-| 0 | Accesso SSH e preparazione repo | `NOTE` — repo creato, IP VPS ricevuto (`195.231.79.221`), credenziali ricevute; SSH `BLOCKED` (ban porta 22; SiteGround solo chiave) |
-| 1 | Bootstrap e hardening | `NOTE` — script pronti, esecuzione `BLOCKED: input #2` |
+| 0 | Accesso SSH e preparazione repo | `DONE` — repo creato e committato (`be56668`); accesso SSH al VPS Aruba stabilito via chiave |
+| 1 | Bootstrap e hardening | `DONE` — Docker 29.9.2 + Compose v5.6.1, swap 2 GB, utente `deploy`, root/password SSH disabilitati, ufw 22/80/443, fail2ban attivo |
 | 2 | DNS e reverse proxy | `NOTE` — Caddyfile pronto; DNS su Vercel ma non punta al VPS, `BLOCKED: input #4/#6` |
 | 3 | Deploy stack Activepieces | `NOTE` — compose/env pronti, `BLOCKED: input #1/#2` |
 | 4 | Primo accesso e chiusura signup | `BLOCKED: input #1/#2` |
@@ -61,7 +61,8 @@ Limiti confermati (default upstream, ora espliciti in `.env.example`): `AP_WEBHO
 ## Log per fase
 
 ### Fase 0 — Accesso SSH e preparazione
-- **Esito:** `NOTE`. Struttura repo creata localmente in `C:\Users\PC\aethersy-infra` (`AGENTS.md`, `.gitignore`, `docker-compose.yml`, `.env.example`, `caddy/`, `scripts/`, `docs/`).
+- **Esito:** `DONE`.
+- **Struttura repo:** creata localmente in `C:\Users\PC\aethersy-infra` (`AGENTS.md`, `.gitignore`, `.gitattributes`, `docker-compose.yml`, `.env.example`, `caddy/`, `scripts/`, `docs/`); `git init -b main` + commit `be56668`. `.env`/`.env.secrets` correttamente esclusi.
 - **Input #1 ricevuto (27/10/2026):** IP pubblico VPS Aruba = **`195.231.79.221`**.
 - **Ricognizione VPS (27/10/2026, sola lettura):**
   - SSH: porta 22 **aperta**, banner `SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.20` → **Ubuntu 24.04 confermato**.
@@ -69,20 +70,34 @@ Limiti confermati (default upstream, ora espliciti in `.env.example`): `AP_WEBHO
   - Porta 8080: chiusa (nessuno stack Activepieces attivo).
   - Ping ICMP: risponde.
 - **DNS (27/10/2026):** il DNS di `aethersy.com` è su **Vercel** (NS `ns1.vercel-dns.com`, `ns2.vercel-dns.com`), **non** su SiteGround come da specifica. `aethersy.com`, `app.aethersy.com`, `mcp.aethersy.com` risolvono su `216.150.16.x` (range Vercel) → **NON puntano al VPS**. I record A per `app.`/`mcp.` vanno creati nella dashboard Vercel verso `195.231.79.221` (input #6, ora "accesso DNS Vercel"). La Vercel CLI è installata localmente ma il token è scaduto/invalido (`vercel login` richiesto).
-- **Accessi (27/10/2026, aggiornamento):** l'utente ha fornito credenziali.
-  - **VPS Aruba `195.231.79.221`** (`host221-79-231-195.serverdedicati.aruba.it`): il server offre `publickey,password`. La porta 22 è tornata **aperta** (ban decaduto) → tentato login a password (via `SSH_ASKPASS`, meccanismo confermato funzionante con `-vv`) come `root`, `deploy`, `ubuntu`: **password rifiutata** su tutti e tre (`Permission denied (publickey,password)`). La porta 22 è poi tornata **filtrata** (ban riattivato dai tentativi). IP pubblico della workstation: `2.36.103.146`.
-  - **Host alternativo SiteGround `ssh.matthewdeblas.com:18765`** (IP `35.214.161.222`, Google Cloud): porta **aperta**, ma il server accetta **solo autenticazione a chiave pubblica** (`Authentications that can continue: publickey`, verificato con `ssh -vv`). La password NON è utilizzabile per SSH qui: serve solo per il pannello **Site Tools**, dove va caricata una chiave pubblica.
-  - **Chiave dedicata generata:** `~/.ssh/aethersy_deploy_ed25519` (+ `.pub`). Pubblica da incollare in Site Tools / `authorized_keys`:
-    `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIP0IEkl3mGtxaRz8k8OVptBKRtNFyEJ9oJcTj4ES3BWr aethersy-deploy`
-  - **`~/.ssh/config`** aggiornato con alias `aethersy-sg` (SiteGround) e `aethersy-vps` (Aruba).
-  - **Sicurezza:** la password condivisa in chat è **compromessa → da ruotare** (vedi `docs/security.md` §6.1).
-- **Bloccante:** accesso SSH effettivo. Due strade: (a) sbloccare l'IP dal ban e usare la password/root corretta sul VPS Aruba; (b) caricare la chiave pubblica `aethersy_deploy_ed25519.pub` in Site Tools e usare `ssh aethersy-sg`.
-- **Da fare quando sbloccata:** verificare `uname -a` (atteso Ubuntu 24.04), `git init` + primo commit.
+- **Accessi — risoluzione finale (27/10/2026):**
+  - **Blocco iniziale:** la porta 22 del VPS Aruba era **filtrata da fail2ban** (ban dell'IP `2.36.103.146` innescato dai tentativi falliti; solo la 22 cambiava stato, la 53 restava aperta). Un ban lato server non è aggirabile dal client.
+  - **Superamento:** l'utente ha eseguito `fail2ban-client unban 2.36.103.146` dalla console Aruba → porta 22 riaperta. Login **`root` + password accettato** (verificato `AETHERSY_OK`, `uid=0`, hostname `Aethersy`, Ubuntu 24.04 LTS).
+  - **Ricognizione confermata via SSH:** IP pubblico `195.231.79.221`; sshd porta 22, `PermitRootLogin yes`, `PasswordAuthentication yes`, `PubkeyAuthentication yes`; unico utente non-root `ubuntu`; ufw attivo (solo 22); fail2ban jail `sshd` presente.
+  - **Chiave dedicata installata:** `~/.ssh/aethersy_deploy_ed25519.pub` aggiunta a `/root/.ssh/authorized_keys` → accesso **via chiave verificato** (`KEY_AUTH_OK`).
+  - **`~/.ssh/config`:** alias `aethersy-vps`/`aethersy` → `deploy@195.231.79.221:22` con `aethersy_deploy_ed25519`.
+  - **Host alternativo SiteGround `ssh.matthewdeblas.com:18765`** (IP `35.214.161.222`): accetta **solo chiave pubblica** (`Authentications that can continue: publickey`). La password NON è utilizzabile per SSH: serve solo per il pannello Site Tools. Non usato per l'architettura finale.
+  - **Sicurezza:** le password condivise in chat sono **compromesse → da ruotare** (vedi `docs/security.md` §6.1).
+- **Acceptance verificata:** `git log` mostra il commit di Fase 0; `ssh aethersy 'uname -a'` risponde `Linux Aethersy ... Ubuntu 24.04` con 3.8 GB RAM.
 
 ### Fase 1 — Bootstrap e hardening
-- **Esito:** `NOTE`. `scripts/00-bootstrap.sh` e `scripts/01-hardening.sh` scritti (idempotenti, `set -euo pipefail`).
-- **Bloccante:** `BLOCKED: input #1/#2` — nessun VPS raggiungibile da qui.
-- **Acceptance da verificare sul VPS:** `swapon --show` = 2 GB; `ufw status verbose` default deny + allow 22/80/443; `systemctl is-active fail2ban` = active; `docker run --rm hello-world` ok; `ssh deploy@VPS` ok e `ssh root@VPS` no.
+- **Esito:** `DONE`.
+- **Bootstrap (`scripts/00-bootstrap.sh`):**
+  - Primo tentativo **fallito**: `apt-get upgrade` ha incontrato un prompt conffile interattivo su `cloud-init` (`end of file on stdin at conffile prompt`) → dpkg in errore → `set -e` ha abortito lo script; Docker non installato; swap ancora 512 MB.
+  - **Correzione dello script:** aggiunte `APT_OPTS=(-o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold")` su `apt-get upgrade`, `dpkg --configure -a || true`, e riscrittura del blocco swap per **ridimensionare** quando `SwapTotal < 2048 MB`.
+  - Stato dpkg del VPS riparato (`dpkg --configure -a` → `EXIT=0`, `cloud-init` ora `ii`), script ricaricato e rieseguito.
+  - **Esito:** Docker **29.9.2** + Compose **v5.6.1**, `docker run --rm hello-world` OK, timezone Europe/Rome, `unattended-upgrades` configurato, swap **2 GB** (`/swapfile`; rimosso il vecchio `/swap` da 512 MB dell'immagine e ripulito `/etc/fstab`).
+- **Hardening (`scripts/01-hardening.sh`):**
+  - Creato utente **`deploy`** (sudo NOPASSWD), chiave pubblica installata.
+  - `/etc/ssh/sshd_config.d/99-hardening.conf`: `PermitRootLogin no`, `PasswordAuthentication no`, `PubkeyAuthentication yes`, `KbdInteractiveAuthentication no`, `MaxAuthTries 3`.
+  - ufw: default deny incoming / allow outgoing; allow 22, 80, 443.
+  - fail2ban: jail `sshd` (maxretry 5, findtime 10m, bantime 1h), attivo.
+- **Acceptance verificata:**
+  - `ssh deploy@195.231.79.221` via chiave → `DEPLOY_OK`, `uid=1001(deploy)` in gruppo `sudo`, `sudo whoami` → `root`, `sudo docker --version` → 29.9.2, `swapon --show` → 2 GB.
+  - `sshd -T` effettivo: `permitrootlogin no`, `passwordauthentication no`, `pubkeyauthentication yes`, `kbdinteractiveauthentication no`.
+  - `ssh root@195.231.79.221` → **`Permission denied`** (root chiuso, come atteso).
+  - `ufw status` attivo con 22/80/443; `systemctl is-active fail2ban` → `active`.
+- **Prossimo passo:** Fase 2 (record A su Vercel + Caddy TLS).
 
 ### Fase 2 — DNS e reverse proxy
 - **Esito:** `NOTE`. `caddy/Caddyfile` scritto con i due hostname e le route MCP esatte; servizio `caddy` presente in compose.
