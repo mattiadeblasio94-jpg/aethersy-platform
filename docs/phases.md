@@ -76,7 +76,8 @@ Limiti confermati (default upstream, ora espliciti in `.env.example`): `AP_WEBHO
   - **Ricognizione confermata via SSH:** IP pubblico `195.231.79.221`; sshd porta 22, `PermitRootLogin yes`, `PasswordAuthentication yes`, `PubkeyAuthentication yes`; unico utente non-root `ubuntu`; ufw attivo (solo 22); fail2ban jail `sshd` presente.
   - **Chiave dedicata installata:** `~/.ssh/aethersy_deploy_ed25519.pub` aggiunta a `/root/.ssh/authorized_keys` → accesso **via chiave verificato** (`KEY_AUTH_OK`).
   - **`~/.ssh/config`:** alias `aethersy-vps`/`aethersy` → `deploy@195.231.79.221:22` con `aethersy_deploy_ed25519`.
-  - **Host alternativo SiteGround `ssh.matthewdeblas.com:18765`** (IP `35.214.161.222`): accetta **solo chiave pubblica** (`Authentications that can continue: publickey`). La password NON è utilizzabile per SSH: serve solo per il pannello Site Tools. Non usato per l'architettura finale.
+  - **Host alternativo SiteGround `ssh.matthewdeblas.com:18765`** (IP `35.214.161.222`): accetta **solo chiave pubblica**. Accesso **ottenuto** (27/10/2026): coppia generata in Site Tools → SSH Keys Manager (ed25519, chiave privata protetta da passphrase), salvata come `~/.ssh/aethersy_sg_ed25519`, alias `aethersy-sg` aggiornato. Login verificato: `u2246-pgbqtt88qkey@esm26.siteground.biz`, home `/home/customer`, PHP 8.2.35, Node v22.23.4; contenuto attuale solo `matthewdeblas.com`. Non usato per l'architettura finale (DNS/hosting restano su Vercel + Aruba).
+  - **Chiave privata SiteGround condivisa in chat → da ruotare** (vedi `docs/security.md` §6.1).
   - **Sicurezza:** le password condivise in chat sono **compromesse → da ruotare** (vedi `docs/security.md` §6.1).
 - **Acceptance verificata:** `git log` mostra il commit di Fase 0; `ssh aethersy 'uname -a'` risponde `Linux Aethersy ... Ubuntu 24.04` con 3.8 GB RAM.
 

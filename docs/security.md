@@ -121,6 +121,7 @@ Regole:
 |---|---|---|---|
 | Password SSH VPS Aruba (`J18nyq2z`) | chat | cambiare la password root dal pannello Aruba / `passwd`; in alternativa disabilitare il login a password e usare solo chiavi | **da fare** |
 | Password pannello SiteGround | chat | cambiare da Site Tools → Account → Password | **da fare** |
+| Chiave privata SSH SiteGround (`aethersy_sg_ed25519`, con passphrase) | chat | rigenerare la coppia da Site Tools → SSH Keys Manager e reimportare la vecchia pubblica | **da fare** |
 | `VENICE_API_KEY` | chat | revocare e rigenerare da venice.ai → Settings → API | **da fare** |
 | `RENDER_API_KEY` | chat | rigenerare da Render → Account Settings → API Keys | **da fare** |
 | `NVIDIA_API_KEY` | chat | rigenerare dal portale NVIDIA | **da fare** |

@@ -129,7 +129,7 @@ Tutti gli script: `set -euo pipefail`, idempotenti, con `usage()` se serve un ar
 | 3 | Chiavi provider AI: OpenRouter (primario) e/o Venice | openrouter.ai/keys, venice.ai/settings/api | 5 |
 | 4 | Email per TLS + alert | — | 2 |
 | 5 | Webhook Slack (o workspace dove installare l'app) | api.slack.com | 6 |
-| 6 | Accesso DNS (pannello **Vercel** / token API) | vercel.com dashboard → Domains | 2 — **da fornire** |
+| 6 | Accesso DNS (pannello **Vercel** / token API) | vercel.com dashboard → Domains | 2 — **account accessibile ma deploy bloccato**; record A `app.`/`mcp.` da impostare verso `195.231.79.221` |
 
 Se un input manca, esegui tutte le fasi possibili e marca le altre come `BLOCKED: input #N` in `docs/phases.md`.
 
