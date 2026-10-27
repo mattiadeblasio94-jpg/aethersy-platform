@@ -11,9 +11,9 @@
 |---|---|---|
 | 0 | Accesso SSH e preparazione repo | `DONE` — repo creato e committato (`be56668`); accesso SSH al VPS Aruba stabilito via chiave |
 | 1 | Bootstrap e hardening | `DONE` — Docker 29.9.2 + Compose v5.6.1, swap 2 GB, utente `deploy`, root/password SSH disabilitati, ufw 22/80/443, fail2ban attivo |
-| 2 | DNS e reverse proxy | `DONE (temporaneo)` — Caddy + TLS Let's Encrypt attivi su `app./mcp.195.231.79.221.sslip.io` (hostname temporanei). Passaggio a `app./mcp.aethersy.com` `BLOCKED: input #6` (account Vercel limitato) |
-| 3 | Deploy stack Activepieces | `DONE (temporaneo)` — stack up e healthy; smoke test OK su hostname sslip.io |
-| 4 | Primo accesso e chiusura signup | `NOTE` — stack raggiungibile via hostname temporaneo; chiusura signup da fare |
+| 2 | DNS e reverse proxy | `DONE` — dominio **aethersy.online** (GoDaddy); Caddy + Let's Encrypt attivi su `app.`, `mcp.`, apex e `www` (apex/www → 301 su `app.`) |
+| 3 | Deploy stack Activepieces | `DONE` — stack up e healthy; smoke test OK su `https://app.aethersy.online` |
+| 4 | Primo accesso e chiusura signup | `NOTE` — stack raggiungibile; creazione admin e chiusura signup da fare |
 | 5 | Provider AI (OpenRouter/Venice) | `NOTE` — chiavi testate (OpenRouter ok, Venice senza credito), config UI `BLOCKED: input #1/#2` |
 | 6 | Slack | `BLOCKED: input #1/#5` |
 | 7 | Endpoint MCP | `BLOCKED: input #1` |
@@ -101,6 +101,14 @@ Limiti confermati (default upstream, ora espliciti in `.env.example`): `AP_WEBHO
 - **Prossimo passo:** Fase 2 (record A su Vercel + Caddy TLS).
 
 ### Fase 2 — DNS e reverse proxy
+- **Esito:** `DONE` — dominio definitivo **`aethersy.online`** (GoDaddy), TLS Let's Encrypt attivo su `app.`, `mcp.`, apex e `www`.
+- **Dominio definitivo (27/10/2026):** l'utente ha registrato **`aethersy.online` su GoDaddy** (registrato 27/10/2026 20:23 UTC, scadenza 27/10/2027, NS `ns59/ns60.domaincontrol.com`), abbandonando `aethersy.com` (bloccato su Vercel). Record creati: **A** `@`, `app`, `mcp` → `195.231.79.221` (TTL 600); `www` = CNAME su apex. Nessun CAA → nessun vincolo di CA.
+- **Caddyfile ristrutturato:** snippet riusabili `(app_proxy)` e `(mcp_proxy)`; blocchi `{$APP_DOMAIN}`, `{$MCP_DOMAIN}`, `{$APEX_DOMAIN}` (301 → app) e `www.{$APEX_DOMAIN}` (301 → app); mantenuti i blocchi `{$APP_DOMAIN_LEGACY}`/`{$MCP_DOMAIN_LEGACY}` (sslip.io) come rete di sicurezza durante il passaggio. Config validata con `caddy validate` e formattata con `caddy fmt`.
+- **TLS:** certificati emessi per `app.aethersy.online`, `mcp.aethersy.online`, `aethersy.online`, `www.aethersy.online` (issuer Let's Encrypt).
+- **Acceptance verificata:** `https://app.aethersy.online/api/v1/health` → `{"status":"Healthy"}`; `https://mcp.aethersy.online/mcp` → **405** (atteso senza token), `/` su mcp → 404; `https://aethersy.online/` → **301** verso `https://app.aethersy.online/`; `scripts/04-smoke-test.sh` → **SMOKE TEST OK**.
+- **Nota:** il resolver DNS locale Windows può mantenere in cache la risposta NXDOMAIN del primo minuto; `ipconfig /flushdns` risolve. La risoluzione pubblica (DoH Google/Cloudflare) e i nameserver autoritativi GoDaddy sono corretti.
+
+#### Storico: Fase 2 su hostname temporaneo (sslip.io)
 - **Esito:** `DONE (temporaneo)` — TLS attivo su hostname `sslip.io`; `BLOCKED: input #6` per il dominio reale.
 - **Contesto (27/10/2026):** l'account Vercel è **limitato** (profilo accessibile ma deploy e **creazione record DNS bloccati**). Il dominio `aethersy.com` è registrato **tramite Vercel** (NS `ns1/ns2.vercel-dns.com`) e ha un record **wildcard `* ALIAS cname.vercel-dns-016.com`** che instrada tutti i sottodomini (`app`, `mcp`, `www`) su Vercel (`216.150.x.x`). Il CAA live autorizza Let's Encrypt (`0 issue "letsencrypt.org"`, `pki.goog`, `sectigo.com`), quindi Caddy può emettere TLS. Non essendo possibile creare i record A in Vercel, si è scelta la **strategia C**: hostname temporanei **`sslip.io`** (che risolvono sull'IP del VPS) per costruire e collaudare l'intero stack, con passaggio al dominio reale a una sola variabile.
 - **Implementazione:**
@@ -122,8 +130,8 @@ Limiti confermati (default upstream, ora espliciti in `.env.example`): `AP_WEBHO
 - **Nota:** `deploy` non è nel gruppo `docker`; i comandi docker sul VPS richiedono `sudo` (nessuna password, come da hardening).
 
 ### Fase 4 — Primo accesso e chiusura registrazioni
-- **Esito:** `BLOCKED: input #1/#2`.
-- **Piano:** aprire il primo account admin su `https://app.aethersy.com`, poi chiudere le registrazioni. `AP_SIGN_UP_ENABLED` **non esiste**: usare Platform Admin (`/platform`) e/o Turnstile + ZeroBounce. Salvare le credenziali admin in un gestore password, non nel repo.
+- **Esito:** `NOTE` — stack raggiungibile su `https://app.aethersy.online`; creazione admin da fare.
+- **Piano:** aprire il primo account admin su `https://app.aethersy.online`, poi chiudere le registrazioni. `AP_SIGN_UP_ENABLED` **non esiste**: usare Platform Admin (`/platform`) e/o Turnstile + ZeroBounce. Salvare le credenziali admin in un gestore password, non nel repo.
 
 ### Fase 5 — Provider AI (OpenRouter + Venice)
 - **Esito:** `NOTE` — chiavi testate live il 27/10/2026, configurazione UI `BLOCKED: input #1/#2`.

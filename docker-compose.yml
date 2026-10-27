@@ -18,8 +18,11 @@ services:
       - "443:443"
     environment:
       - ACME_EMAIL=${ACME_EMAIL}
-      - APP_DOMAIN=${APP_DOMAIN:-app.aethersy.com}
-      - MCP_DOMAIN=${MCP_DOMAIN:-mcp.aethersy.com}
+      - APP_DOMAIN=${APP_DOMAIN:-app.aethersy.online}
+      - MCP_DOMAIN=${MCP_DOMAIN:-mcp.aethersy.online}
+      - APEX_DOMAIN=${APEX_DOMAIN:-aethersy.online}
+      - APP_DOMAIN_LEGACY=${APP_DOMAIN_LEGACY:-app.195.231.79.221.sslip.io}
+      - MCP_DOMAIN_LEGACY=${MCP_DOMAIN_LEGACY:-mcp.195.231.79.221.sslip.io}
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./caddy/data:/data

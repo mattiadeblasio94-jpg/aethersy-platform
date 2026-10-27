@@ -1,25 +1,28 @@
 # Caddyfile — reverse proxy + TLS per aethersy
 #
-# Due hostname pubblici (parametrizzati via .env, così il passaggio da
-# hostname temporaneo a dominio reale è una sola variabile):
-#   {$APP_DOMAIN}  -> app Activepieces (UI + API + webhook)
-#   {$MCP_DOMAIN}  -> solo le route MCP/ OAuth
+# Hostname pubblici (tutti parametrizzati via .env):
+#   {$APP_DOMAIN}          -> app Activepieces (UI + API + webhook)
+#   {$MCP_DOMAIN}          -> solo le route MCP / OAuth
+#   {$APEX_DOMAIN}         -> redirect 301 verso APP_DOMAIN
+#   www.{$APEX_DOMAIN}     -> redirect 301 verso APP_DOMAIN
 #
-# Default (docker-compose.yml): app.aethersy.com / mcp.aethersy.com.
-# Temporaneo (DNS bloccato): app.195.231.79.221.sslip.io / mcp.195.231.79.221.sslip.io
+# I due blocchi "legacy" servono solo durante la transizione da hostname
+# temporaneo (sslip.io) al dominio definitivo: mantengono attivo il vecchio
+# URL finché il DNS del nuovo dominio non è propagato. Si possono rimuovere
+# (insieme a APP_DOMAIN_LEGACY/MCP_DOMAIN_LEGACY in compose/.env) appena il
+# dominio reale risponde.
 #
-# Entrambi puntano allo stesso container `app` (porta interna 80).
+# Tutti gli hostname puntano allo stesso container `app` (porta interna 80).
 # Activepieces riconosce le richieste MCP dall'hostname, quindi l'header
 # Host pubblico viene preservato (vedi header_up Host {host}).
-
 {
 	email {$ACME_EMAIL}
 }
 
 # -----------------------------------------------------------------------------
-# App: UI, API, webhook, e la consent screen MCP (/mcp-authorize).
+# Snippet: inoltro generico verso l'app (UI, API, webhook, consent screen MCP).
 # -----------------------------------------------------------------------------
-{$APP_DOMAIN} {
+(app_proxy) {
 	encode zstd gzip
 
 	# Consenti upload fino a 25 MB (default AP_MAX_FILE_SIZE_MB / webhook payload).
@@ -35,10 +38,10 @@
 }
 
 # -----------------------------------------------------------------------------
-# MCP: solo le route documentate. Tutto il resto risponde 404.
+# Snippet: solo le route documentate MCP/OAuth. Tutto il resto risponde 404.
 # Riferimento: docs Activepieces -> "Serving MCP from its own hostname".
 # -----------------------------------------------------------------------------
-{$MCP_DOMAIN} {
+(mcp_proxy) {
 	encode zstd gzip
 
 	# Match esatto: /mcp e /mcp/platform.
@@ -91,4 +94,40 @@
 	handle {
 		respond "Not found" 404
 	}
+}
+
+# -----------------------------------------------------------------------------
+# App: UI, API, webhook, e la consent screen MCP (/mcp-authorize).
+# -----------------------------------------------------------------------------
+{$APP_DOMAIN} {
+	import app_proxy
+}
+
+# -----------------------------------------------------------------------------
+# MCP: hostname dedicato.
+# -----------------------------------------------------------------------------
+{$MCP_DOMAIN} {
+	import mcp_proxy
+}
+
+# -----------------------------------------------------------------------------
+# Apex e www: nessun sito, solo redirect verso l'app.
+# -----------------------------------------------------------------------------
+{$APEX_DOMAIN} {
+	redir https://{$APP_DOMAIN}{uri} permanent
+}
+
+www.{$APEX_DOMAIN} {
+	redir https://{$APP_DOMAIN}{uri} permanent
+}
+
+# -----------------------------------------------------------------------------
+# TRANSITORIO: hostname temporanei sslip.io. Rimuovere dopo il passaggio.
+# -----------------------------------------------------------------------------
+{$APP_DOMAIN_LEGACY} {
+	import app_proxy
+}
+
+{$MCP_DOMAIN_LEGACY} {
+	import mcp_proxy
 }
