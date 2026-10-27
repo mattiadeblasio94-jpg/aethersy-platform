@@ -19,7 +19,7 @@
 | 7 | Endpoint MCP | `DONE` — hostname `mcp.aethersy.online` esposto via Caddy; discovery OAuth + handshake verificati (401 con `WWW-Authenticate` → resource metadata) |
 | 8 | Branding | `BLOCKED` — richiede decisione utente su nome/logo/colori (non è un input infrastrutturale) |
 | 9 | Backup e monitoraggio | `DONE` — `backup.sh` corretto (rotazione robusta a glob vuoto) ed eseguito; **restore testato** su DB temporaneo (83 tabelle, dati coerenti) |
-| 10 | Review finale e consegna | `IN CORSO` — audit finale |
+| 10 | Review finale e consegna | `IN CORSO` — audit infrastrutturale **completato** (tutte le verifiche OK); restano azioni utente (rotazione credenziali, backup segreti offline) e le fasi 6/8 |
 
 ## Verifica §11 — nomi variabili, versioni, route
 
