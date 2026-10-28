@@ -57,10 +57,13 @@ function generateTheme({ primaryColor, fullLogoUrl, favIconUrl, logoIconUrl, web
     };
 }
 exports.defaultTheme = generateTheme({
-    primaryColor: '#6e41e2',
+    primaryColor: '#00D4FF',
     websiteName: 'Aethersy',
-    fullLogoUrl: '/brand/full-logo.svg',
+    fullLogoUrl: '/brand/full-logo.png',
     favIconUrl: '/favicon.ico',
-    logoIconUrl: '/brand/logo.svg',
+    logoIconUrl: '/brand/logo.png',
+    themeColors: {
+        'blue-link': '#4DEEFF',
+    },
 });
 //# sourceMappingURL=theme.js.map

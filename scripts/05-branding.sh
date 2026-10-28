@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# 05-branding.sh — Fase 8
+# 05-branding.sh — Fase 8 (Aethersy)
 # Scopo: completare/verificare il branding Aethersy.
 # Prerequisiti: stack up (container `aethersy-app`), cartella `branding/` presente.
 # Effetto:
 #   - verifica che theme.js e gli asset siano montati (bind-mount, vedi compose);
-#   - patcha `index.html` (titolo + favicon.ico) in modo VERSION-AWARE, perche'
+#   - patcha `index.html` (titolo + favicon) in modo VERSION-AWARE, perche'
 #     contiene gli hash dei bundle JS/CSS che cambiano a ogni release.
 # Idempotente: rilanciabile a ogni deploy/upgrade.
 #
 # PERCHE' il patch e' necessario: la Community edition serve sempre `defaultTheme`
 # (nome "Activepieces") e ignora nome/logo/colori del DB; `index.html` e' generato
-# upstream con `<title>Activepieces</title>`. Vedi docs/phases.md, Fase 8.
+# upstream con `<title>Activepieces</title>` e favicon esterna. Vedi docs/phases.md.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -28,9 +28,14 @@ check() {
   local rc=0
   echo "==> Verifica branding in ${APP}"
   if docker exec "$APP" grep -q "websiteName: 'Aethersy'" "$THEME_DST"; then
-    echo "  theme.js: OK (websiteName Aethersy, montato)"
+    echo "  theme.js: OK (websiteName Aethersy)"
   else
     echo "  theme.js: NON applicato (bind-mount mancante?)"; rc=1
+  fi
+  if docker exec "$APP" grep -q "primaryColor: '#00D4FF'" "$THEME_DST"; then
+    echo "  palette: OK (primary #00D4FF)"
+  else
+    echo "  palette: NON aggiornata"; rc=1
   fi
   if docker exec "$APP" grep -q "<title>Aethersy</title>" "$WEB_DST/index.html"; then
     echo "  index.html: OK (title Aethersy)"
