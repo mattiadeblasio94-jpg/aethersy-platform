@@ -12,6 +12,9 @@ caddy/config/
 # Log
 *.log
 
+# Scratch / work-in-progress
+.tmp/
+
 # OS / editor
 .DS_Store
 Thumbs.db

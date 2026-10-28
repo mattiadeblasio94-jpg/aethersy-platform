@@ -12,7 +12,7 @@ if [[ ! -f .env ]]; then
   exit 1
 fi
 
-echo "==> [1/4] Controllo placeholder nei segreti"
+echo "==> [1/5] Controllo placeholder nei segreti"
 # Rifiuta i valori placeholder rimasti da .env.example.
 if grep -E '^(AP_ENCRYPTION_KEY|AP_JWT_SECRET|AP_POSTGRES_PASSWORD|AP_REDIS_PASSWORD)=.*CHANGEME' .env >/dev/null; then
   echo "ERRORE: .env contiene ancora valori 'CHANGEME'. Genera i segreti:" >&2
@@ -21,7 +21,7 @@ if grep -E '^(AP_ENCRYPTION_KEY|AP_JWT_SECRET|AP_POSTGRES_PASSWORD|AP_REDIS_PASS
   exit 1
 fi
 
-echo "==> [2/4] Controllo variabili obbligatorie"
+echo "==> [2/5] Controllo variabili obbligatorie"
 required=(AP_VERSION AP_FRONTEND_URL AP_MCP_URL AP_ENCRYPTION_KEY AP_JWT_SECRET \
           AP_POSTGRES_PASSWORD AP_REDIS_PASSWORD ACME_EMAIL)
 missing=0
@@ -33,12 +33,18 @@ for v in "${required[@]}"; do
 done
 [[ "${missing}" -eq 0 ]] || { echo "ERRORE: compila le variabili mancanti." >&2; exit 1; }
 
-echo "==> [3/4] Validazione compose"
+echo "==> [3/5] Validazione compose"
 docker compose config --quiet
 
-echo "==> [4/4] Avvio stack"
+echo "==> [4/5] Avvio stack"
 docker compose pull
 docker compose up -d
+
+echo
+echo "==> [5/5] Branding AETHERSY (Fase 8)"
+# theme.js e gli asset sono bind-mount (compose); index.html va ripatchato perche'
+# contiene gli hash dei bundle, che cambiano a ogni AP_VERSION.
+./scripts/05-branding.sh
 
 echo
 echo "Stack avviato. Stato:"

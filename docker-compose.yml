@@ -53,6 +53,16 @@ services:
         condition: service_healthy
     volumes:
       - ./cache:/usr/src/app/cache
+      # --- Fase 8: branding AETHERSY (read-only) --------------------------
+      # La Community edition ignora nome/logo/colori del DB e serve sempre
+      # `defaultTheme`. Questi bind-mount applicano il brand senza rebuild.
+      # Vedi docs/phases.md (Fase 8) e scripts/05-branding.sh.
+      - ./branding/theme.js:/usr/src/app/packages/server/api/dist/src/app/flags/theme.js:ro
+      - ./branding/web/logo.svg:/usr/src/app/dist/packages/web/logo.svg:ro
+      - ./branding/web/favicon.ico:/usr/src/app/dist/packages/web/favicon.ico:ro
+      - ./branding/web/logo-192.png:/usr/src/app/dist/packages/web/logo-192.png:ro
+      - ./branding/web/logo-180.png:/usr/src/app/dist/packages/web/logo-180.png:ro
+      - ./branding/web/brand:/usr/src/app/dist/packages/web/brand:ro
     networks:
       - aethersy
     logging:
