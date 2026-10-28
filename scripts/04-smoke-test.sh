@@ -18,6 +18,7 @@ CONSOLE_DOMAIN="${CONSOLE_DOMAIN:-console.aethersy.online}"
 FAIL=0
 ok()   { echo "    OK   - $1"; }
 bad()  { echo "    FAIL - $1"; FAIL=1; }
+warn() { echo "    WARN - $1"; }
 
 echo "==> [1/5] Container"
 for svc in app worker console postgres redis caddy; do
@@ -55,10 +56,16 @@ else
 fi
 
 echo "==> [5/5] Console pubblica (HTTPS)"
-if curl -fsS "https://${CONSOLE_DOMAIN}/api/health" >/dev/null 2>&1; then
-  ok "https://${CONSOLE_DOMAIN}/api/health"
+# Se il DNS `console` non e' ancora configurato, e' un WARN (non un FAIL):
+# evita alert Slack continui finche' l'utente non aggiunge il record A.
+if getent hosts "${CONSOLE_DOMAIN}" >/dev/null 2>&1; then
+  if curl -fsS "https://${CONSOLE_DOMAIN}/api/health" >/dev/null 2>&1; then
+    ok "https://${CONSOLE_DOMAIN}/api/health"
+  else
+    bad "https://${CONSOLE_DOMAIN}/api/health (TLS non pronto?)"
+  fi
 else
-  bad "https://${CONSOLE_DOMAIN}/api/health (record DNS \`console\` aggiunto?)"
+  warn "https://${CONSOLE_DOMAIN} non risolve (record DNS \`console\` da aggiungere) — salto"
 fi
 
 echo

@@ -15,11 +15,11 @@
 | 3 | Deploy stack Activepieces | `DONE` — stack up e healthy; smoke test OK su `https://app.aethersy.online` |
 | 4 | Primo accesso e chiusura signup | `DONE` — admin `mattiadeblasio94@gmail.com` (ADMIN, ACTIVE) su `app.aethersy.online`; registrazioni pubbliche chiuse (`AP_ALLOW_OPEN_SIGN_UP` assente → `INVITATION_ONLY_SIGN_UP`) |
 | 5 | Provider AI (OpenRouter/Venice) | `DONE` — **OpenRouter** creato via API admin, `status=active`, `enabledForChat=true`, 464 modelli; acceptance con flow reale "Ask AI" (webhook → `askAi`) → run `SUCCEEDED`, output `PONG`. Venice: chiave valida ma senza credito → non aggiunto (opzionale) |
-| 6 | Slack | `BLOCKED: input #5` — `SLACK_WEBHOOK_URL` vuoto |
+| 6 | Slack | `DONE` — webhook in `.env` VPS; alert su fallimento smoke test (cron ogni 15 min) + flow Activepieces "Slack notification" (`ENABLED`, run `SUCCEEDED`) |
 | 7 | Endpoint MCP | `DONE` — hostname `mcp.aethersy.online` esposto via Caddy; discovery OAuth + handshake verificati (401 con `WWW-Authenticate` → resource metadata) |
 | 8 | Branding | `DONE` — nome **Aethersy**, logo reale fornito dal committente; palette ufficiale (primary `#00D4FF`, glow `#4DEEFF`, secondary `#1A0F4A`, accent `#FF9F1C`, bg `#0A0518`); asset trasparenti (`logo.png`, `full-logo.png`, `favicon.ico`) + **Layer A** re-skin via design token (`brand/aethersy.css`) con dark mode orbitale; verificato live (header/logo/bottone primario/screenshot) |
 | 9 | Backup e monitoraggio | `DONE` — `backup.sh` corretto (rotazione robusta a glob vuoto) ed eseguito; **restore testato** su DB temporaneo (83 tabelle, dati coerenti) |
-| 10 | Review finale e consegna | `IN CORSO` — audit infrastrutturale **completato** (tutte le verifiche OK); restano azioni utente (rotazione credenziali, backup segreti offline) e asset brand definitivi; fase 6 in attesa di `SLACK_WEBHOOK_URL` |
+| 10 | Review finale e consegna | `IN CORSO` — audit infrastrutturale **completato** (tutte le verifiche OK); restano azioni utente (rotazione credenziali, backup segreti offline) e asset brand definitivi |
 | 11 | Aethersy Console (fusion A+B+C) | `IN CORSO` — frontend proprietario React 19 + Vite + TS + Tailwind v4 + TanStack Query + React Router + BFF Fastify con sessione httpOnly firmata, proxy `/api/ap/*` verso Activepieces e **AI Router** multimodale (selezione automatica di modelli gratuiti OpenRouter per capacità testo/immagine/audio/video). Build web+server pulite, router verificato live. **Deploy bloccato dal record DNS `console`** |
 
 ## Verifica §11 — nomi variabili, versioni, route
@@ -156,8 +156,12 @@ Limiti confermati (default upstream, ora espliciti in `.env.example`): `AP_WEBHO
 - **Nota admin API:** gli endpoint `/v1/ai-providers` sono `platformAdminOnly` e richiedono un principal USER con `platformRole=ADMIN`. In assenza di API key (feature a pagamento), il provider è stato inserito con un JWT admin firmato con `AP_JWT_SECRET` (uso una-tantum, token non persistito).
 
 ### Fase 6 — Slack
-- **Esito:** `BLOCKED: input #5`.
-- **Piano:** creare l'app Slack, salvare il webhook in `.env` (`SLACK_WEBHOOK_URL`). Flow di notifica + alert su `04-smoke-test.sh` in cron.
+- **Esito:** `DONE` (28/10/2026).
+- **Webhook:** creato un'app Slack con **Incoming Webhook** e salvato `SLACK_WEBHOOK_URL` nel `.env` del VPS (riga 125, `chmod 600`). Test live: `POST` al webhook → **HTTP 200 `ok`** (messaggio recapitato sul canale).
+- **Deliverable (a) — alert di sistema:** `scripts/06-smoke-alert.sh` esegue `04-smoke-test.sh` e invia su Slack **solo in caso di fallimento** (log in `/tmp/aethersy-smoke.log`). Installato in cron ogni 15 min (sostituisce il vecchio job che loggava soltanto): `*/15 * * * * ... ./scripts/06-smoke-alert.sh >> backups/smoke.log`. Percorso di fallimento verificato end-to-end (smoke forzato a fallire → Slack HTTP 200 + exit 1; a riposo → exit 0, nessun messaggio). Helper riutilizzabile: `scripts/06-slack-notify.sh "<msg>" [emoji]`.
+- **Deliverable (b) — flow Activepieces:** `scripts/06-slack-flow.sh` crea/pubblica/abilita il flow **"Slack notification"** (id `frmFofQ3jOzknIpPNbMX7`, `ENABLED`): trigger *Catch Webhook* (`piece-webhook` 0.1.42) → azione HTTP `send_request` (`piece-http` 0.13.0) in `POST` verso `SLACK_WEBHOOK_URL`, `authType=NONE`, `body_type=json`, `body.data.text`. Trigger via `POST /api/v1/webhooks/<flowId>` → run **SUCCEEDED**. Script idempotente (riusa il flow esistente via lookup su `flow_version.displayName`).
+- **Nota tecnica:** il piece Slack nativo (`@activepieces/piece-slack`) richiede una connessione **OAuth**, non accetta il webhook in ingresso; per notifiche webhook si usa `piece-http`. Per il `body` JSON il prop è annidato in `body.data` (non `body.text`): un payload piatto produce `invalid_payload` (400) da Slack.
+- **`04-smoke-test.sh`:** il check della Console pubblica è ora **WARN** (non FAIL) se `console.aethersy.online` non risolve, per evitare alert continui finché l'utente non aggiunge il record DNS.
 
 ### Fase 7 — Endpoint MCP
 - **Esito:** `DONE` (27/10/2026).
@@ -198,7 +202,7 @@ Limiti confermati (default upstream, ora espliciti in `.env.example`): `AP_WEBHO
 - **Esito:** `IN CORSO` — audit infrastrutturale completato (27/10/2026).
 - **Verifiche eseguite sul VPS (tutte OK):** ufw default-deny con allow 22/80/443; fail2ban attivo; `sshd -T` → `permitrootlogin no`/`passwordauthentication no`/`maxauthtries 3`; `unattended-upgrades` active; swap 2 GB; porte in ascolto solo 22/80/443 (5432/6379 assenti); `.env` `-rw------- deploy`; `docker compose config --quiet` senza warning; immagini **pinnate** (`caddy:2.8-alpine`, `pgvector/pgvector:0.8.0-pg14`, `redis:7.0.7`, `activepieces:${AP_VERSION}`=`0.92.3-hotfix.1`); log driver `json-file` `max-size=10m`/`max-file=5`; nessun `network_mode: host` né mount di `docker.sock`.
 - **Audit segreti:** `.env`/`.env.secrets` mai committati (fuori da `git ls-files`); nessuna chiave reale (`sk-…`, `ghp_…`, webhook Slack, PEM) nei file tracciati o nella history. **Defect trovato e corretto:** `docs/security.md` conteneva la password SSH in chiaro → **redatta**; il valore resta nella history git locale (repo **senza remote**, non pubblicato) e va comunque **ruotato** (§6.1 di `docs/security.md`).
-- **Prossimi passi:** (1) rotazione credenziali esposte in chat (azione utente); (2) backup offline dei segreti critici; (3) collegare un client MCP reale per chiudere l'acceptance di Fase 7; (4) ~~decisione branding~~ (Fase 8 **DONE** 28/10/2026 — logo e palette definitivi dal committente, applicati e verificati live); (5) `SLACK_WEBHOOK_URL` (Fase 6).
+- **Prossimi passi:** (1) rotazione credenziali esposte in chat (azione utente); (2) backup offline dei segreti critici; (3) collegare un client MCP reale per chiudere l'acceptance di Fase 7; (4) ~~decisione branding~~ (Fase 8 **DONE** 28/10/2026 — logo e palette definitivi dal committente, applicati e verificati live); (5) ~~`SLACK_WEBHOOK_URL`~~ (Fase 6 **DONE** 28/10/2026).
 
 ### Fase 11 — Aethersy Console (fusion A+B+C)
 - **Esito:** `IN CORSO` (28/10/2026). Piattaforma proprietaria "Aethersy Console" costruita **in aggiunta** ad Activepieces (che resta engine, admin e fallback). L'obiettivo è un'app brandizzata Aethersy con un **AI Router** che sceglie automaticamente il modello per capacità, preferendo i gratuiti.

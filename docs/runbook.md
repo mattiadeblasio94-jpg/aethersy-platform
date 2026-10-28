@@ -152,6 +152,33 @@ curl -s https://mcp.aethersy.online/.well-known/oauth-protected-resource/mcp | j
 Troubleshooting: `/mcp` risponde 404 pubblico → Caddy non instrada (verifica `AP_MCP_URL` e le route nel Caddyfile; l'hostname MCP deve differire da `AP_FRONTEND_URL`). Il consent screen va servito su `AP_FRONTEND_URL`, quindi il dominio MCP **non** deve essere lo stesso dell'app.
 
 
+## 6.3 Notifiche Slack (Fase 6)
+
+Webhook in `.env`: `SLACK_WEBHOOK_URL` (riga ~125, `chmod 600`). Gli script `06-slack-notify.sh` / `06-smoke-alert.sh` leggono la env a ogni esecuzione (nessun riavvio). Il **flow** Activepieces invece ha l'URL salvato nello step: dopo un cambio va ri-eseguito `./scripts/06-slack-flow.sh`.
+
+**Test rapido:**
+
+```bash
+./scripts/06-slack-notify.sh "Messaggio di prova" ":satellite:"
+```
+
+**Alert automatico su fallimento smoke test** (cron ogni 15 min, solo su FAIL):
+
+```bash
+./scripts/06-smoke-alert.sh   # esce 0 se tutto ok (silenzioso); Slack + exit 1 se fallisce
+```
+
+**Flow Activepieces "Slack notification"** (`frmFofQ3jOzknIpPNbMX7`, `ENABLED`): webhook → HTTP POST verso `SLACK_WEBHOOK_URL`. Ricrearlo/aggiornarlo (idempotente):
+
+```bash
+./scripts/06-slack-flow.sh
+```
+
+Trigger manuale: `curl -X POST https://app.aethersy.online/api/v1/webhooks/frmFofQ3jOzknIpPNbMX7 -H 'Content-Type: application/json' -d '{"test":1}'`.
+
+> Nota: il piece Slack nativo richiede OAuth (non accetta webhook in ingresso) → si usa `piece-http` con `body_type=json` e payload annidato in `body.data`.
+
+
 ## 7. Backup
 
 ```bash

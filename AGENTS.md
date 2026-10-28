@@ -113,7 +113,8 @@ aethersy-infra/
     ├── runbook.md             # operazioni quotidiane
     ├── security.md            # modello di minaccia + hardening
     ├── phases.md              # log di esecuzione fasi
-    └── restore.md             # procedura di ripristino testata
+    ├── restore.md             # procedura di ripristino testata
+    └── agents.md              # roster degli agenti (droid) + guida alla delega
 ```
 
 Tutti gli script: `set -euo pipefail`, idempotenti, con `usage()` se serve un argomento.
@@ -126,7 +127,7 @@ Tutti gli script: `set -euo pipefail`, idempotenti, con `usage()` se serve un ar
 | 2 | Accesso SSH iniziale (utente + chiave o password) | pannello Aruba | 0 — **ricevuto e funzionante**: VPS Aruba `195.231.79.221`; chiave `aethersy_deploy_ed25519` installata; utente `deploy` (root/password disabilitati dopo hardening) |
 | 3 | Chiavi provider AI: OpenRouter (primario) e/o Venice | openrouter.ai/keys, venice.ai/settings/api | 5 — **ricevuto**: OpenRouter configurato e funzionante; Venice valido ma senza credito |
 | 4 | Email per TLS + alert | — | 2 — **ricevuto** |
-| 5 | Webhook Slack (o workspace dove installare l'app) | api.slack.com | 6 — **mancante** (`SLACK_WEBHOOK_URL` vuoto) |
+| 5 | Webhook Slack (o workspace dove installare l'app) | api.slack.com | 6 — **ricevuto**: `SLACK_WEBHOOK_URL` in `.env` VPS; alert cron + flow "Slack notification" attivi |
 | 6 | Accesso DNS (pannello **Vercel** / token API) | vercel.com dashboard → Domains | 2 — **superato**: dominio su **GoDaddy** (`aethersy.online`), record A `app.`/`mcp.`/apex/www → `195.231.79.221` attivi |
 
 Se un input manca, esegui tutte le fasi possibili e marca le altre come `BLOCKED: input #N` in `docs/phases.md`.
