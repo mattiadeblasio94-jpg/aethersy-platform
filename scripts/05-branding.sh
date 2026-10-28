@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 05-branding.sh — Fase 8
-# Scopo: completare/verificare il branding AETHERSY.
+# Scopo: completare/verificare il branding Aethersy.
 # Prerequisiti: stack up (container `aethersy-app`), cartella `branding/` presente.
 # Effetto:
 #   - verifica che theme.js e gli asset siano montati (bind-mount, vedi compose);
@@ -27,13 +27,13 @@ usage() {
 check() {
   local rc=0
   echo "==> Verifica branding in ${APP}"
-  if docker exec "$APP" grep -q "websiteName: 'AETHERSY'" "$THEME_DST"; then
-    echo "  theme.js: OK (websiteName AETHERSY, montato)"
+  if docker exec "$APP" grep -q "websiteName: 'Aethersy'" "$THEME_DST"; then
+    echo "  theme.js: OK (websiteName Aethersy, montato)"
   else
     echo "  theme.js: NON applicato (bind-mount mancante?)"; rc=1
   fi
-  if docker exec "$APP" grep -q "<title>AETHERSY</title>" "$WEB_DST/index.html"; then
-    echo "  index.html: OK (title AETHERSY)"
+  if docker exec "$APP" grep -q "<title>Aethersy</title>" "$WEB_DST/index.html"; then
+    echo "  index.html: OK (title Aethersy)"
   else
     echo "  index.html: NON patchato"; rc=1
   fi
@@ -61,7 +61,7 @@ python3 - "$tmp" <<'PY'
 import pathlib, re, sys
 p = pathlib.Path(sys.argv[1])
 html = p.read_text()
-html = re.sub(r"<title>.*?</title>", "<title>AETHERSY</title>", html, count=1)
+html = re.sub(r"<title>.*?</title>", "<title>Aethersy</title>", html, count=1)
 html = re.sub(
     r'<link rel="icon" type="image/x-icon" href="[^"]*">',
     '<link rel="icon" type="image/x-icon" href="/favicon.ico">',

@@ -41,7 +41,7 @@ docker compose pull
 docker compose up -d
 
 echo
-echo "==> [5/5] Branding AETHERSY (Fase 8)"
+echo "==> [5/5] Branding Aethersy (Fase 8)"
 # theme.js e gli asset sono bind-mount (compose); index.html va ripatchato perche'
 # contiene gli hash dei bundle, che cambiano a ogni AP_VERSION.
 ./scripts/05-branding.sh

@@ -1,4 +1,4 @@
-"""Genera gli asset PNG/ICO placeholder del brand AETHERSY.
+"""Genera gli asset PNG/ICO placeholder del brand Aethersy.
 
 Placeholder: l'utente sostituira' logo.svg / favicon.ico con i file definitivi.
 Uso: python scripts/gen_brand_assets.py

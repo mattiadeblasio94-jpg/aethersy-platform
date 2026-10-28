@@ -58,7 +58,7 @@ function generateTheme({ primaryColor, fullLogoUrl, favIconUrl, logoIconUrl, web
 }
 exports.defaultTheme = generateTheme({
     primaryColor: '#6e41e2',
-    websiteName: 'AETHERSY',
+    websiteName: 'Aethersy',
     fullLogoUrl: '/brand/full-logo.svg',
     favIconUrl: '/favicon.ico',
     logoIconUrl: '/brand/logo.svg',
