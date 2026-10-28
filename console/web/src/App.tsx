@@ -1,3 +1,4 @@
+import { Suspense, lazy } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { Protected } from "./components/Protected";
@@ -11,29 +12,63 @@ import Assets from "./pages/Assets";
 import Pipeline from "./pages/Pipeline";
 import Leads from "./pages/Leads";
 import Credits from "./pages/Credits";
+import { APP_ROUTES } from "./preview/pages/routes";
+
+// Layer "Anteprima": porting delle pagine di platform/ (dati demo, nessun
+// endpoint nuovo). Montato sotto /preview dentro la sessione reale della Console.
+const PreviewLayout = lazy(() =>
+  import("./preview/PreviewLayout").then((m) => ({ default: m.PreviewLayout })),
+);
+const PreviewDashboard = lazy(() => import("./preview/pages/Dashboard"));
+const PreviewOnboarding = lazy(() => import("./preview/pages/Onboarding"));
+
+function Fallback() {
+  return <div className="p-8 text-[--color-muted]">Caricamento…</div>;
+}
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/login" element={<Login />} />
-      <Route
-        element={
-          <Protected>
-            <Layout />
-          </Protected>
-        }
-      >
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/flows" element={<Flows />} />
-        <Route path="/runs" element={<Runs />} />
-        <Route path="/connections" element={<Connections />} />
-        <Route path="/assets" element={<Assets />} />
-        <Route path="/pipeline" element={<Pipeline />} />
-        <Route path="/leads" element={<Leads />} />
-        <Route path="/credits" element={<Credits />} />
-        <Route path="/ai" element={<AiCenter />} />
-      </Route>
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <Suspense fallback={<Fallback />}>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route
+          element={
+            <Protected>
+              <Layout />
+            </Protected>
+          }
+        >
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/flows" element={<Flows />} />
+          <Route path="/runs" element={<Runs />} />
+          <Route path="/connections" element={<Connections />} />
+          <Route path="/assets" element={<Assets />} />
+          <Route path="/pipeline" element={<Pipeline />} />
+          <Route path="/leads" element={<Leads />} />
+          <Route path="/credits" element={<Credits />} />
+          <Route path="/ai" element={<AiCenter />} />
+        </Route>
+
+        {/* --- Anteprima (dati demo, porting di platform/) ------------------- */}
+        <Route
+          path="/preview"
+          element={
+            <Protected>
+              <PreviewLayout />
+            </Protected>
+          }
+        >
+          <Route index element={<Navigate to="/preview/dashboard" replace />} />
+          <Route path="dashboard" element={<PreviewDashboard />} />
+          <Route path="onboarding" element={<PreviewOnboarding />} />
+          {APP_ROUTES.map((spec) => {
+            const Page = spec.component;
+            return <Route key={spec.path} path={spec.path} element={<Page />} />;
+          })}
+        </Route>
+
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Suspense>
   );
 }

@@ -18,6 +18,8 @@ console/web/node_modules/
 console/server/node_modules/
 console/web/dist/
 console/server/dist/
+platform/node_modules/
+platform/dist/
 *.tsbuildinfo
 
 # Scratch / work-in-progress

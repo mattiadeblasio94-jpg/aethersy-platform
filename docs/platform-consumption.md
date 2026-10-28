@@ -873,6 +873,7 @@ testing automatico sui creative, attribution avanzata, SLA e supporto enterprise
 | QA end-to-end (P0.7) | **fatto** — `console/server/tools/test-e2e-pilot.mjs`, **opt-in** (`E2E_CONFIRM=1`) e contro un DB temporaneo (`CONSOLE_PGDATABASE=console_e2e`), altrimenti esce con SKIP. Copre l'intero percorso pilota su Postgres reale: migrazioni idempotenti (applicate la prima volta, non la seconda), provisioning tenant + top-up + saldo, apertura run (6 task) con rifiuto dell'approvazione in `draft`, `orchestrateRun` con asset sintetici e addebito `flow_run`, `flow_run_id` sui task, asset v1 `draft`, `runUsageSummary`, HITL sugli asset (decisione su `draft` rifiutata, submit, doppio submit rifiutato, approva, `approvedVersion`), approvazione run, consegna (1 asset consegnato, doppia consegna rifiutata), notifica di consegna, pacchetto (`aethersy.run-package/v1`, solo deliverable approvati, nome deterministico), round-trip dei segreti, credenziali di integrazione (salvataggio senza `secret_enc` in lista, tenant > fallback di stack, revoca), lead + notifica + `markLeadNotified` + testo, funnel e conteggi/filtri, isolamento fra tenant, ultimi eventi di consumo. **Eseguito sul VPS: 41/41 OK** | esecuzione in CI con DB effimero |
 | Test | **fatto** — `npm run test:metering` (**42** asserzioni pure: prezzi + pattern + catalogo/stati pipeline + macchina a stati asset + macchina a stati lead + **guardrail sullo schema**: nessuna keyword riservata come colonna, `schema.ts` allineato a `schema.sql`) | test di integrazione con DB reale nella CI |
 | Backup off-site (P0.7) | **fatto** — `scripts/offsite-pull.ps1` (lato PC): pull incrementale via `ssh`/`scp` con la chiave esistente verso `C:\Users\PC\aethersy-offsite`, verifica `sha256` prima/dopo, `manifest.tsv`, retention locale (14 daily / 8 weekly), log; task pianificato `Aethersy Offsite Backup` alle 04:15. Verificato: 6 file copiati, secondo giro 0 copiati / 6 invariati | cifratura dei dump prima del trasferimento |
+| Layer Anteprima (P0.8) | **fatto** - porting di `platform/` in `console/web/src/preview/` (stesso SPA, nessun endpoint nuovo): token in namespace isolato `pv-*` (i nomi `primary`/`secondary` sono **invertiti** fra i due progetti), alias `@pv`, tema **dark-only**, rotte sotto `/preview/*` dentro `Protected` + sessione reale della Console, banner "Anteprima — dati demo", voce di nav "Piattaforma (demo)"; dati da `preview/mocks` | la sostituzione pagina-per-pagina dei mock con gli endpoint reali (`/api/ap/*`, `/api/pipeline/*`, `/api/ai/*`) |
 | Snapshot listini | **solo seed** statico (price book v1) | cron di aggiornamento `price_book` + `fx_usd_eur` |
 
 ---
@@ -882,5 +883,7 @@ testing automatico sui creative, attribution avanzata, SLA e supporto enterprise
 asset: versioning, macchina a stati, approvazione in Console) e P0.5 (Console: run di pipeline +
 display crediti/consumo) sono implementati e verificati. P0.6 (lead: webhook + macchina a stati +
 canale Slack + export pacchettizzato + UI Console) è implementato e verificato. P0.7 (QA end-to-end
-del percorso pilota su DB reale + backup off-site automatico) è implementato e verificato sul VPS. Le
-voci `[DA VERIFICARE]` restanti vanno risolte prima della fase di build.*
+del percorso pilota su DB reale + backup off-site automatico) è implementato e verificato sul VPS.
+P0.8 (porting del frontend `platform/` dentro la Console come layer di anteprima a dati demo) è
+implementato e verificato in build. Le voci `[DA VERIFICARE]` restanti vanno risolte prima della
+fase di build.*

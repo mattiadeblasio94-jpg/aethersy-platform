@@ -45,6 +45,16 @@ export function Layout() {
           ))}
         </nav>
 
+        <div className="mt-6 border-t border-[--color-border] pt-4">
+          <div className="px-2 pb-2 text-[11px] uppercase tracking-widest text-[--color-muted]">
+            Anteprima
+          </div>
+          <NavLink to="/preview" className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}>
+            <span className="w-4 text-center text-[--color-accent]">◇</span>
+            Piattaforma (demo)
+          </NavLink>
+        </div>
+
         <div className="mt-auto flex flex-col gap-3 px-2">
           <div className="text-xs text-[--color-muted]">
             <div className="truncate text-white">{user?.email}</div>

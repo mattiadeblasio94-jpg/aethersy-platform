@@ -228,7 +228,7 @@ Limiti confermati (default upstream, ora espliciti in `.env.example`): `AP_WEBHO
 - **Prossimi passi:** (1) Fase 10 (rotazione segreti esposti in chat + backup offline dei due segreti critici); (2) ~~collegare un client MCP reale~~ (Fase 7 acceptance **CHIUSA** 28/10/2026 — handshake reale, 42 tool).
 
 ### Fase 12 — Piattaforma a consumo (P0): pipeline + asset + Console + lead/canale (P0.6)
-- **Esito:** `IN CORSO` (28/10/2026; P0.7 chiuso, resta P0.8). Trasformazione della piattaforma verso un modello **pay-per-use**: nucleo di metering/billing (P0.1/P0.2), pipeline multi-stadio (P0.3), **libreria asset con versioning + approvazione** (P0.4), **Console run/crediti** (P0.5), **lead webhook + canale Slack + export pacchettizzato** (P0.6) e **QA end-to-end + backup off-site** (P0.7, sezione dedicata sotto). Documento di progetto e delta implementativo: [`docs/platform-consumption.md`](platform-consumption.md) (§9).
+- **Esito:** `DONE` (28/10/2026; P0.1–P0.8 chiusi). Trasformazione della piattaforma verso un modello **pay-per-use**: nucleo di metering/billing (P0.1/P0.2), pipeline multi-stadio (P0.3), **libreria asset con versioning + approvazione** (P0.4), **Console run/crediti** (P0.5), **lead webhook + canale Slack + export pacchettizzato** (P0.6) e **QA end-to-end + backup off-site** (P0.7, sezione dedicata sotto). Documento di progetto e delta implementativo: [`docs/platform-consumption.md`](platform-consumption.md) (§9).
 - **Nucleo (P0.1/P0.2, commit `24c1d1f`):** schema `metering` idempotente (`usage_event`, `ledger`, `price_book`, `tenant`, …), repo `reserve`/`settle`/`top-up`, motore di prezzo (markup 15000 bps = margine 60%, `credit_unit = 0.0001 €`), guard con clamp-to-zero + degrade + `402`; generazione Venice metrata (`img_out`/`tts`/`vid_out`).
 - **Pipeline (P0.3, commit `94f65a9`):** schema `pipeline` (`pipeline_run`, `agent_task`, `asset`, `integration_credential`, `lead`), catalogo puro (`STAGES` brand/website/content/social, macchina a stati del run), orchestratore con esecutore **iniettato** (`TaskExecutor`) e **HITL** obbligatorio su `approved→delivered`, segreti integrazione AES-256-GCM (`CONSOLE_SECRETS_KEY`), metering `flow_run` (1 × 0.0020 €/task).
 - **Libreria asset (P0.4):** `pipeline/catalog.ts` — macchina a stati asset (`draft → in_review → approved → delivered`; `rejected` ripresentabile) con `canTransitionAsset`/`isAssetDecidable`/`isAssetAccepted`/`assetFamilyKey`/`approvedVersion`. `pipeline/repo.ts` — `transitionAsset` (con `SELECT … FOR UPDATE`), `listAssetVersions`, `listAssetFamilies` (una riga per deliverable run/kind/name con `latest_version`, `approved_version`, `latest_asset_id`, conteggio revisioni), `deliverRunAssets`; `deliverRun` ora marca `delivered` gli asset approvati. Rotte: `GET /api/pipeline/assets/families`, `GET /api/pipeline/assets/:assetId/versions`, `POST …/:assetId/submit`, `POST …/:assetId/decide`.
@@ -311,3 +311,44 @@ Limiti confermati (default upstream, ora espliciti in `.env.example`): `AP_WEBHO
 - **Residuo:** cifratura (gpg/BitLocker) dei dump prima della copia off-site — oggi arrivano in chiaro
   sul PC (vedi avvertenza in `docs/runbook.md` §7.1); E2E in CI con DB effimero; alert dedicato sul
   fallimento del pull off-site (oggi solo log locale + task scheduler).
+
+### Fase 12 — P0.8: layer "Anteprima" (porting di `platform/` in Console)
+- **Esito:** `DONE` (28/10/2026). Il frontend standalone `platform/` (React 18 + Tailwind 3, SPA demo
+  alimentata solo da `src/mocks/*`) è portato **dentro** la Console come layer di anteprima a dati
+  demo: una sola app reale, nessun secondo deploy, nessun endpoint nuovo inventato.
+- **Decisione (AskUser):** migrazione **pagina per pagina** mappando solo gli endpoint che esistono
+  davvero (oggi: `/api/ap/*`, `/api/pipeline/*`, `/api/ai/*`), `platform/` **tracciata** in git
+  (già 94 file tracciati: `git ls-files platform` → 94, di cui 72 in `platform/src`), pagine mock
+  **visibili in Console** e marcate come anteprima.
+- **Porting:** `platform/src/*` → `console/web/src/preview/` (**64 file** TS/TSX). Dipendenze già
+  presenti in Console estese con `lucide-react`, `framer-motion`, `zustand`, `@radix-ui/*`.
+  Alias dedicato `@pv` → `src/preview` (`tsconfig.json` + `vite.config.ts`), accanto a `@` → `src`.
+- **Namespace colori `pv-*` (motivo tecnico):** i token hanno **nome invertito** fra i due progetti
+  (`platform`: `primary` = superficie indaco `#1A0F4A`, `secondary` = testo ciano; Console: opposto).
+  Per non toccare la palette della Console si è introdotto un namespace isolato: `@theme` con
+  `--color-pv-*`, `--shadow-pv-*`, `--container-content`, `--animate-*`, i `@keyframes`
+  (`pulseGlow`, `shake`, `orbit`, `fadeIn`, `slideInLeft`) e il blocco `.pv-layer` (variabili di
+  layout, utility gradient/surface, focus) — tutto consolidato in `console/web/src/index.css`
+  (il vecchio `preview/index.css` con le direttive Tailwind 3 `@tailwind` è stato eliminato: avrebbe
+  rotto la build Tailwind 4).
+- **Tema:** anteprima **dark-only**. `lib/theme.ts` e `components/common/ThemeToggle.tsx` eliminati;
+  l'Header non ha più il toggle e `SettingsProfile` spiega che la Console usa un solo tema scuro.
+  Così l'anteprima non aggiunge classi globali su `<html>` che de-brandizzerebbero la Console.
+- **Routing e integrazione:** tutte le rotte riscritte sotto `/preview/*`; `PreviewLayout.tsx`
+  monta lo `Shell` originale (Header/Drawer/BottomNav/Fab) dentro `.pv-layer`, mostra il banner fisso
+  **"Anteprima — dati demo"** con link "Torna alla Console" e sincronizza il profilo demo
+  (`store/auth.ts` → nuovo `setUser`) con la sessione reale. In `App.tsx` la rotta `/preview` è sotto
+  `Protected` (auth reale della Console), `index` → `/preview/dashboard`, le pagine sono lazy sotto un
+  `<Suspense>` globale. Voce di nav "Piattaforma (demo)" in `components/Layout.tsx`.
+- **File eliminati (dead code dal progetto sorgente):** `main.tsx`, `index.css`, `preview.css`,
+  `App.tsx`, `components/Protected.tsx`, `components/common/ThemeToggle.tsx`, `lib/theme.ts`,
+  `pages/{Landing,Login,Register}.tsx` (la Console ha già auth reale); il logout del Drawer punta a
+  `/login` e l'Header espone "Torna alla Console" invece dei link marketing.
+- **Dati:** `preview/lib/api.ts` usa **solo** `delay(clone(...))` sui mock — nessuna `fetch`/`axios`,
+  quindi nessuna chiamata a endpoint inesistenti (§ analisi di `platform/src/lib/api.ts`).
+- **Verifica (28/10/2026):** web `tsc --noEmit -p tsconfig.json` **0**, `vite build` **0** (~7 s,
+  `PreviewLayout` chunk ~61 kB, pagine lazy separate); CSS emesso con `bg-pv-indigo`, `text-pv-ink-3`,
+  `shadow-pv-glow`, `max-w-content`, `animate-fade-in`, `pv-layer` tutti presenti. Server non toccato.
+- **Residuo:** sostituire i mock pagina per pagina con gli endpoint reali, partendo da quelle che hanno
+  già copertura (dashboard/lead/asset/crediti → `/api/pipeline/*`, `/api/ai/*`); download/preview dei
+  binari; rimozione del vecchio `platform/` quando tutte le pagine saranno migrate.
