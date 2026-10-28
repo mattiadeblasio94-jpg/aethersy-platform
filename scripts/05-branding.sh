@@ -4,8 +4,11 @@
 # Prerequisiti: stack up (container `aethersy-app`), cartella `branding/` presente.
 # Effetto:
 #   - verifica che theme.js e gli asset siano montati (bind-mount, vedi compose);
-#   - patcha `index.html` (titolo + favicon) in modo VERSION-AWARE, perche'
-#     contiene gli hash dei bundle JS/CSS che cambiano a ogni release.
+#   - patcha `index.html` (titolo + favicon + link al CSS di brand) in modo
+#     VERSION-AWARE, perche' contiene gli hash dei bundle JS/CSS che cambiano
+#     a ogni release.
+#   - il re-skin profondo (Layer A) sta in `branding/web/brand/aethersy.css`,
+#     iniettato come ULTIMO stylesheet cosi' vince a parita' di specificita'.
 # Idempotente: rilanciabile a ogni deploy/upgrade.
 #
 # PERCHE' il patch e' necessario: la Community edition serve sempre `defaultTheme`
@@ -47,6 +50,16 @@ check() {
   else
     echo "  favicon ref: ancora esterna"; rc=1
   fi
+  if docker exec "$APP" grep -q 'href="/brand/aethersy.css"' "$WEB_DST/index.html"; then
+    echo "  brand css ref: OK (/brand/aethersy.css)"
+  else
+    echo "  brand css ref: NON iniettato"; rc=1
+  fi
+  if docker exec "$APP" grep -q -- '--primary: 190 100% 50% !important' "$WEB_DST/brand/aethersy.css"; then
+    echo "  brand css palette: OK (primary ciano)"
+  else
+    echo "  brand css palette: NON allineata"; rc=1
+  fi
   return $rc
 }
 
@@ -59,7 +72,7 @@ fi
 [[ -f branding/theme.js ]] || { echo "ERRORE: branding/theme.js assente." >&2; exit 1; }
 [[ -d branding/web ]]     || { echo "ERRORE: branding/web/ assente." >&2; exit 1; }
 
-echo "==> [1/2] Patch di index.html (titolo + favicon), version-aware"
+echo "==> [1/2] Patch di index.html (titolo + favicon + CSS brand), version-aware"
 tmp="$(mktemp)"
 docker exec "$APP" cat "$WEB_DST/index.html" > "$tmp"
 python3 - "$tmp" <<'PY'
@@ -72,6 +85,10 @@ html = re.sub(
     '<link rel="icon" type="image/x-icon" href="/favicon.ico">',
     html,
 )
+# Inietta il CSS di brand come ULTIMO stylesheet di <head> (idempotente).
+css_link = '<link rel="stylesheet" href="/brand/aethersy.css">'
+if 'href="/brand/aethersy.css"' not in html:
+    html = html.replace("</head>", f"  {css_link}\n</head>", 1)
 p.write_text(html)
 PY
 docker cp "$tmp" "${APP}:${WEB_DST}/index.html"

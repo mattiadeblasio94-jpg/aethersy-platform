@@ -1,0 +1,96 @@
+/* =============================================================================
+ * aethersy.css — Fase 8, Layer A: re-skin profondo del frontend Activepieces.
+ *
+ * Caricato DOPO il bundle CSS principale (link iniettato in index.html da
+ * scripts/05-branding.sh), quindi le sue regole vincono a parita' di specificita'.
+ * Usa `!important` sui design token per battere eventuali stylesheet iniettati
+ * a runtime dal SPA.
+ *
+ * Palette ufficiale Aethersy (fornita dal committente):
+ *   Primary   #00D4FF  cyan orbitale      -> hsl(190 100% 50%)
+ *   Secondary #1A0F4A  indaco profondo    -> hsl(251 66% 17%)
+ *   Accent    #FF9F1C  nucleo dorato      -> hsl(35 100% 55%)
+ *   Glow      #4DEEFF  alone ciano        -> hsl(191 100% 65%)
+ *   Bg dark   #0A0518  nero-viola         -> hsl(256 66% 6%)
+ *   Radius    8px -> .5rem (gia' il default del bundle)
+ *
+ * NB: i token semantici sono in formato "H S% L%" (triplette HSL), NON hex.
+ * ========================================================================== */
+
+:root {
+  /* --- Primary: cyan orbitale -------------------------------------------- */
+  --primary: 190 100% 50% !important;
+  --primary-100: 190 100% 88% !important;
+  --primary-300: 191 100% 22% !important;
+  /* Testo scuro su ciano: il bianco su #00D4FF non ha contrasto sufficiente. */
+  --primary-foreground: 222 45% 9% !important;
+
+  /* --- Focus ring / selezione -------------------------------------------- */
+  --ring: 190 100% 50% !important;
+
+  /* --- Link (allineato a theme.js: blue-link #4DEEFF) -------------------- */
+  --light-blue: 191 100% 65% !important;
+
+  /* --- Sidebar brandizzata (indaco profondo + accenti ciano) ------------- */
+  --sidebar-background: 251 66% 10% !important;
+  --sidebar-foreground: 210 40% 96% !important;
+  --sidebar-primary: 190 100% 50% !important;
+  --sidebar-primary-foreground: 222 45% 9% !important;
+  --sidebar-accent: 251 55% 20% !important;
+  --sidebar-accent-foreground: 210 40% 96% !important;
+  --sidebar-border: 251 45% 26% !important;
+  --sidebar-ring: 190 100% 50% !important;
+  --sidebar-progress: 190 100% 50% !important;
+
+  /* --- Accent dorato ----------------------------------------------------- */
+  --accent: 35 100% 55% !important;
+  --accent-foreground: 30 80% 12% !important;
+
+  /* --- Grafici in palette ------------------------------------------------ */
+  --chart-1: 190 100% 50% !important;
+  --chart-2: 35 100% 55% !important;
+  --chart-3: 262 83% 68% !important;
+  --chart-4: 191 100% 75% !important;
+  --chart-5: 251 66% 45% !important;
+
+  /* --- Builder canvas ---------------------------------------------------- */
+  --builder-background: 256 30% 98% !important;
+  --builder-background-pattern: 190 35% 72% !important;
+
+  /* --- Ombra glow orbitale ----------------------------------------------- */
+  --add-button-shadow: 0px 0px 0px 6px hsl(var(--primary-100)) !important;
+  --aethersy-glow: 0 0 20px rgba(0, 212, 255, 0.3);
+}
+
+/* --- Dark mode: tema orbitale nero-viola --------------------------------- */
+:root.dark,
+.dark {
+  --background: 256 66% 6% !important;
+  --foreground: 210 40% 96% !important;
+  --popover: 251 55% 9% !important;
+  --secondary: 251 55% 16% !important;
+  --secondary-foreground: 210 40% 96% !important;
+  --muted: 251 35% 14% !important;
+  --muted-foreground: 215 25% 70% !important;
+  --accent: 251 45% 20% !important;
+  --accent-foreground: 210 40% 96% !important;
+  --border: 251 40% 20% !important;
+  --input: 251 40% 20% !important;
+  --sidebar-background: 251 66% 8% !important;
+  --sidebar-border: 251 45% 20% !important;
+  --builder-background: 256 55% 7% !important;
+  --builder-background-pattern: 251 40% 28% !important;
+}
+
+/* --- Glow sui bottoni primari (look orbitale) ---------------------------- */
+button.bg-primary,
+a.bg-primary,
+.bg-primary {
+  box-shadow: var(--aethersy-glow);
+}
+
+/* --- Brand text accent: wordmark 'Aethersy' nei titoli quando presente --- */
+.aethersy-wordmark {
+  font-family: 'Space Grotesk', Inter, ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: -0.01em;
+}
