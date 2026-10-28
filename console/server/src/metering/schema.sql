@@ -137,7 +137,8 @@ CREATE INDEX IF NOT EXISTS credit_ledger_tenant_time
 CREATE TABLE IF NOT EXISTS metering.quota (
   tenant_id     uuid PRIMARY KEY REFERENCES metering.tenant(id) ON DELETE CASCADE,
   limit_credits numeric(18,8) NOT NULL DEFAULT 0,
-  window        text NOT NULL DEFAULT 'month',
+  -- NON `window`: e' una keyword riservata in Postgres 14 e rompe il DDL.
+  quota_window  text NOT NULL DEFAULT 'month',
   soft_pct      integer NOT NULL DEFAULT 80,
   updated_at    timestamptz NOT NULL DEFAULT now()
 );

@@ -236,7 +236,45 @@ crontab -e
 
 > Prerequisito: `deploy` deve essere nel gruppo `docker` (`usermod -aG docker deploy`, fatto da `01-hardening.sh`), altrimenti `docker compose` fallisce con *permission denied*.
 
-Scarica i backup **fuori dal VPS** (rsync/rclone verso storage esterno). Un backup solo sul server non è un backup.
+Un backup solo sul server non è un backup: serve una copia **off-site**.
+
+### 7.1 Copia off-site (pull dal PC)
+
+Il VPS non ha credenziali verso l'esterno e non ne servono di nuove: è il **PC** a
+tirare i backup, usando la chiave SSH già presente per il deploy
+(`~/.ssh/config` → alias `aethersy-vps`).
+
+| Voce | Valore |
+|---|---|
+| Script | `scripts/offsite-pull.ps1` (PowerShell, lato PC) |
+| Destinazione | `C:\Users\PC\aethersy-offsite\` (`daily/`, `weekly/`, `manifest.tsv`, `logs/offsite-pull.log`) |
+| Cadenza | ogni notte alle **04:15** (dopo il backup delle 03:30) |
+| Task pianificato | `Aethersy Offsite Backup` (Utilità di pianificazione di Windows, `schtasks`) |
+| Retention locale | 14 file/tipo in `daily/`, 8 in `weekly/` (più lunga di quella del VPS) |
+| Integrità | confronto `sha256` remoto↔locale prima e dopo il trasferimento; copia scartata se non combacia |
+
+Comandi:
+
+```powershell
+# anteprima, nessuna scrittura
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\offsite-pull.ps1 -DryRun
+
+# esecuzione manuale
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\offsite-pull.ps1
+
+# stato dell'attività pianificata
+schtasks /Query /TN "Aethersy Offsite Backup" /FO LIST /V
+schtasks /Run   /TN "Aethersy Offsite Backup"      # forzare un run
+```
+
+È **incrementale**: il manifest locale (`manifest.tsv`, sha256 + dimensione + data)
+evita di riscaricare file già presenti e invariati. Prerequisiti: OpenSSH client nel
+`PATH` (`ssh`, `scp`) e chiave funzionante (`ssh aethersy-vps true`).
+
+**Limite noto:** i file arrivano non cifrati sul PC (il dump contiene i dati
+applicativi). Se il PC non è considerato un posto sicuro, aggiungere una cifratura
+prima del trasferimento (es. `gpg --symmetric` sul VPS in `backup.sh`) oppure
+spostare la destinazione su un disco cifrato con BitLocker.
 
 ## 8. Troubleshooting
 

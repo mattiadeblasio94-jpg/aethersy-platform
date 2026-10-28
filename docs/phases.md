@@ -228,7 +228,7 @@ Limiti confermati (default upstream, ora espliciti in `.env.example`): `AP_WEBHO
 - **Prossimi passi:** (1) Fase 10 (rotazione segreti esposti in chat + backup offline dei due segreti critici); (2) ~~collegare un client MCP reale~~ (Fase 7 acceptance **CHIUSA** 28/10/2026 — handshake reale, 42 tool).
 
 ### Fase 12 — Piattaforma a consumo (P0): pipeline + asset + Console + lead/canale (P0.6)
-- **Esito:** `IN CORSO` (28/10/2026). Trasformazione della piattaforma verso un modello **pay-per-use**: nucleo di metering/billing (P0.1/P0.2), pipeline multi-stadio (P0.3), **libreria asset con versioning + approvazione** (P0.4), **Console run/crediti** (P0.5) e **lead webhook + canale Slack + export pacchettizzato** (P0.6). Documento di progetto e delta implementativo: [`docs/platform-consumption.md`](platform-consumption.md) (§9).
+- **Esito:** `IN CORSO` (28/10/2026; P0.7 chiuso, resta P0.8). Trasformazione della piattaforma verso un modello **pay-per-use**: nucleo di metering/billing (P0.1/P0.2), pipeline multi-stadio (P0.3), **libreria asset con versioning + approvazione** (P0.4), **Console run/crediti** (P0.5), **lead webhook + canale Slack + export pacchettizzato** (P0.6) e **QA end-to-end + backup off-site** (P0.7, sezione dedicata sotto). Documento di progetto e delta implementativo: [`docs/platform-consumption.md`](platform-consumption.md) (§9).
 - **Nucleo (P0.1/P0.2, commit `24c1d1f`):** schema `metering` idempotente (`usage_event`, `ledger`, `price_book`, `tenant`, …), repo `reserve`/`settle`/`top-up`, motore di prezzo (markup 15000 bps = margine 60%, `credit_unit = 0.0001 €`), guard con clamp-to-zero + degrade + `402`; generazione Venice metrata (`img_out`/`tts`/`vid_out`).
 - **Pipeline (P0.3, commit `94f65a9`):** schema `pipeline` (`pipeline_run`, `agent_task`, `asset`, `integration_credential`, `lead`), catalogo puro (`STAGES` brand/website/content/social, macchina a stati del run), orchestratore con esecutore **iniettato** (`TaskExecutor`) e **HITL** obbligatorio su `approved→delivered`, segreti integrazione AES-256-GCM (`CONSOLE_SECRETS_KEY`), metering `flow_run` (1 × 0.0020 €/task).
 - **Libreria asset (P0.4):** `pipeline/catalog.ts` — macchina a stati asset (`draft → in_review → approved → delivered`; `rejected` ripresentabile) con `canTransitionAsset`/`isAssetDecidable`/`isAssetAccepted`/`assetFamilyKey`/`approvedVersion`. `pipeline/repo.ts` — `transitionAsset` (con `SELECT … FOR UPDATE`), `listAssetVersions`, `listAssetFamilies` (una riga per deliverable run/kind/name con `latest_version`, `approved_version`, `latest_asset_id`, conteggio revisioni), `deliverRunAssets`; `deliverRun` ora marca `delivered` gli asset approvati. Rotte: `GET /api/pipeline/assets/families`, `GET /api/pipeline/assets/:assetId/versions`, `POST …/:assetId/submit`, `POST …/:assetId/decide`.
@@ -243,4 +243,71 @@ Limiti confermati (default upstream, ora espliciti in `.env.example`): `AP_WEBHO
   - **Rotte**: `GET /api/pipeline/leads` (filtri + `counts`), `PATCH /api/pipeline/leads/:id` (400 stato ignoto, 404 assente, 409 transizione non ammessa), `POST /api/pipeline/leads` ora notifica e marca `notified_at`, `POST /api/pipeline/runs/:id/deliver` notifica (best-effort, la consegna non dipende dall'esito), `GET /api/pipeline/runs/:id/export` (manifest `aethersy.run-package/v1`: run, deliverable approvati/consegnati con `storageKey`/mime/size/meta, consumo totale e per capacità; `Content-Disposition: attachment`).
   - **Console**: `pages/Leads.tsx` — elenco lead con filtri per stato e conteggi, azioni di funnel (solo transizioni ammesse), colonne origine/notificato/ricevuto e pannello "Canale outbound" (salva/revoca credenziale `slack`). `api.patch`; tipi `Lead`/`LeadStatus`/`LeadsResponse`/`IntegrationCredential`; hook `useLeads`/`useUpdateLead`/`useIntegrations`/`useSaveIntegration`/`useRevokeIntegration`/`useExportRun`; pulsante "Esporta pacchetto" nel pannello run (visibile su `approved`/`delivered`); voce di navigazione "Lead" e rotta `/leads`.
 - **Verifica (28/10/2026):** server `gen:schema` OK, `tsc --noEmit` **0**, `build` **0**, `npm run test:metering` **38/38** (incluse 4 asserzioni sulla macchina a stati lead); web `tsc -b --noEmit` **0**, `vite build` OK.
-- **Residuo:** preview/download inline degli artefatti binari, azioni bulk, secondo canale outbound (email/CRM) e retry con backoff; P0.7 (QA E2E + backup/alert), P0.8 (consolidamento frontend).
+- **Residuo:** preview/download inline degli artefatti binari, azioni bulk, secondo canale outbound (email/CRM) e retry con backoff; P0.8 (consolidamento frontend).
+
+### Fase 12 — P0.7: QA end-to-end e backup off-site
+- **Esito:** `DONE` (28/10/2026). Il percorso pilota (tenant → run → task → asset → approvazione →
+  consegna → pacchetto → lead) è coperto da test **end-to-end su Postgres reale**, ed esiste una
+  copia di backup **automatica fuori dal VPS**. Metering attivo in produzione.
+- **Presentazione run (`pipeline/package.ts`, nuovo):** il formato del pacchetto è estratto dalle
+  rotte (`RUN_PACKAGE_FORMAT = "aethersy.run-package/v1"`, `buildRunPackage`, `runPackageFilename`) e
+  `GET /api/pipeline/runs/:id/export` ora vi delega — stesso JSON di prima, ma costruibile e
+  testabile senza HTTP.
+- **Test end-to-end (`console/server/tools/test-e2e-pilot.mjs`, nuovo):** **opt-in** (`E2E_CONFIRM=1`)
+  e **solo su DB temporaneo** (`CONSOLE_PGDATABASE=console_e2e`); rifiuta esplicitamente il DB
+  `activepieces`. Importa il `dist` compilato (`/app/dist`) e pilota l'API reale con webhook Slack
+  finto locale. Copre: migrazioni idempotenti (applicate al primo giro, no-op al secondo),
+  provisioning tenant + top-up + saldo/disponibile, apertura run (6 task) con approvazione rifiutata
+  in `draft`, `orchestrateRun` con esecutore sintetico e addebito `flow_run`, `flow_run_id` scritto sui
+  task, asset v1 in `draft`, `runUsageSummary`, HITL sugli asset (decide su `draft` rifiutata → submit
+  → doppio submit rifiutato → approva → `approvedVersion`), approvazione run, consegna (1 asset
+  consegnato, doppia consegna rifiutata), notifica di consegna, pacchetto (solo deliverable approvati,
+  formato e nome file), round-trip dei segreti AES-GCM, credenziali di integrazione (lista senza
+  `secret_enc`, credenziale tenant che vince sul fallback di stack, revoca), lead + notifica +
+  `markLeadNotified` + testo notifica, funnel e filtri/conteggi, isolamento fra tenant, eventi di
+  consumo finali.
+- **Tre bug reali trovati dal deploy live + E2E e corretti:**
+  1. **`window` è keyword riservata (Postgres 14):** `metering.quota.window` faceva fallire
+     `migrateMetering()` con `syntax error at or near "window"` (container avviato ma schema
+     `metering` assente). Rinominata in `quota_window` (+ commento in `schema.sql`),
+     `schema.ts` rigenerato, `quotaState()` legge `quota_window AS window` (il tipo TS
+     `QuotaState.window` resta invariato).
+  2. **`started_at` ambiguo:** in `startTask` l'`UPDATE pipeline.agent_task t … FROM pipeline.pipeline_run r`
+     referenziava `started_at`, presente in entrambe le tabelle
+     (`column reference "started_at" is ambiguous`). Corretto con `COALESCE(t.started_at, now())`.
+     Rivisti anche `finishTask` (già qualificato) e il backfill di `flow_run_id`.
+  3. **`request_id` è `uuid`:** `recordFlowRun` passava `"flow_run:<flowRunId>"`, non un UUID
+     (`invalid input syntax for type uuid`). Aggiunto `requestIdForFlowRun()`: UUID deterministico
+     derivato da `sha256("flow_run:"+flowRunId)`, così il vincolo unico `(request_id, attempt_no)`
+     continua a deduplicare i retry. Il `requestId` viene calcolato una volta all'inizio della funzione
+     ed è restituito anche nel caso "run inesistente".
+- **Guardrail aggiunti (`tools/test-metering.mjs`):** per ogni cartella-schema, (a) nessuna keyword
+  riservata usata come nome di colonna (`window|order|group|limit|user|check|end|all`) e (b)
+  `schema.ts` deve essere **byte-identico** al bundle di `schema.sql` (fallisce con
+  "esegui npm run gen:schema" se si dimentica la rigenerazione). Test: **42/42**.
+- **Deploy in produzione (28/10/2026):** `.env` del VPS aggiornato (backup `.env.bak-p07`) con
+  `METERING_ENABLED=true`, `METERING_RATE_PER_MINUTE=120`, `METERING_SIGNUP_CREDITS=0` e un
+  `CONSOLE_SECRETS_KEY` nuovo (`openssl rand -hex 32`, `chmod 600`); `docker-compose.yml` salvato in
+  `.bak-p07`. `docker compose config` OK con segreti mascherati, immagine ricostruita, container
+  `healthy`: log `schema metering applicato` + `schema pipeline applicato`, 13 tabelle `metering` e 5
+  tabelle `pipeline` verificate via `psql`, `https://console.aethersy.online/api/health` → **200**.
+  DB temporaneo `console_e2e` creato per l'E2E e poi rimosso (`DROP DATABASE`).
+- **E2E sul VPS:** `docker compose run --rm --no-deps -e E2E_CONFIRM=1 -e CONSOLE_PGDATABASE=console_e2e
+  -e METERING_ENABLED=true -v tools:/tools:ro console node /tools/test-e2e-pilot.mjs` →
+  **41 ok, 0 falliti** su Postgres reale. Nota operativa: `docker compose run` consuma lo stdin, quindi
+  il runner va scritto su file e invocato con `< /dev/null` e redirect su log, altrimenti l'output
+  sembra vuoto.
+- **Backup off-site (`scripts/offsite-pull.ps1`, nuovo, lato PC):** pull **incrementale** con la chiave
+  SSH già esistente (`ssh`/`scp` verso `aethersy-vps`), confronto di dimensione e `sha256` remoto con
+  `manifest.tsv`, copia solo di file mancanti/cambiati, verifica `sha256` dopo il trasferimento,
+  retention locale (14 daily / 8 weekly), log su `logs/offsite-pull.log`, flag `-DryRun`. Bug corretto:
+  `Get-RemoteFiles` che restituiva un array vuoto veniva srotolato a `$null` (errore
+  `PropertyNotFoundException` su `.Count`) → `return ,$files`. Verificato: primo giro **6 file**
+  (~83 MB), secondo giro **0 copiati / 6 invariati**. Attività pianificata **"Aethersy Offsite Backup"**
+  giornaliera alle **04:15** (dopo il backup VPS delle 03:30); `/RL HIGHEST` negato ("Accesso negato")
+  quindi task creato senza elevazione, test-run OK. Procedura in `docs/runbook.md` §7.1.
+- **`.env.example`:** documentato `CONSOLE_SECRETS_KEY` (64 hex, fallback su `AP_ENCRYPTION_KEY`,
+  503 se entrambe assenti).
+- **Residuo:** cifratura (gpg/BitLocker) dei dump prima della copia off-site — oggi arrivano in chiaro
+  sul PC (vedi avvertenza in `docs/runbook.md` §7.1); E2E in CI con DB effimero; alert dedicato sul
+  fallimento del pull off-site (oggi solo log locale + task scheduler).

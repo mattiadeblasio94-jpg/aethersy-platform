@@ -371,6 +371,35 @@ check("spam raggiungibile da ogni stato non terminale", () => {
   }
 });
 
+// --- Guardrail sullo schema ------------------------------------------------
+// Il DDL locale non tocca Postgres nei test, quindi un errore di sintassi (es.
+// una keyword riservata usata come nome di colonna) si scoprirebbe solo al
+// primo boot in produzione. Questi due controlli lo intercettano in CI.
+{
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const here = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
+  const srcDir = path.resolve(here, "..", "src");
+
+  // `window` e' riservata in Postgres: come nome di colonna rompe il DDL.
+  for (const dir of ["metering", "pipeline"]) {
+    check(`${dir}/schema.sql non usa keyword riservate come colonne`, () => {
+      const sql = fs.readFileSync(path.join(srcDir, dir, "schema.sql"), "utf8");
+      const offenders = sql
+        .split("\n")
+        .filter((line) => /^\s*(window|order|group|limit|user|check|end|all)\s+[a-z]/.test(line));
+      eq(offenders.length, 0, `colonne riservate: ${offenders.join(" | ")}`);
+    });
+
+    check(`${dir}/schema.ts e' allineato a schema.sql`, () => {
+      const sql = fs.readFileSync(path.join(srcDir, dir, "schema.sql"), "utf8").replace(/\r\n/g, "\n");
+      const bundle = fs.readFileSync(path.join(srcDir, dir, "schema.ts"), "utf8");
+      const literal = bundle.slice(bundle.indexOf("= ") + 2).trim().replace(/;$/, "");
+      eq(JSON.parse(literal), sql.trimEnd() + "\n", "bundle disallineato: esegui npm run gen:schema");
+    });
+  }
+}
+
 console.log(`\n${passed} test superati, ${failures.length} falliti`);
 if (failures.length) {
   for (const f of failures) console.error(`- ${f.name}: ${f.message}`);

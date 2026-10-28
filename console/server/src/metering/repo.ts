@@ -716,9 +716,12 @@ export async function quotaState(tenantId: string): Promise<QuotaState | null> {
       limit_credits: string;
       window: string;
       soft_pct: number;
-    }>(`SELECT limit_credits, window, soft_pct FROM metering.quota WHERE tenant_id = $1`, [
-      tenantId,
-    ]);
+    }>(
+      // La colonna e' `quota_window` perche' `window` e' keyword riservata (PG14).
+      `SELECT limit_credits, quota_window AS window, soft_pct
+         FROM metering.quota WHERE tenant_id = $1`,
+      [tenantId],
+    );
     const q = rows[0];
     if (!q) return null;
     const consumed = await client.query<{ total: string }>(

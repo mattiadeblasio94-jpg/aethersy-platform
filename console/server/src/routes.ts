@@ -720,46 +720,16 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     const tenant = await pipelineTenant(request, reply);
     if (!tenant) return;
     const { runId } = request.params as { runId: string };
-    const { getRun, listAssets, runUsageSummary } = await import("./pipeline/repo.js");
+    const { getRun } = await import("./pipeline/repo.js");
     const run = await getRun(tenant.tenantId, runId);
     if (!run) return reply.code(404).send({ code: "NOT_FOUND", message: "Run inesistente" });
 
-    const assets = (await listAssets(tenant.tenantId, { runId })).filter(
-      (a) => a.status === "approved" || a.status === "delivered",
-    );
-    const usage = await runUsageSummary(tenant.tenantId, runId);
+    const { buildRunPackage, runPackageFilename } = await import("./pipeline/package.js");
+    const pkg = await buildRunPackage(tenant.tenantId, runId);
+    if (!pkg) return reply.code(404).send({ code: "NOT_FOUND", message: "Run inesistente" });
 
-    const pkg = {
-      format: "aethersy.run-package/v1",
-      generatedAt: new Date().toISOString(),
-      run: {
-        id: run.id,
-        stage: run.stage,
-        title: run.title,
-        status: run.status,
-        approvedBy: run.approved_by,
-        approvedAt: run.approved_at,
-        deliveredAt: run.delivered_at,
-      },
-      deliverables: assets.map((a) => ({
-        name: a.name,
-        kind: a.kind,
-        version: a.version,
-        status: a.status,
-        storageKey: a.storage_key,
-        mime: a.mime,
-        sizeBytes: a.size_bytes,
-        meta: a.meta,
-      })),
-      usage: {
-        credits: usage.totals.credits,
-        priceEur: usage.totals.price_eur,
-        byCapability: usage.byCapability,
-      },
-    };
-    const filename = `run-${run.stage}-${run.id.slice(0, 8)}.json`;
     return reply
-      .header("Content-Disposition", `attachment; filename="${filename}"`)
+      .header("Content-Disposition", `attachment; filename="${runPackageFilename(run)}"`)
       .type("application/json")
       .send(pkg);
   });

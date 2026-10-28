@@ -1,4 +1,4 @@
-import crypto from "node:crypto";
+import crypto, { createHash } from "node:crypto";
 import { withTx } from "../metering/db.js";
 import {
   availableCredits,
@@ -222,8 +222,10 @@ export async function startTask(
 ): Promise<AgentTaskRow | null> {
   const { rows } = await withTx((client) =>
     client.query<AgentTaskRow>(
+      // In `UPDATE ... FROM`, `pipeline_run` ha anch'esso `started_at`: senza
+      // alias il riferimento e' ambiguo e Postgres rifiuta la query.
       `UPDATE pipeline.agent_task t SET
-         status = 'running', started_at = COALESCE(started_at, now()),
+         status = 'running', started_at = COALESCE(t.started_at, now()),
          flow_run_id = COALESCE($3, t.flow_run_id), updated_at = now()
        FROM pipeline.pipeline_run r
        WHERE t.id = $1 AND r.id = t.run_id AND r.tenant_id = $2
@@ -867,10 +869,15 @@ export interface RecordFlowRunResult extends RecordUsageResult {
  * L'idempotenza su `(request_id, attempt_no)` rende sicuro un retry.
  */
 export async function recordFlowRun(input: RecordFlowRunInput): Promise<RecordFlowRunResult> {
+  // `metering.usage_event.request_id` e' `uuid`: l'id del flow run (testo, usato
+  // per l'attribuzione in `flow_run_id`) va mappato su un UUID stabile. Derivarlo
+  // con sha256 mantiene l'idempotenza: lo stesso flow run produce la stessa riga.
+  const requestId = input.requestId ?? requestIdForFlowRun(input.flowRunId);
+
   const run = await getRun(input.tenantId, input.runId);
   if (!run) {
     return {
-      requestId: input.requestId ?? `flow_run:${input.flowRunId}`,
+      requestId,
       flowRunId: input.flowRunId,
       recorded: false,
       credits: 0,
@@ -889,7 +896,6 @@ export async function recordFlowRun(input: RecordFlowRunInput): Promise<RecordFl
   const tenant = await tenantById(input.tenantId);
   if (!tenant) throw new Error(`tenant ${input.tenantId} inesistente`);
 
-  const requestId = input.requestId ?? `flow_run:${input.flowRunId}`;
   const counts = { [FLOW_RUN_UNIT]: 1 } as Partial<Record<Unit, number>>;
 
   const estimate = await estimateCredits(tenant, {
@@ -947,4 +953,15 @@ export async function recordFlowRun(input: RecordFlowRunInput): Promise<RecordFl
 /** Flow run id generato per un task (formato stabile: stage:run:seq:random). */
 export function makeFlowRunId(stage: string, runId: string, seq: number): string {
   return `${stage}:${runId}:${seq}:${crypto.randomUUID().slice(0, 8)}`;
+}
+
+/**
+ * UUID deterministico per l'idempotenza del consumo di orchestrazione.
+ * `metering.usage_event.request_id` e' `uuid`: partendo dal `flow_run_id`
+ * (testo) si ottiene lo stesso UUID a ogni retry, cosi' il vincolo unico
+ * `(request_id, attempt_no)` continua a deduplicare.
+ */
+function requestIdForFlowRun(flowRunId: string): string {
+  const h = createHash("sha256").update(`flow_run:${flowRunId}`).digest("hex");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
 }
