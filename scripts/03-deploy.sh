@@ -23,7 +23,7 @@ fi
 
 echo "==> [2/5] Controllo variabili obbligatorie"
 required=(AP_VERSION AP_FRONTEND_URL AP_MCP_URL AP_ENCRYPTION_KEY AP_JWT_SECRET \
-          AP_POSTGRES_PASSWORD AP_REDIS_PASSWORD ACME_EMAIL)
+          AP_POSTGRES_PASSWORD AP_REDIS_PASSWORD ACME_EMAIL CONSOLE_SESSION_SECRET)
 missing=0
 for v in "${required[@]}"; do
   if ! grep -qE "^${v}=.+" .env; then
@@ -37,7 +37,9 @@ echo "==> [3/5] Validazione compose"
 docker compose config --quiet
 
 echo "==> [4/5] Avvio stack"
-docker compose pull
+# Pull solo dei servizi basati su immagine: `console` e' un build locale.
+docker compose pull caddy app worker postgres redis
+docker compose build console
 docker compose up -d
 
 echo
