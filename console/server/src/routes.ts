@@ -511,4 +511,305 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     const events = await recentUsage(tenant.tenantId, Math.min(Number(limit) || 50, 200));
     return { metering: true, events };
   });
+
+  // ------------------------------------------------------------ Pipeline ----
+  // Pipeline a stadi (P0.3): Brand -> Sito -> Contenuti -> Social.
+  // Richiede il metering attivo: i run vivono nello schema `pipeline` con FK
+  // verso `metering.tenant`, e ogni task eseguito produce consumo `flow_run`.
+  // HITL: nessun run passa a `delivered` senza approvazione esplicita.
+
+  /**
+   * Tenant della richiesta per le rotte di pipeline (cookie Console o Bearer
+   * key). `null` se il metering e' spento o l'identita' non e' valida.
+   */
+  async function pipelineTenant(request: FastifyRequest, reply: FastifyReply) {
+    if (!meteringActive()) {
+      reply.code(503).send({
+        code: "METERING_DISABLED",
+        message: "La pipeline richiede il metering attivo (METERING_ENABLED=true)",
+      });
+      return null;
+    }
+    const { resolveTenant } = await import("./metering/guard.js");
+    const tenant = await resolveTenant(request);
+    if (!tenant) {
+      reply.code(401).send({ code: "UNAUTHENTICATED", message: "Identita' tenant non valida" });
+      return null;
+    }
+    return tenant;
+  }
+
+  app.get("/api/pipeline/stages", async (request, reply) => {
+    if (!(await pipelineTenant(request, reply))) return;
+    const { STAGES } = await import("./pipeline/catalog.js");
+    return { stages: STAGES };
+  });
+
+  app.post("/api/pipeline/runs", async (request, reply) => {
+    const tenant = await pipelineTenant(request, reply);
+    if (!tenant) return;
+    const body = (request.body ?? {}) as {
+      stage?: string;
+      title?: string;
+      brief?: unknown;
+      context?: unknown;
+    };
+    const { stageSpec } = await import("./pipeline/catalog.js");
+    const spec = body.stage ? stageSpec(body.stage) : null;
+    if (!spec) {
+      return reply.code(400).send({
+        code: "BAD_REQUEST",
+        message: "stage richiesto (brand | website | content | social)",
+      });
+    }
+    const { openRun } = await import("./pipeline/orchestrator.js");
+    const run = await openRun({
+      tenantId: tenant.tenantId,
+      stage: spec.id,
+      title: body.title,
+      brief: body.brief,
+      context: body.context,
+    });
+    return reply.code(201).send(run);
+  });
+
+  app.get("/api/pipeline/runs", async (request, reply) => {
+    const tenant = await pipelineTenant(request, reply);
+    if (!tenant) return;
+    const { stage, status, limit } = request.query as {
+      stage?: string;
+      status?: string;
+      limit?: string;
+    };
+    const { listRuns } = await import("./pipeline/repo.js");
+    return listRuns(tenant.tenantId, {
+      stage,
+      status,
+      limit: limit ? Number(limit) : undefined,
+    });
+  });
+
+  app.get("/api/pipeline/runs/:runId", async (request, reply) => {
+    const tenant = await pipelineTenant(request, reply);
+    if (!tenant) return;
+    const { runId } = request.params as { runId: string };
+    const { getRun, listTasks, listAssets, runUsageSummary } = await import("./pipeline/repo.js");
+    const run = await getRun(tenant.tenantId, runId);
+    if (!run) return reply.code(404).send({ code: "NOT_FOUND", message: "Run inesistente" });
+    const [tasks, assets, usage] = await Promise.all([
+      listTasks(tenant.tenantId, runId),
+      listAssets(tenant.tenantId, { runId }),
+      runUsageSummary(tenant.tenantId, runId),
+    ]);
+    return { run, tasks, assets, usage };
+  });
+
+  app.get("/api/pipeline/runs/:runId/usage", async (request, reply) => {
+    const tenant = await pipelineTenant(request, reply);
+    if (!tenant) return;
+    const { runId } = request.params as { runId: string };
+    const { getRun, runUsageSummary } = await import("./pipeline/repo.js");
+    const run = await getRun(tenant.tenantId, runId);
+    if (!run) return reply.code(404).send({ code: "NOT_FOUND", message: "Run inesistente" });
+    return runUsageSummary(tenant.tenantId, runId);
+  });
+
+  /**
+   * Esecuzione assistita dei task pendenti: l'esecutore e' iniettato dal
+   * chiamante (payload `results` per task). E' il punto in cui la produzione
+   * sostituira' l'executor con l'accodamento su Activepieces; qui la logica di
+   * stato e di metering (`flow_run`) e' gia' quella definitiva.
+   */
+  app.post("/api/pipeline/runs/:runId/execute", async (request, reply) => {
+    const tenant = await pipelineTenant(request, reply);
+    if (!tenant) return;
+    const { runId } = request.params as { runId: string };
+    const body = (request.body ?? {}) as {
+      continueOnError?: boolean;
+      meter?: boolean;
+      results?: Record<
+        string,
+        {
+          status?: "done" | "failed" | "skipped";
+          output?: unknown;
+          error?: string | null;
+          assets?: Array<{ kind: string; name: string; storageKey: string; mime?: string; meta?: unknown }>;
+        }
+      >;
+    };
+    const { orchestrateRun } = await import("./pipeline/orchestrator.js");
+    const results = body.results ?? {};
+    const result = await orchestrateRun(
+      tenant.tenantId,
+      runId,
+      async (ctx) => {
+        const r = results[ctx.task.id];
+        if (!r) {
+          return { status: "failed", error: "nessun risultato fornito per il task" };
+        }
+        return {
+          status: r.status,
+          output: r.output,
+          error: r.error ?? null,
+          assets: (r.assets ?? []) as any,
+        };
+      },
+      { continueOnError: body.continueOnError, meter: body.meter },
+    );
+    if (!result.run) return reply.code(404).send({ code: "NOT_FOUND", message: "Run inesistente" });
+    return result;
+  });
+
+  app.post("/api/pipeline/runs/:runId/approve", async (request, reply) => {
+    const tenant = await pipelineTenant(request, reply);
+    if (!tenant) return;
+    const { runId } = request.params as { runId: string };
+    const body = (request.body ?? {}) as { approvedBy?: string };
+    const approvedBy = body.approvedBy ?? tenant.email ?? tenant.tenantName;
+    const { approveRun } = await import("./pipeline/orchestrator.js");
+    const run = await approveRun(tenant.tenantId, runId, approvedBy);
+    if (!run) {
+      return reply.code(409).send({ code: "INVALID_TRANSITION", message: "Approvazione non ammessa" });
+    }
+    return run;
+  });
+
+  app.post("/api/pipeline/runs/:runId/deliver", async (request, reply) => {
+    const tenant = await pipelineTenant(request, reply);
+    if (!tenant) return;
+    const { runId } = request.params as { runId: string };
+    const { deliverRun } = await import("./pipeline/orchestrator.js");
+    const run = await deliverRun(tenant.tenantId, runId);
+    if (!run) {
+      return reply.code(409).send({ code: "INVALID_TRANSITION", message: "Consegna non ammessa" });
+    }
+    return run;
+  });
+
+  app.post("/api/pipeline/runs/:runId/retry", async (request, reply) => {
+    const tenant = await pipelineTenant(request, reply);
+    if (!tenant) return;
+    const { runId } = request.params as { runId: string };
+    const { retryRun } = await import("./pipeline/orchestrator.js");
+    const run = await retryRun(tenant.tenantId, runId);
+    if (!run) {
+      return reply.code(409).send({ code: "INVALID_TRANSITION", message: "Retry non ammesso" });
+    }
+    return run;
+  });
+
+  // ------------------------------------------------------ Asset / lead -----
+  app.get("/api/pipeline/assets", async (request, reply) => {
+    const tenant = await pipelineTenant(request, reply);
+    if (!tenant) return;
+    const { runId, kind, status, limit } = request.query as {
+      runId?: string;
+      kind?: string;
+      status?: string;
+      limit?: string;
+    };
+    const { listAssets } = await import("./pipeline/repo.js");
+    return listAssets(tenant.tenantId, {
+      runId,
+      kind,
+      status,
+      limit: limit ? Number(limit) : undefined,
+    });
+  });
+
+  app.post("/api/pipeline/assets/:assetId/decide", async (request, reply) => {
+    const tenant = await pipelineTenant(request, reply);
+    if (!tenant) return;
+    const { assetId } = request.params as { assetId: string };
+    const body = (request.body ?? {}) as { decision?: string; approvedBy?: string };
+    if (body.decision !== "approved" && body.decision !== "rejected") {
+      return reply.code(400).send({ code: "BAD_REQUEST", message: "decision: approved | rejected" });
+    }
+    const { decideAsset } = await import("./pipeline/repo.js");
+    const asset = await decideAsset(
+      tenant.tenantId,
+      assetId,
+      body.decision,
+      body.approvedBy ?? tenant.email ?? tenant.tenantName,
+    );
+    if (!asset) {
+      return reply.code(409).send({ code: "INVALID_STATE", message: "Asset non decidibile" });
+    }
+    return asset;
+  });
+
+  /**
+   * Webhook lead: il form del sito (o un flow Activepieces) invia qui il lead.
+   * Non richiede la sessione Console ma una chiave Bearer del tenant.
+   */
+  app.post("/api/pipeline/leads", async (request, reply) => {
+    const tenant = await pipelineTenant(request, reply);
+    if (!tenant) return;
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const { createLead } = await import("./pipeline/repo.js");
+    const lead = await createLead({
+      tenantId: tenant.tenantId,
+      runId: (body.runId as string) ?? null,
+      source: (body.source as string) ?? "website",
+      name: (body.name as string) ?? null,
+      email: (body.email as string) ?? null,
+      phone: (body.phone as string) ?? null,
+      message: (body.message as string) ?? null,
+      utm: body.utm,
+      payload: body,
+    });
+    return reply.code(201).send(lead);
+  });
+
+  app.get("/api/pipeline/integrations", async (request, reply) => {
+    const tenant = await pipelineTenant(request, reply);
+    if (!tenant) return;
+    const { listIntegrationCredentials } = await import("./pipeline/repo.js");
+    return listIntegrationCredentials(tenant.tenantId);
+  });
+
+  app.post("/api/pipeline/integrations", async (request, reply) => {
+    const tenant = await pipelineTenant(request, reply);
+    if (!tenant) return;
+    const body = (request.body ?? {}) as {
+      provider?: string;
+      kind?: "oauth" | "webhook" | "api_key";
+      label?: string;
+      secret?: string;
+      scopes?: string[];
+      meta?: unknown;
+    };
+    if (!body.provider || !body.secret) {
+      return reply.code(400).send({ code: "BAD_REQUEST", message: "provider e secret richiesti" });
+    }
+    const { hasSecretsKey, encryptSecret } = await import("./pipeline/secrets.js");
+    if (!hasSecretsKey()) {
+      return reply.code(503).send({
+        code: "SECRETS_KEY_MISSING",
+        message: "CONSOLE_SECRETS_KEY non configurata: impossibile cifrare il segreto",
+      });
+    }
+    const { saveIntegrationCredential } = await import("./pipeline/repo.js");
+    const saved = await saveIntegrationCredential({
+      tenantId: tenant.tenantId,
+      provider: body.provider,
+      kind: body.kind,
+      label: body.label,
+      secretEnc: encryptSecret(body.secret),
+      scopes: body.scopes,
+      meta: body.meta,
+    });
+    const { secret_enc: _omit, ...safe } = saved;
+    return reply.code(201).send(safe);
+  });
+
+  app.post("/api/pipeline/integrations/:id/revoke", async (request, reply) => {
+    const tenant = await pipelineTenant(request, reply);
+    if (!tenant) return;
+    const { id } = request.params as { id: string };
+    const { revokeIntegrationCredential } = await import("./pipeline/repo.js");
+    const ok = await revokeIntegrationCredential(tenant.tenantId, id);
+    if (!ok) return reply.code(404).send({ code: "NOT_FOUND", message: "Integrazione inesistente" });
+    return { ok: true };
+  });
 }

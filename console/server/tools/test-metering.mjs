@@ -212,6 +212,74 @@ check("precedenza: exact > prefisso > wildcard", () => {
   eq(s1 > s2 && s2 > s3, true, `ordinamento ${s1} > ${s2} > ${s3}`);
 });
 
+// --- pipeline/catalog.ts (macchina a stati + catalogo stadi) ------------------
+const { STAGES, stageSpec, canTransitionRun, nextRunStatus, isRunTerminal, derivedRunStatus } =
+  await import("../src/pipeline/catalog.ts");
+
+console.log("pipeline/catalog.ts");
+
+check("P0: 4 stadi con ordine 3..6 e id unici", () => {
+  eq(STAGES.length, 4, "numero stadi");
+  const ids = STAGES.map((s) => s.id);
+  eq(new Set(ids).size, 4, "id unici");
+  eq(
+    STAGES.every((s) => s.order >= 3 && s.order <= 6),
+    true,
+    "ordini",
+  );
+});
+
+check("ogni stadio ha task, droids e deliverable", () => {
+  for (const s of STAGES) {
+    eq(s.tasks.length > 0, true, `${s.id} tasks`);
+    eq(s.droids.length > 0, true, `${s.id} droids`);
+    eq(s.deliverables.length > 0, true, `${s.id} deliverables`);
+  }
+});
+
+check("stageSpec risolve gli id noti e ignora gli sconosciuti", () => {
+  eq(stageSpec("brand")?.title, "Brand", "brand");
+  eq(stageSpec("social")?.title, "Social media", "social");
+  eq(stageSpec("idea"), null, "stadi P1 non in P0");
+});
+
+check("transizioni run ammesse nel percorso felice", () => {
+  eq(canTransitionRun("draft", "in_progress"), true, "draft->in_progress");
+  eq(canTransitionRun("in_progress", "in_review"), true, "in_progress->in_review");
+  eq(canTransitionRun("in_review", "approved"), true, "in_review->approved");
+  eq(canTransitionRun("approved", "delivered"), true, "approved->delivered");
+});
+
+check("transizioni non ammesse rifiutate", () => {
+  eq(canTransitionRun("draft", "approved"), false, "draft->approved");
+  eq(canTransitionRun("delivered", "in_progress"), false, "delivered e' terminale");
+  eq(canTransitionRun("in_review", "delivered"), false, "no salto approvazione");
+});
+
+check("nextRunStatus salta lo stato di errore", () => {
+  eq(nextRunStatus("draft"), "in_progress", "draft");
+  eq(nextRunStatus("delivered"), null, "terminale");
+});
+
+check("isRunTerminal solo su delivered", () => {
+  eq(isRunTerminal("delivered"), true, "delivered");
+  eq(isRunTerminal("failed"), false, "failed ammette retry");
+  eq(isRunTerminal("in_progress"), false, "in_progress");
+});
+
+check("derivedRunStatus dai task", () => {
+  eq(derivedRunStatus([]), "draft", "nessun task");
+  eq(derivedRunStatus([{ status: "pending" }]), "draft", "tutti pending");
+  eq(derivedRunStatus([{ status: "running" }]), "in_progress", "in esecuzione");
+  eq(derivedRunStatus([{ status: "done" }]), "in_review", "tutti done");
+  eq(
+    derivedRunStatus([{ status: "done" }, { status: "skipped" }]),
+    "in_review",
+    "done+skipped",
+  );
+  eq(derivedRunStatus([{ status: "failed" }]), "failed", "fallimento");
+});
+
 console.log(`\n${passed} test superati, ${failures.length} falliti`);
 if (failures.length) {
   for (const f of failures) console.error(`- ${f.name}: ${f.message}`);

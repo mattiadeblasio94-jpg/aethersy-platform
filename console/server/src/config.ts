@@ -53,6 +53,13 @@ export const config = {
   // Credito di benvenuto assegnato al provisioning del primo accesso (0 = nessuno).
   signupCredits: Number(process.env.METERING_SIGNUP_CREDITS ?? 0),
 
+  // Chiave per cifrare a riposo i segreti delle integrazioni (AES-256-GCM).
+  // Deve essere una stringa esadecimale di 64 caratteri (32 byte): `openssl rand -hex 32`.
+  // Fallback su AP_ENCRYPTION_KEY (stessa chiave dello stack Activepieces) per
+  // non introdurre un secondo segreto da custodire; se assente, le funzioni di
+  // cifratura delle integrazioni falliscono esplicitamente.
+  secretsKey: process.env.CONSOLE_SECRETS_KEY ?? process.env.AP_ENCRYPTION_KEY ?? "",
+
   // Nome cookie di sessione.
   cookieName: "aethersy_session",
   cookieMaxAgeSec: 60 * 60 * 24 * 7,

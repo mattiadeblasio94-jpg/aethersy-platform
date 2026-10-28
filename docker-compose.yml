@@ -131,6 +131,10 @@ services:
       - METERING_ENABLED=${METERING_ENABLED:-false}
       - METERING_RATE_PER_MINUTE=${METERING_RATE_PER_MINUTE:-120}
       - METERING_SIGNUP_CREDITS=${METERING_SIGNUP_CREDITS:-0}
+      # Cifratura a riposo dei segreti di integrazione (AES-256-GCM). Se
+      # CONSOLE_SECRETS_KEY non e' impostata, il BFF ricade su AP_ENCRYPTION_KEY.
+      - CONSOLE_SECRETS_KEY=${CONSOLE_SECRETS_KEY:-}
+      - AP_ENCRYPTION_KEY=${AP_ENCRYPTION_KEY}
     depends_on:
       - app
       - postgres

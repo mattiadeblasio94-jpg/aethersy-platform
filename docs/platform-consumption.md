@@ -854,14 +854,21 @@ testing automatico sui creative, attribution avanzata, SLA e supporto enterprise
 | Sessione | **non toccata** — il tenant si risolve a ogni richiesta da email/chiave, non dalla sessione | `tenantId` in `Session` solo se serve caching |
 | `chat()` | **fatto** — `meter?: MeterInfo`, `billChat()` token-based | `attempt_no` incrementale sui fallback (oggi `1`) |
 | Generazione | **fatto** — `ai-gen/{select,venice,generate}.ts` + `img_out`/`tts`/`vid_out` in `/api/ai/generate` | — |
-| `routes.ts` | **fatto** — `authorizeAi()` (cookie **o** Bearer key) + release su errore; `/api/ai/balance` e `/api/ai/usage` | `flow_run` (P0.3) |
-| Compose `console` | **fatto** — parametri discreti `CONSOLE_PG*`/`CONSOLE_REDIS_*` derivati da `AP_POSTGRES_*`/`AP_REDIS_PASSWORD` (nessuna URL con credenziali); dipendenze su `postgres`/`redis` | — |
+| `routes.ts` | **fatto** — `authorizeAi()` (cookie **o** Bearer key) + release su errore; `/api/ai/balance` e `/api/ai/usage` | — |
+| Compose `console` | **fatto** — parametri discreti `CONSOLE_PG*`/`CONSOLE_REDIS_*` derivati da `AP_POSTGRES_*`/`AP_REDIS_PASSWORD` (nessuna URL con credenziali); dipendenze su `postgres`/`redis`; `CONSOLE_SECRETS_KEY` (fallback `AP_ENCRYPTION_KEY`) | — |
 | Redis | **fatto** — riuso dello stack, namespace `rl:` | quota negativa su Redis non necessaria |
-| Migrazioni | **fatto** — `metering/schema.sql` → `schema.ts` (bundle) + `migrate.ts` idempotente all'avvio, schema isolato | — |
-| Test | **fatto** — `npm run test:metering` (19 asserzioni pure su prezzi + pattern) | test di integrazione con DB reale |
+| Migrazioni | **fatto** — `metering/schema.sql` + `pipeline/schema.sql` → `schema.ts` (bundle) + `migrateMetering()`/`migratePipeline()` idempotenti all'avvio, schemi isolati da `public` | — |
+| Schema `pipeline` (P0.3) | **fatto** — `pipeline_run`/`agent_task`/`asset`/`integration_credential`/`lead`, FK verso `metering.tenant` | — |
+| Orchestrazione (P0.3) | **fatto** — `pipeline/orchestrator.ts`: `openRun`/`orchestrateRun`/`approveRun`/`deliverRun`/`retryRun`, esecutore **iniettato** (`TaskExecutor`), HITL obbligatorio su `approved→delivered` | executor di produzione (accodo su Activepieces) |
+| Metering orchestrazione (P0.3) | **fatto** — `capability='flow_run'`, `unit='request'`, 1 × 0.0020 € per task; `recordFlowRun()` = estimate → reserve → `recordUsage` → release su errore; `runUsage()`/`runUsageSummary()` aggregano per run | metrica "tasso di fallback a pagamento" |
+| Stato pipeline (P0.3) | **fatto** — `pipeline/catalog.ts` puro: `STAGES` (brand/website/content/social), `RUN_TRANSITIONS`, `canTransitionRun`/`derivedRunStatus` | stadi P1 (idea, strategia, ads, growth) |
+| Segreti integrazione (P0.6, anticipato) | **fatto** — `pipeline/secrets.ts` (AES-256-GCM, formato `v1:…`), chiave da `CONSOLE_SECRETS_KEY`; `secret_enc` mai in chiaro nel DB | rotazione chiave + re-encrypt |
+| Rotte pipeline (P0.3) | **fatto** — `/api/pipeline/{stages,runs,runs/:id,usage,execute,approve,deliver,retry,assets,leads,integrations}` | — |
+| Test | **fatto** — `npm run test:metering` (27 asserzioni pure: prezzi + pattern + catalogo/stati pipeline) | test di integrazione con DB reale |
 | Snapshot listini | **solo seed** statico (price book v1) | cron di aggiornamento `price_book` + `fx_usd_eur` |
 
 ---
 
-*Fine documento. Nessuna implementazione è stata eseguita: questo file è progettazione. Le voci
-`[DA VERIFICARE]` vanno risolte prima della fase di build.*
+*Documento di progettazione + stato implementativo. P0.1/P0.2 sono in `24c1d1f`; P0.3 (schema
+`pipeline`, orchestratore, segreti, rotte, metering `flow_run`) è implementato. Le voci
+`[DA VERIFICARE]` restanti vanno risolte prima della fase di build.*

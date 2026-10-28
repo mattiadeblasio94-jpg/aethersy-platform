@@ -1,0 +1,668 @@
+import crypto from "node:crypto";
+import { withTx } from "../metering/db.js";
+import {
+  availableCredits,
+  estimateCredits,
+  recordUsage,
+  releaseReservation,
+  reserveCredits,
+  tenantById,
+  type RecordUsageResult,
+} from "../metering/repo.js";
+import type { Capability, Unit } from "../metering/price.js";
+import {
+  canTransitionRun,
+  derivedRunStatus,
+  type RunStatus,
+  type StageId,
+  type StageSpec,
+  type TaskStatus,
+} from "./catalog.js";
+
+// Repository della pipeline: run per stadio, task per droid, asset e lead.
+// Tutte le query sono parametrizzate; ogni scrittura di stato passa dalla
+// macchina a stati di `catalog.ts` (niente transizioni inventate sul DB).
+
+export interface PipelineRunRow {
+  id: string;
+  tenant_id: string;
+  stage: string;
+  status: RunStatus;
+  title: string;
+  brief: unknown;
+  context: unknown;
+  approved_by: string | null;
+  approved_at: Date | null;
+  delivered_at: Date | null;
+  started_at: Date | null;
+  finished_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface AgentTaskRow {
+  id: string;
+  run_id: string;
+  seq: number;
+  droid: string;
+  title: string;
+  status: TaskStatus;
+  flow_run_id: string | null;
+  input: unknown;
+  output: unknown;
+  error: string | null;
+  attempt_no: number;
+  started_at: Date | null;
+  finished_at: Date | null;
+}
+
+export interface AssetRow {
+  id: string;
+  tenant_id: string;
+  run_id: string | null;
+  task_id: string | null;
+  kind: string;
+  name: string;
+  storage_key: string;
+  mime: string | null;
+  size_bytes: string | null;
+  version: number;
+  status: string;
+  meta: unknown;
+  approved_by: string | null;
+  approved_at: Date | null;
+  created_at: Date;
+}
+
+// --- Run ---------------------------------------------------------------------
+
+export interface CreateRunInput {
+  tenantId: string;
+  stage: StageId;
+  title?: string;
+  brief?: unknown;
+  context?: unknown;
+}
+
+/** Crea un run `draft` per lo stadio, con i task pianificati dallo `StageSpec`. */
+export async function createRun(input: CreateRunInput, spec: StageSpec): Promise<PipelineRunRow> {
+  return withTx(async (client) => {
+    const { rows } = await client.query<PipelineRunRow>(
+      `INSERT INTO pipeline.pipeline_run (tenant_id, stage, title, brief, context)
+       VALUES ($1, $2, $3, $4::jsonb, $5::jsonb)
+       RETURNING *`,
+      [
+        input.tenantId,
+        input.stage,
+        input.title ?? spec.title,
+        JSON.stringify(input.brief ?? {}),
+        JSON.stringify(input.context ?? {}),
+      ],
+    );
+    const run = rows[0];
+
+    // Pianificazione dei task: seq progressivo nell'ordine dello StageSpec.
+    for (let i = 0; i < spec.tasks.length; i++) {
+      const t = spec.tasks[i];
+      await client.query(
+        `INSERT INTO pipeline.agent_task (run_id, seq, droid, title, input)
+         VALUES ($1, $2, $3, $4, $5::jsonb)`,
+        [run.id, i + 1, t.droid, t.title, JSON.stringify({ stage: spec.id, brief: input.brief ?? {} })],
+      );
+    }
+    return run;
+  });
+}
+
+export async function getRun(tenantId: string, runId: string): Promise<PipelineRunRow | null> {
+  const { rows } = await withTx((client) =>
+    client.query<PipelineRunRow>(
+      `SELECT * FROM pipeline.pipeline_run WHERE id = $1 AND tenant_id = $2`,
+      [runId, tenantId],
+    ),
+  );
+  return rows[0] ?? null;
+}
+
+export async function listRuns(
+  tenantId: string,
+  opts: { stage?: string; status?: string; limit?: number } = {},
+): Promise<PipelineRunRow[]> {
+  const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+  const { rows } = await withTx((client) =>
+    client.query<PipelineRunRow>(
+      `SELECT * FROM pipeline.pipeline_run
+        WHERE tenant_id = $1
+          AND ($2::text IS NULL OR stage = $2)
+          AND ($3::text IS NULL OR status = $3)
+        ORDER BY created_at DESC
+        LIMIT $4`,
+      [tenantId, opts.stage ?? null, opts.status ?? null, limit],
+    ),
+  );
+  return rows;
+}
+
+/**
+ * Transizione di stato del run: valida con la macchina a stati, poi aggiorna
+ * i timestamp coerenti (`approved_at`, `delivered_at`, `finished_at`).
+ * Ritorna `null` se la transizione non e' ammessa.
+ */
+export async function transitionRun(
+  tenantId: string,
+  runId: string,
+  to: RunStatus,
+  opts: { approvedBy?: string } = {},
+): Promise<PipelineRunRow | null> {
+  const current = await getRun(tenantId, runId);
+  if (!current) return null;
+  if (!canTransitionRun(current.status, to)) return null;
+
+  const { rows } = await withTx((client) =>
+    client.query<PipelineRunRow>(
+      `UPDATE pipeline.pipeline_run SET
+         status      = $3,
+         started_at  = CASE WHEN $3 = 'in_progress' AND started_at IS NULL THEN now() ELSE started_at END,
+         approved_by = CASE WHEN $3 = 'approved' THEN COALESCE($4, approved_by) ELSE approved_by END,
+         approved_at = CASE WHEN $3 = 'approved' THEN now() ELSE approved_at END,
+         delivered_at = CASE WHEN $3 = 'delivered' THEN now() ELSE delivered_at END,
+         finished_at = CASE WHEN $3 IN ('delivered','failed') THEN now() ELSE finished_at END,
+         updated_at  = now()
+       WHERE id = $1 AND tenant_id = $2
+       RETURNING *`,
+      [runId, tenantId, to, opts.approvedBy ?? null],
+    ),
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * Riallinea lo stato del run dai task (chiamato dopo l'esecuzione dei task):
+ * `failed` se un task e' fallito, `in_review` se sono tutti conclusi.
+ * Non riporta mai indietro un run gia' approvato/consegnato.
+ */
+export async function syncRunStatus(tenantId: string, runId: string): Promise<PipelineRunRow | null> {
+  const current = await getRun(tenantId, runId);
+  if (!current) return null;
+  if (current.status === "approved" || current.status === "delivered") return current;
+
+  const tasks = await listTasks(tenantId, runId);
+  const derived = derivedRunStatus(tasks);
+  if (derived === current.status) return current;
+  return transitionRun(tenantId, runId, derived);
+}
+
+// --- Task --------------------------------------------------------------------
+
+export async function listTasks(tenantId: string, runId: string): Promise<AgentTaskRow[]> {
+  const { rows } = await withTx((client) =>
+    client.query<AgentTaskRow>(
+      `SELECT t.* FROM pipeline.agent_task t
+         JOIN pipeline.pipeline_run r ON r.id = t.run_id
+        WHERE t.run_id = $1 AND r.tenant_id = $2
+        ORDER BY t.seq ASC`,
+      [runId, tenantId],
+    ),
+  );
+  return rows;
+}
+
+/** Marca il task come in esecuzione e registra il flow_run Activepieces. */
+export async function startTask(
+  tenantId: string,
+  taskId: string,
+  flowRunIdValue?: string | null,
+): Promise<AgentTaskRow | null> {
+  const { rows } = await withTx((client) =>
+    client.query<AgentTaskRow>(
+      `UPDATE pipeline.agent_task t SET
+         status = 'running', started_at = COALESCE(started_at, now()),
+         flow_run_id = COALESCE($3, t.flow_run_id), updated_at = now()
+       FROM pipeline.pipeline_run r
+       WHERE t.id = $1 AND r.id = t.run_id AND r.tenant_id = $2
+         AND t.status IN ('pending','failed')
+       RETURNING t.*`,
+      [taskId, tenantId, flowRunIdValue ?? null],
+    ),
+  );
+  return rows[0] ?? null;
+}
+
+export async function finishTask(
+  tenantId: string,
+  taskId: string,
+  result: { output?: unknown; status?: Extract<TaskStatus, "done" | "failed" | "skipped">; error?: string | null },
+): Promise<AgentTaskRow | null> {
+  const status = result.status ?? "done";
+  const { rows } = await withTx((client) =>
+    client.query<AgentTaskRow>(
+      `UPDATE pipeline.agent_task t SET
+         status = $3,
+         output = COALESCE($4::jsonb, t.output),
+         error = $5,
+         finished_at = now(),
+         attempt_no = t.attempt_no + CASE WHEN $3 = 'failed' THEN 1 ELSE 0 END,
+         updated_at = now()
+       FROM pipeline.pipeline_run r
+       WHERE t.id = $1 AND r.id = t.run_id AND r.tenant_id = $2
+         AND t.status = 'running'
+       RETURNING t.*`,
+      [taskId, tenantId, status, result.output === undefined ? null : JSON.stringify(result.output), result.error ?? null],
+    ),
+  );
+  return rows[0] ?? null;
+}
+
+// --- Asset -------------------------------------------------------------------
+
+export interface RegisterAssetInput {
+  tenantId: string;
+  runId?: string | null;
+  taskId?: string | null;
+  kind: AssetRow["kind"];
+  name: string;
+  storageKey: string;
+  mime?: string | null;
+  sizeBytes?: number | null;
+  meta?: unknown;
+}
+
+/**
+ * Registra un deliverable. La versione e' calcolata come max+1 per
+ * (run, kind, name): ogni rigenerazione produce una nuova revisione, la
+ * precedente resta consultabile. L'indice unique in DDL rende l'operazione
+ * sicura anche in concorrenza.
+ */
+export async function registerAsset(input: RegisterAssetInput): Promise<AssetRow> {
+  return withTx(async (client) => {
+    const runId = input.runId ?? null;
+    const { rows: verRows } = await client.query<{ next: number }>(
+      `SELECT COALESCE(MAX(version), 0) + 1 AS next
+         FROM pipeline.asset
+        WHERE tenant_id = $1 AND kind = $2 AND name = $3
+          AND COALESCE(run_id, '00000000-0000-0000-0000-000000000000'::uuid)
+              = COALESCE($4::uuid, '00000000-0000-0000-0000-000000000000'::uuid)`,
+      [input.tenantId, input.kind, input.name, runId],
+    );
+    const version = Number(verRows[0]?.next ?? 1);
+
+    const { rows } = await client.query<AssetRow>(
+      `INSERT INTO pipeline.asset
+         (tenant_id, run_id, task_id, kind, name, storage_key, mime, size_bytes, version, meta)
+       VALUES ($1, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10::jsonb)
+       RETURNING *`,
+      [
+        input.tenantId,
+        runId,
+        input.taskId ?? null,
+        input.kind,
+        input.name,
+        input.storageKey,
+        input.mime ?? null,
+        input.sizeBytes ?? null,
+        version,
+        JSON.stringify(input.meta ?? {}),
+      ],
+    );
+    return rows[0];
+  });
+}
+
+export async function listAssets(
+  tenantId: string,
+  opts: { runId?: string; kind?: string; status?: string; limit?: number } = {},
+): Promise<AssetRow[]> {
+  const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500);
+  const { rows } = await withTx((client) =>
+    client.query<AssetRow>(
+      `SELECT * FROM pipeline.asset
+        WHERE tenant_id = $1
+          AND ($2::uuid IS NULL OR run_id = $2::uuid)
+          AND ($3::text IS NULL OR kind = $3)
+          AND ($4::text IS NULL OR status = $4)
+        ORDER BY created_at DESC
+        LIMIT $5`,
+      [tenantId, opts.runId ?? null, opts.kind ?? null, opts.status ?? null, limit],
+    ),
+  );
+  return rows;
+}
+
+/** Approva (o rifiuta) un deliverable. Solo gli asset in `in_review` sono decidibili. */
+export async function decideAsset(
+  tenantId: string,
+  assetId: string,
+  decision: "approved" | "rejected",
+  approvedBy: string,
+): Promise<AssetRow | null> {
+  const { rows } = await withTx((client) =>
+    client.query<AssetRow>(
+      `UPDATE pipeline.asset SET
+         status = $3, approved_by = CASE WHEN $3 = 'approved' THEN $4 ELSE approved_by END,
+         approved_at = CASE WHEN $3 = 'approved' THEN now() ELSE approved_at END
+       WHERE id = $1 AND tenant_id = $2 AND status = 'in_review'
+       RETURNING *`,
+      [assetId, tenantId, decision, approvedBy],
+    ),
+  );
+  return rows[0] ?? null;
+}
+
+// --- Lead --------------------------------------------------------------------
+
+export interface CreateLeadInput {
+  tenantId: string;
+  runId?: string | null;
+  source?: string;
+  name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  message?: string | null;
+  utm?: unknown;
+  payload?: unknown;
+}
+
+export async function createLead(input: CreateLeadInput): Promise<{ id: string }> {
+  const { rows } = await withTx((client) =>
+    client.query<{ id: string }>(
+      `INSERT INTO pipeline.lead
+         (tenant_id, run_id, source, name, email, phone, message, utm, payload)
+       VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb)
+       RETURNING id`,
+      [
+        input.tenantId,
+        input.runId ?? null,
+        input.source ?? "website",
+        input.name ?? null,
+        input.email ?? null,
+        input.phone ?? null,
+        input.message ?? null,
+        JSON.stringify(input.utm ?? {}),
+        JSON.stringify(input.payload ?? {}),
+      ],
+    ),
+  );
+  return rows[0];
+}
+
+// --- Integrazioni ------------------------------------------------------------
+
+export interface IntegrationRow {
+  id: string;
+  tenant_id: string;
+  provider: string;
+  kind: string;
+  label: string;
+  secret_enc: string;
+  scopes: string[];
+  status: string;
+  meta: unknown;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export async function saveIntegrationCredential(input: {
+  tenantId: string;
+  provider: string;
+  kind?: "oauth" | "webhook" | "api_key";
+  label?: string;
+  secretEnc: string;
+  scopes?: string[];
+  meta?: unknown;
+}): Promise<IntegrationRow> {
+  const { rows } = await withTx((client) =>
+    client.query<IntegrationRow>(
+      `INSERT INTO pipeline.integration_credential
+         (tenant_id, provider, kind, label, secret_enc, scopes, meta)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+       ON CONFLICT (tenant_id, provider, label) DO UPDATE SET
+         kind = EXCLUDED.kind,
+         secret_enc = EXCLUDED.secret_enc,
+         scopes = EXCLUDED.scopes,
+         meta = EXCLUDED.meta,
+         status = 'active',
+         updated_at = now()
+       RETURNING *`,
+      [
+        input.tenantId,
+        input.provider,
+        input.kind ?? "oauth",
+        input.label ?? "",
+        input.secretEnc,
+        input.scopes ?? [],
+        JSON.stringify(input.meta ?? {}),
+      ],
+    ),
+  );
+  return rows[0];
+}
+
+/** Credenziali senza il segreto cifrato: l'elenco e' sicuro per la Console. */
+export async function listIntegrationCredentials(
+  tenantId: string,
+): Promise<Omit<IntegrationRow, "secret_enc">[]> {
+  const { rows } = await withTx((client) =>
+    client.query<IntegrationRow>(
+      `SELECT id, tenant_id, provider, kind, label, scopes, status, meta, created_at, updated_at
+         FROM pipeline.integration_credential
+        WHERE tenant_id = $1
+        ORDER BY created_at DESC`,
+      [tenantId],
+    ),
+  );
+  return rows;
+}
+
+export async function revokeIntegrationCredential(
+  tenantId: string,
+  id: string,
+): Promise<boolean> {
+  const res = await withTx((client) =>
+    client.query(
+      `UPDATE pipeline.integration_credential
+          SET status = 'revoked', updated_at = now()
+        WHERE id = $1 AND tenant_id = $2`,
+      [id, tenantId],
+    ),
+  );
+  return (res.rowCount ?? 0) > 0;
+}
+
+// --- Manifest di consumo per run ---------------------------------------------
+
+export interface RunUsageRow {
+  capability: string;
+  requests: number;
+  credits: number;
+  price_eur: number;
+  provider_cost_usd: number;
+}
+
+export interface RunUsageSummary {
+  /** Righe per capability, dalla piu' costosa. */
+  byCapability: RunUsageRow[];
+  totals: {
+    requests: number;
+    credits: number;
+    price_eur: number;
+    provider_cost_usd: number;
+  };
+}
+
+/**
+ * Manifest di consumo di un run: aggrega `metering.usage_event` per gli
+ * `flow_run_id` registrati sui task dello stadio. E' il ponte fra pipeline e
+ * banco di conto (docs sez. 5: "run_id -> unita' AI consumate").
+ *
+ * Il consumo e' attribuito SOLO se il task ha un `flow_run_id` e se la riga di
+ * `usage_event` appartiene allo stesso tenant del run: nessuna fuga di dati fra
+ * tenant e nessun consumo orfano conteggiato due volte.
+ */
+export async function runUsage(tenantId: string, runId: string): Promise<RunUsageRow[]> {
+  const { rows } = await withTx((client) =>
+    client.query<{ capability: string; requests: string; credits: string; price_eur: string; provider_cost_usd: string }>(
+      `SELECT ue.capability,
+              COUNT(*) AS requests,
+              COALESCE(SUM(ue.credits), 0) AS credits,
+              COALESCE(SUM(ue.price_eur), 0) AS price_eur,
+              COALESCE(SUM(ue.provider_cost_usd), 0) AS provider_cost_usd
+         FROM metering.usage_event ue
+         JOIN pipeline.agent_task t ON t.flow_run_id = ue.flow_run_id
+         JOIN pipeline.pipeline_run r ON r.id = t.run_id
+        WHERE r.id = $1 AND r.tenant_id = $2 AND ue.tenant_id = $2
+        GROUP BY ue.capability
+        ORDER BY credits DESC`,
+      [runId, tenantId],
+    ),
+  );
+  return rows.map((r) => ({
+    capability: r.capability,
+    requests: Number(r.requests),
+    credits: Number(r.credits),
+    price_eur: Number(r.price_eur),
+    provider_cost_usd: Number(r.provider_cost_usd),
+  }));
+}
+
+/**
+ * Manifest di consumo del run con i totali: e' la vista che la Console mostra
+ * accanto ai deliverable ("quanto e' costato questo stadio"). Somma i consumi
+ * AI (dal ledger) e il consumo di orchestrazione (`flow_run`, registrato da
+ * `recordFlowRun`).
+ */
+export async function runUsageSummary(tenantId: string, runId: string): Promise<RunUsageSummary> {
+  const byCapability = await runUsage(tenantId, runId);
+  const totals = byCapability.reduce(
+    (acc, r) => ({
+      requests: acc.requests + r.requests,
+      credits: acc.credits + r.credits,
+      price_eur: acc.price_eur + r.price_eur,
+      provider_cost_usd: acc.provider_cost_usd + r.provider_cost_usd,
+    }),
+    { requests: 0, credits: 0, price_eur: 0, provider_cost_usd: 0 },
+  );
+  return { byCapability, totals };
+}
+
+// --- Metering dell'orchestrazione (non-AI) -----------------------------------
+
+/** Capability/unit del consumo non-AI: 1 esecuzione di task = 1 `request`. */
+const FLOW_RUN_CAPABILITY: Capability = "flow_run";
+const FLOW_RUN_UNIT: Unit = "request";
+
+export interface RecordFlowRunInput {
+  tenantId: string;
+  /** Run di pipeline a cui appartiene il task (per audit/joins). */
+  runId: string;
+  /** Task eseguito: se presente, il suo `flow_run_id` viene riallineato. */
+  taskId?: string | null;
+  /** Id del flow run Activepieces (chiave di attribuzione del consumo AI). */
+  flowRunId: string;
+  /** Id idempotenza: default `flow_run:<flowRunId>`. */
+  requestId?: string;
+  attemptNo?: number;
+  /** Esito dell'esecuzione: `error` registra la riga ma senza addebito pieno. */
+  status?: "success" | "error";
+  latencyMs?: number | null;
+  source?: string;
+}
+
+export interface RecordFlowRunResult extends RecordUsageResult {
+  requestId: string;
+  flowRunId: string;
+  /** false se il run non esiste o appartiene a un altro tenant. */
+  recorded: boolean;
+}
+
+/**
+ * Calcola e REGISTRA il consumo di orchestrazione di un task di pipeline:
+ * 1 esecuzione = 1 unita' `request` sulla capability `flow_run`
+ * (prezzo dal price book, oggi 0,0020 USD/request, min 1 credito).
+ *
+ * Percorso: stima -> prenotazione atomica -> `recordUsage` (che scrive
+ * `usage_event` e salda la prenotazione nella stessa transazione). In caso di
+ * errore la prenotazione viene rilasciata: nessun addebito senza esecuzione.
+ * L'idempotenza su `(request_id, attempt_no)` rende sicuro un retry.
+ */
+export async function recordFlowRun(input: RecordFlowRunInput): Promise<RecordFlowRunResult> {
+  const run = await getRun(input.tenantId, input.runId);
+  if (!run) {
+    return {
+      requestId: input.requestId ?? `flow_run:${input.flowRunId}`,
+      flowRunId: input.flowRunId,
+      recorded: false,
+      credits: 0,
+      charged: 0,
+      overflow: 0,
+      balance: 0,
+      available: 0,
+      duplicate: false,
+      priceEur: 0,
+      providerCostUsd: 0,
+      markupBps: 0,
+      priceBookVersion: null,
+    };
+  }
+
+  const tenant = await tenantById(input.tenantId);
+  if (!tenant) throw new Error(`tenant ${input.tenantId} inesistente`);
+
+  const requestId = input.requestId ?? `flow_run:${input.flowRunId}`;
+  const counts = { [FLOW_RUN_UNIT]: 1 } as Partial<Record<Unit, number>>;
+
+  const estimate = await estimateCredits(tenant, {
+    capability: FLOW_RUN_CAPABILITY,
+    model: "*",
+    provider: "*",
+    units: [FLOW_RUN_UNIT],
+    counts,
+  });
+  const available = await availableCredits(input.tenantId);
+  const reservation = Math.max(0, Math.min(estimate, available));
+  const res = await reserveCredits(input.tenantId, requestId, reservation);
+  if (!res.ok) {
+    // Saldo insufficiente: nessuna esecuzione addebitabile. Fail-closed.
+    throw new Error("crediti insufficienti per il task di pipeline");
+  }
+
+  try {
+    const settled = await recordUsage({
+      tenant,
+      requestId,
+      reservation,
+      flowRunId: input.flowRunId,
+      capability: FLOW_RUN_CAPABILITY,
+      provider: "*",
+      model: "*",
+      units: counts,
+      latencyMs: input.latencyMs ?? null,
+      status: input.status ?? "success",
+      source: input.source ?? "pipeline",
+    });
+
+    // Riallinea il flow_run_id del task (se non gia' impostato da startTask).
+    if (input.taskId) {
+      await withTx((client) =>
+        client.query(
+          `UPDATE pipeline.agent_task t SET flow_run_id = $3, updated_at = now()
+             FROM pipeline.pipeline_run r
+            WHERE t.id = $1 AND r.id = t.run_id AND r.tenant_id = $2
+              AND t.flow_run_id IS NULL`,
+          [input.taskId, input.tenantId, input.flowRunId],
+        ),
+      );
+    }
+
+    return { ...settled, requestId, flowRunId: input.flowRunId, recorded: true };
+  } catch (err) {
+    await releaseReservation(input.tenantId, requestId, reservation, "flow_run failed").catch(
+      () => {},
+    );
+    throw err;
+  }
+}
+
+/** Flow run id generato per un task (formato stabile: stage:run:seq:random). */
+export function makeFlowRunId(stage: string, runId: string, seq: number): string {
+  return `${stage}:${runId}:${seq}:${crypto.randomUUID().slice(0, 8)}`;
+}

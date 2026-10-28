@@ -28,6 +28,16 @@ try {
   app.log.error({ err }, "migrazione metering fallita: metering inerte");
 }
 
+// Migrazione idempotente dello schema `pipeline` (P0.3). Dipende da
+// `metering.tenant` (FK): gira solo dopo il metering e solo se questo e' attivo.
+try {
+  const { migratePipeline } = await import("./pipeline/migrate.js");
+  const res = await migratePipeline();
+  if (res.applied) app.log.info("schema pipeline applicato");
+} catch (err) {
+  app.log.error({ err }, "migrazione pipeline fallita: pipeline inerte");
+}
+
 await registerRoutes(app);
 
 // Chiusura ordinata dei pool (Postgres/Redis) su SIGTERM/SIGINT.

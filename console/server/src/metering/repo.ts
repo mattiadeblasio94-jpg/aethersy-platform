@@ -85,6 +85,24 @@ export async function tenantFromApiKey(rawKey: string): Promise<TenantContext | 
   return toTenantContext(row, row.api_key_id, row.source_tag, null);
 }
 
+/**
+ * Risolve il tenant dal suo id. Usato dai percorsi interni (orchestratore di
+ * pipeline, cron di metering non-AI) che non hanno una richiesta HTTP da cui
+ * derivare l'identita'.
+ */
+export async function tenantById(tenantId: string): Promise<TenantContext | null> {
+  const { rows } = await withTx((client) =>
+    client.query<TenantRow>(
+      `SELECT id, name, plan, markup_bps, credit_unit, hard_stop_on_empty
+         FROM metering.tenant WHERE id = $1`,
+      [tenantId],
+    ),
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return toTenantContext(row, null, "pipeline", null);
+}
+
 /** Risolve il tenant dall'email dell'utente (sessione cookie). */
 export async function tenantFromEmail(email: string): Promise<TenantContext | null> {
   const { rows } = await withTx((client) =>
