@@ -3,7 +3,7 @@
 > Aggiornare dopo **ogni** fase con: data/ora, esito, comandi di verifica, note.
 > Stati ammessi: `DONE`, `BLOCKED: input #N`, `NOTE`.
 >
-> Ultima revisione: 2026-10-27
+> Ultima revisione: 2026-10-28
 
 ## Stato sintetico
 
@@ -17,9 +17,9 @@
 | 5 | Provider AI (OpenRouter/Venice) | `DONE` — **OpenRouter** creato via API admin, `status=active`, `enabledForChat=true`, 464 modelli; acceptance con flow reale "Ask AI" (webhook → `askAi`) → run `SUCCEEDED`, output `PONG`. Venice: chiave valida ma senza credito → non aggiunto (opzionale) |
 | 6 | Slack | `BLOCKED: input #5` — `SLACK_WEBHOOK_URL` vuoto |
 | 7 | Endpoint MCP | `DONE` — hostname `mcp.aethersy.online` esposto via Caddy; discovery OAuth + handshake verificati (401 con `WWW-Authenticate` → resource metadata) |
-| 8 | Branding | `BLOCKED` — richiede decisione utente su nome/logo/colori (non è un input infrastrutturale) |
+| 8 | Branding | `DONE` — nome **Aethersy**, colore `#6e41e2`, loghi/asset locali via patch `theme.js` + bind-mount + `05-branding.sh`; verificato live (header/titolo/favicon) |
 | 9 | Backup e monitoraggio | `DONE` — `backup.sh` corretto (rotazione robusta a glob vuoto) ed eseguito; **restore testato** su DB temporaneo (83 tabelle, dati coerenti) |
-| 10 | Review finale e consegna | `IN CORSO` — audit infrastrutturale **completato** (tutte le verifiche OK); restano azioni utente (rotazione credenziali, backup segreti offline) e le fasi 6/8 |
+| 10 | Review finale e consegna | `IN CORSO` — audit infrastrutturale **completato** (tutte le verifiche OK); restano azioni utente (rotazione credenziali, backup segreti offline) e asset brand definitivi; fase 6 in attesa di `SLACK_WEBHOOK_URL` |
 
 ## Verifica §11 — nomi variabili, versioni, route
 
