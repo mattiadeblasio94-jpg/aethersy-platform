@@ -3,6 +3,7 @@ import {
   useApproveRun,
   useDeliverRun,
   useExecuteRun,
+  useExportRun,
   useOpenRun,
   usePipelineRuns,
   useRetryRun,
@@ -217,10 +218,12 @@ function RunDetailView({ detail, onClose }: { detail: RunDetail; onClose: () => 
   const approve = useApproveRun();
   const deliver = useDeliverRun();
   const retry = useRetryRun();
+  const exportRun = useExportRun();
   const [error, setError] = useState<string | null>(null);
 
   const pending = tasks.filter((t) => t.status === "pending" || t.status === "failed").length;
   const busy = execute.isPending || approve.isPending || deliver.isPending || retry.isPending;
+  const exportable = run.status === "approved" || run.status === "delivered";
 
   function act(fn: () => void) {
     setError(null);
@@ -300,6 +303,19 @@ function RunDetailView({ detail, onClose }: { detail: RunDetail; onClose: () => 
             }
           >
             Riprova
+          </button>
+        )}
+        {exportable && (
+          <button
+            className="btn btn-ghost"
+            disabled={exportRun.isPending}
+            onClick={() =>
+              act(() =>
+                exportRun.mutate(run.id, { onError: (e) => setError((e as Error).message) }),
+              )
+            }
+          >
+            Esporta pacchetto
           </button>
         )}
       </div>

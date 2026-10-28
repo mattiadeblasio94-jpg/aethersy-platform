@@ -337,6 +337,40 @@ check("approvedVersion sceglie l'ultima approvata/consegnata", () => {
   eq(approvedVersion([{ version: 4, status: "delivered" }])?.version, 4, "delivered conta");
 });
 
+// --- pipeline/catalog.ts (macchina a stati dei lead, P0.6) -------------------
+const { canTransitionLead, isLeadStatus, LEAD_STATUSES } = await import(
+  "../src/pipeline/catalog.ts"
+);
+
+console.log("pipeline/catalog.ts — lead");
+
+check("isLeadStatus riconosce solo gli stati noti", () => {
+  for (const s of LEAD_STATUSES) eq(isLeadStatus(s), true, s);
+  eq(isLeadStatus("boh"), false, "sconosciuto");
+  eq(isLeadStatus("NEW"), false, "case-sensitive");
+});
+
+check("transizioni lead ammesse nel funnel", () => {
+  eq(canTransitionLead("new", "contacted"), true, "new->contacted");
+  eq(canTransitionLead("new", "won"), true, "new->won (chiusura rapida)");
+  eq(canTransitionLead("contacted", "qualified"), true, "contacted->qualified");
+  eq(canTransitionLead("qualified", "won"), true, "qualified->won");
+  eq(canTransitionLead("qualified", "lost"), true, "qualified->lost");
+});
+
+check("transizioni lead non ammesse rifiutate", () => {
+  eq(canTransitionLead("won", "contacted"), false, "won e' terminale");
+  eq(canTransitionLead("lost", "won"), false, "lost e' terminale");
+  eq(canTransitionLead("spam", "new"), false, "spam e' terminale");
+  eq(canTransitionLead("contacted", "new"), false, "niente passi indietro");
+});
+
+check("spam raggiungibile da ogni stato non terminale", () => {
+  for (const s of ["new", "contacted", "qualified"]) {
+    eq(canTransitionLead(s, "spam"), true, `${s}->spam`);
+  }
+});
+
 console.log(`\n${passed} test superati, ${failures.length} falliti`);
 if (failures.length) {
   for (const f of failures) console.error(`- ${f.name}: ${f.message}`);

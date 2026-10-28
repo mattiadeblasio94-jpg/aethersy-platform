@@ -9,6 +9,7 @@ import Connections from "./pages/Connections";
 import AiCenter from "./pages/AiCenter";
 import Assets from "./pages/Assets";
 import Pipeline from "./pages/Pipeline";
+import Leads from "./pages/Leads";
 import Credits from "./pages/Credits";
 
 export default function App() {
@@ -28,6 +29,7 @@ export default function App() {
         <Route path="/connections" element={<Connections />} />
         <Route path="/assets" element={<Assets />} />
         <Route path="/pipeline" element={<Pipeline />} />
+        <Route path="/leads" element={<Leads />} />
         <Route path="/credits" element={<Credits />} />
         <Route path="/ai" element={<AiCenter />} />
       </Route>

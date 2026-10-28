@@ -13,10 +13,13 @@ import type { Capability, Unit } from "../metering/price.js";
 import {
   assetFamilyKey,
   canTransitionAsset,
+  canTransitionLead,
   canTransitionRun,
   derivedRunStatus,
   isAssetDecidable,
+  isLeadStatus,
   type AssetStatus,
+  type LeadStatus,
   type RunStatus,
   type StageId,
   type StageSpec,
@@ -538,6 +541,111 @@ export async function createLead(input: CreateLeadInput): Promise<{ id: string }
   return rows[0];
 }
 
+export interface LeadRow {
+  id: string;
+  tenant_id: string;
+  run_id: string | null;
+  source: string;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+  message: string | null;
+  utm: unknown;
+  payload: unknown;
+  status: LeadStatus;
+  notified_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+/** Elenco dei lead del tenant, dal piu' recente, con filtri opzionali. */
+export async function listLeads(
+  tenantId: string,
+  opts: { status?: string; runId?: string; limit?: number } = {},
+): Promise<LeadRow[]> {
+  const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500);
+  const { rows } = await withTx((client) =>
+    client.query<LeadRow>(
+      `SELECT * FROM pipeline.lead
+        WHERE tenant_id = $1
+          AND ($2::text IS NULL OR status = $2)
+          AND ($3::uuid IS NULL OR run_id = $3::uuid)
+        ORDER BY created_at DESC
+        LIMIT $4`,
+      [tenantId, opts.status ?? null, opts.runId ?? null, limit],
+    ),
+  );
+  return rows;
+}
+
+export async function getLead(tenantId: string, leadId: string): Promise<LeadRow | null> {
+  const { rows } = await withTx((client) =>
+    client.query<LeadRow>(
+      `SELECT * FROM pipeline.lead WHERE id = $1 AND tenant_id = $2`,
+      [leadId, tenantId],
+    ),
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * Aggiorna lo stato di un lead passando dalla macchina a stati di `catalog.ts`:
+ * una transizione non ammessa ritorna `null` (niente stati inventati sul DB).
+ */
+export async function updateLeadStatus(
+  tenantId: string,
+  leadId: string,
+  to: LeadStatus,
+): Promise<LeadRow | null> {
+  if (!isLeadStatus(to)) return null;
+  return withTx(async (client) => {
+    const { rows: cur } = await client.query<LeadRow>(
+      `SELECT * FROM pipeline.lead WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+      [leadId, tenantId],
+    );
+    const current = cur[0];
+    if (!current) return null;
+    if (current.status === to) return current;
+    if (!canTransitionLead(current.status, to)) return null;
+
+    const { rows } = await client.query<LeadRow>(
+      `UPDATE pipeline.lead
+          SET status = $3, updated_at = now()
+        WHERE id = $1 AND tenant_id = $2
+        RETURNING *`,
+      [leadId, tenantId, to],
+    );
+    return rows[0] ?? null;
+  });
+}
+
+/** Marca un lead come inoltrato al canale outbound (idempotente). */
+export async function markLeadNotified(tenantId: string, leadId: string): Promise<void> {
+  await withTx((client) =>
+    client.query(
+      `UPDATE pipeline.lead SET notified_at = now()
+        WHERE id = $1 AND tenant_id = $2 AND notified_at IS NULL`,
+      [leadId, tenantId],
+    ),
+  );
+}
+
+/** Conteggio lead per stato (per i badge della Console). */
+export async function leadStatusCounts(
+  tenantId: string,
+): Promise<{ status: string; count: number }[]> {
+  const { rows } = await withTx((client) =>
+    client.query<{ status: string; count: string }>(
+      `SELECT status, COUNT(*) AS count
+         FROM pipeline.lead
+        WHERE tenant_id = $1
+        GROUP BY status`,
+      [tenantId],
+    ),
+  );
+  return rows.map((r) => ({ status: r.status, count: Number(r.count) }));
+}
+
 // --- Integrazioni ------------------------------------------------------------
 
 export interface IntegrationRow {
@@ -619,6 +727,27 @@ export async function revokeIntegrationCredential(
     ),
   );
   return (res.rowCount ?? 0) > 0;
+}
+
+/**
+ * Credenziale attiva di un provider per il tenant (con segreto cifrato).
+ * Usata dal notificatore outbound: il chiamante decifra con `decryptSecret`.
+ * Ritorna `null` se non esiste o e' stata revocata.
+ */
+export async function findActiveIntegrationCredential(
+  tenantId: string,
+  provider: string,
+): Promise<IntegrationRow | null> {
+  const { rows } = await withTx((client) =>
+    client.query<IntegrationRow>(
+      `SELECT * FROM pipeline.integration_credential
+        WHERE tenant_id = $1 AND provider = $2 AND status = 'active'
+        ORDER BY updated_at DESC
+        LIMIT 1`,
+      [tenantId, provider],
+    ),
+  );
+  return rows[0] ?? null;
 }
 
 // --- Manifest di consumo per run ---------------------------------------------

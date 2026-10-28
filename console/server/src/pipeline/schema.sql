@@ -139,5 +139,12 @@ CREATE TABLE IF NOT EXISTS pipeline.lead (
     status IN ('new', 'contacted', 'qualified', 'won', 'lost', 'spam')
   )
 );
+-- Colonne aggiunte in P0.6 (idempotenti su DB gia' migrati).
+ALTER TABLE pipeline.lead ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+-- `notified_at`: valorizzato quando il lead e' stato inoltrato al canale
+-- outbound (Slack). NULL = non ancora notificato (o canale assente).
+ALTER TABLE pipeline.lead ADD COLUMN IF NOT EXISTS notified_at timestamptz;
 CREATE INDEX IF NOT EXISTS lead_tenant_time
   ON pipeline.lead(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS lead_tenant_status
+  ON pipeline.lead(tenant_id, status, created_at DESC);

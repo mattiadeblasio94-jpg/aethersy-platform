@@ -248,3 +248,38 @@ export function approvedVersion<T extends { version: number; status: string }>(
     .sort((a, b) => b.version - a.version);
   return accepted[0] ?? null;
 }
+
+// --- Lead (P0.6) -------------------------------------------------------------
+
+export type LeadStatus = "new" | "contacted" | "qualified" | "won" | "lost" | "spam";
+
+/**
+ * Transizioni ammesse di `lead.status`. Un lead entra come `new` e segue un
+ * funnel di qualificazione; `won`/`lost`/`spam` sono terminali. `spam` e'
+ * raggiungibile da qualunque stato non terminale (filtro in qualunque momento).
+ */
+const LEAD_TRANSITIONS: Record<LeadStatus, LeadStatus[]> = {
+  new: ["contacted", "qualified", "won", "lost", "spam"],
+  contacted: ["qualified", "won", "lost", "spam"],
+  qualified: ["won", "lost", "spam"],
+  won: [],
+  lost: [],
+  spam: [],
+};
+
+export const LEAD_STATUSES: LeadStatus[] = [
+  "new",
+  "contacted",
+  "qualified",
+  "won",
+  "lost",
+  "spam",
+];
+
+export function isLeadStatus(value: string): value is LeadStatus {
+  return (LEAD_STATUSES as string[]).includes(value);
+}
+
+export function canTransitionLead(from: LeadStatus, to: LeadStatus): boolean {
+  return (LEAD_TRANSITIONS[from] ?? []).includes(to);
+}

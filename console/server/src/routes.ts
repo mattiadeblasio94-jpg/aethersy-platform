@@ -6,6 +6,7 @@ import { meteringActive } from "./metering/db.js";
 import { authorizeAi, flowRunId, estimateTokens } from "./metering/guard.js";
 import { balanceSnapshot, recentUsage } from "./metering/repo.js";
 import { selectGenModel } from "./ai-gen/select.js";
+import type { NotifyResult } from "./pipeline/notify.js";
 
 // Rotte BFF:
 //   POST /api/auth/login     -> sign-in Activepieces, apre la sessione (cookie httpOnly)
@@ -18,6 +19,10 @@ import { selectGenModel } from "./ai-gen/select.js";
 //   POST /api/ai/video/retrieve -> stato/risultato di un job video
 //   GET  /api/ai/balance     -> saldo crediti + quota del tenant
 //   GET  /api/ai/usage       -> ultimi eventi di consumo
+//   POST /api/pipeline/leads -> webhook lead (Bearer key del tenant)
+//   GET  /api/pipeline/leads -> elenco lead del tenant
+//   PATCH /api/pipeline/leads/:id -> aggiorna lo stato del lead (funnel)
+//   GET  /api/pipeline/runs/:id/export -> pacchetto JSON dei deliverable approvati
 
 function requireSession(request: FastifyRequest, reply: FastifyReply): Session | null {
   const session = getSession(request);
@@ -683,6 +688,13 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     if (!run) {
       return reply.code(409).send({ code: "INVALID_TRANSITION", message: "Consegna non ammessa" });
     }
+    // Canale outbound (P0.6): notifica best-effort, non blocca la consegna.
+    const { notifyRunDelivered } = await import("./pipeline/notify.js");
+    const fallback: NotifyResult = { sent: false, channel: null };
+    const notified = await notifyRunDelivered(tenant.tenantId, run).catch(() => fallback);
+    if (!notified.sent && notified.error) {
+      request.log.warn({ runId, error: notified.error }, "notifica consegna non inviata");
+    }
     return run;
   });
 
@@ -696,6 +708,60 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(409).send({ code: "INVALID_TRANSITION", message: "Retry non ammesso" });
     }
     return run;
+  });
+
+  /**
+   * Export pacchettizzato di un run consegnato (P0.6): manifest JSON con i
+   * deliverable approvati/consegnati (metadati + storage key) e il consumo
+   * aggregato. E' il "pacchetto consegnabile" del pilota: nessun binario viene
+   * incluso, i riferimenti puntano allo storage esterno.
+   */
+  app.get("/api/pipeline/runs/:runId/export", async (request, reply) => {
+    const tenant = await pipelineTenant(request, reply);
+    if (!tenant) return;
+    const { runId } = request.params as { runId: string };
+    const { getRun, listAssets, runUsageSummary } = await import("./pipeline/repo.js");
+    const run = await getRun(tenant.tenantId, runId);
+    if (!run) return reply.code(404).send({ code: "NOT_FOUND", message: "Run inesistente" });
+
+    const assets = (await listAssets(tenant.tenantId, { runId })).filter(
+      (a) => a.status === "approved" || a.status === "delivered",
+    );
+    const usage = await runUsageSummary(tenant.tenantId, runId);
+
+    const pkg = {
+      format: "aethersy.run-package/v1",
+      generatedAt: new Date().toISOString(),
+      run: {
+        id: run.id,
+        stage: run.stage,
+        title: run.title,
+        status: run.status,
+        approvedBy: run.approved_by,
+        approvedAt: run.approved_at,
+        deliveredAt: run.delivered_at,
+      },
+      deliverables: assets.map((a) => ({
+        name: a.name,
+        kind: a.kind,
+        version: a.version,
+        status: a.status,
+        storageKey: a.storage_key,
+        mime: a.mime,
+        sizeBytes: a.size_bytes,
+        meta: a.meta,
+      })),
+      usage: {
+        credits: usage.totals.credits,
+        priceEur: usage.totals.price_eur,
+        byCapability: usage.byCapability,
+      },
+    };
+    const filename = `run-${run.stage}-${run.id.slice(0, 8)}.json`;
+    return reply
+      .header("Content-Disposition", `attachment; filename="${filename}"`)
+      .type("application/json")
+      .send(pkg);
   });
 
   // ------------------------------------------------------ Asset / lead -----
@@ -797,8 +863,8 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     const tenant = await pipelineTenant(request, reply);
     if (!tenant) return;
     const body = (request.body ?? {}) as Record<string, unknown>;
-    const { createLead } = await import("./pipeline/repo.js");
-    const lead = await createLead({
+    const { createLead, getLead, markLeadNotified } = await import("./pipeline/repo.js");
+    const created = await createLead({
       tenantId: tenant.tenantId,
       runId: (body.runId as string) ?? null,
       source: (body.source as string) ?? "website",
@@ -809,7 +875,63 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       utm: body.utm,
       payload: body,
     });
-    return reply.code(201).send(lead);
+    // Canale outbound (P0.6): inoltro best-effort del lead, non blocca la 201.
+    const { notifyLeadCreated } = await import("./pipeline/notify.js");
+    const lead = await getLead(tenant.tenantId, created.id);
+    if (lead) {
+      const fallback: NotifyResult = { sent: false, channel: null };
+      const notified = await notifyLeadCreated(tenant.tenantId, lead).catch(() => fallback);
+      if (notified.sent) {
+        await markLeadNotified(tenant.tenantId, lead.id).catch(() => undefined);
+      } else if (notified.error) {
+        request.log.warn({ leadId: lead.id, error: notified.error }, "notifica lead non inviata");
+      }
+    }
+    return reply.code(201).send(created);
+  });
+
+  /** Elenco lead del tenant con filtri opzionali + conteggio per stato. */
+  app.get("/api/pipeline/leads", async (request, reply) => {
+    const tenant = await pipelineTenant(request, reply);
+    if (!tenant) return;
+    const q = (request.query ?? {}) as { status?: string; runId?: string; limit?: string };
+    const { listLeads, leadStatusCounts } = await import("./pipeline/repo.js");
+    const { isLeadStatus } = await import("./pipeline/catalog.js");
+    if (q.status && !isLeadStatus(q.status)) {
+      return reply.code(400).send({ code: "BAD_REQUEST", message: `stato sconosciuto: ${q.status}` });
+    }
+    const limit = q.limit ? Number.parseInt(q.limit, 10) : undefined;
+    const [leads, counts] = await Promise.all([
+      listLeads(tenant.tenantId, {
+        status: q.status,
+        runId: q.runId,
+        limit: Number.isFinite(limit) ? limit : undefined,
+      }),
+      leadStatusCounts(tenant.tenantId),
+    ]);
+    return { leads, counts };
+  });
+
+  /** Avanza un lead nel funnel; 409 se la transizione non e' ammessa. */
+  app.patch("/api/pipeline/leads/:id", async (request, reply) => {
+    const tenant = await pipelineTenant(request, reply);
+    if (!tenant) return;
+    const { id } = request.params as { id: string };
+    const body = (request.body ?? {}) as { status?: string };
+    const { isLeadStatus } = await import("./pipeline/catalog.js");
+    if (!body.status || !isLeadStatus(body.status)) {
+      return reply.code(400).send({ code: "BAD_REQUEST", message: "status valido richiesto" });
+    }
+    const { getLead, updateLeadStatus } = await import("./pipeline/repo.js");
+    const before = await getLead(tenant.tenantId, id);
+    if (!before) return reply.code(404).send({ code: "NOT_FOUND", message: "Lead inesistente" });
+    const updated = await updateLeadStatus(tenant.tenantId, id, body.status);
+    if (!updated) {
+      return reply
+        .code(409)
+        .send({ code: "INVALID_TRANSITION", message: `${before.status} -> ${body.status} non ammessa` });
+    }
+    return updated;
   });
 
   app.get("/api/pipeline/integrations", async (request, reply) => {

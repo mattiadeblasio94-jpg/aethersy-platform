@@ -12,6 +12,11 @@ import type {
   ExecuteResult,
   Flow,
   FlowRun,
+  IntegrationCredential,
+  IntegrationKind,
+  Lead,
+  LeadsResponse,
+  LeadStatus,
   Project,
   RunDetail,
   SessionUser,
@@ -277,5 +282,92 @@ export function useUsageEvents(limit = 50) {
   return useQuery<UsageEvents>({
     queryKey: ["usage-events", limit],
     queryFn: () => api.get<UsageEvents>(`/ai/usage?limit=${limit}`),
+  });
+}
+
+// --- Lead + integrazioni (P0.6) ----------------------------------------------
+
+/** Lead del tenant con filtri opzionali + conteggio per stato. */
+export function useLeads(opts: { status?: string; runId?: string; limit?: number } = {}) {
+  const qs = new URLSearchParams();
+  if (opts.status) qs.set("status", opts.status);
+  if (opts.runId) qs.set("runId", opts.runId);
+  if (opts.limit) qs.set("limit", String(opts.limit));
+  const suffix = qs.toString() ? `?${qs}` : "";
+  return useQuery<LeadsResponse>({
+    queryKey: ["leads", opts.status ?? "", opts.runId ?? "", opts.limit ?? 0],
+    queryFn: () => api.get<LeadsResponse>(`/pipeline/leads${suffix}`),
+  });
+}
+
+/** Avanza un lead nel funnel (transizioni validate dal server). */
+export function useUpdateLead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { leadId: string; status: LeadStatus }) =>
+      api.patch<Lead>(`/pipeline/leads/${v.leadId}`, { status: v.status }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["leads"] }),
+  });
+}
+
+/** Credenziali di integrazione del tenant (senza segreti). */
+export function useIntegrations() {
+  return useQuery<IntegrationCredential[]>({
+    queryKey: ["integrations"],
+    queryFn: () => api.get<IntegrationCredential[]>("/pipeline/integrations"),
+  });
+}
+
+/** Salva (o aggiorna) una credenziale di integrazione cifrata a riposo. */
+export function useSaveIntegration() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      provider: string;
+      kind?: IntegrationKind;
+      label?: string;
+      secret: string;
+      scopes?: string[];
+      meta?: unknown;
+    }) => api.post<IntegrationCredential>("/pipeline/integrations", body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["integrations"] }),
+  });
+}
+
+/** Revoca una credenziale di integrazione. */
+export function useRevokeIntegration() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.post<{ ok: boolean }>(`/pipeline/integrations/${id}/revoke`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["integrations"] }),
+  });
+}
+
+/**
+ * Scarica il pacchetto JSON di un run consegnato (manifest deliverable +
+ * consumo). Usa `fetch` diretto per rispettare il `Content-Disposition` del BFF.
+ */
+export function useExportRun() {
+  return useMutation({
+    mutationFn: async (runId: string) => {
+      const res = await fetch(`/api/pipeline/runs/${runId}/export`, {
+        credentials: "same-origin",
+      });
+      if (!res.ok) throw new Error(`Export fallito (${res.status})`);
+      const blob = await res.blob();
+      const cd = res.headers.get("Content-Disposition") ?? "";
+      const match = /filename="([^"]+)"/.exec(cd);
+      const filename = match?.[1] ?? `run-${runId.slice(0, 8)}.json`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      return filename;
+    },
   });
 }

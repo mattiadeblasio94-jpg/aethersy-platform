@@ -53,6 +53,11 @@ export const config = {
   // Credito di benvenuto assegnato al provisioning del primo accesso (0 = nessuno).
   signupCredits: Number(process.env.METERING_SIGNUP_CREDITS ?? 0),
 
+  // Canale di notifica outbound (P0.6): webhook Slack a livello di stack.
+  // Usato come fallback quando il tenant non ha un canale dedicato salvato in
+  // `pipeline.integration_credential`. Se assente, le notifiche sono no-op.
+  slackWebhookUrl: process.env.SLACK_WEBHOOK_URL ?? "",
+
   // Chiave per cifrare a riposo i segreti delle integrazioni (AES-256-GCM).
   // Deve essere una stringa esadecimale di 64 caratteri (32 byte): `openssl rand -hex 32`.
   // Fallback su AP_ENCRYPTION_KEY (stessa chiave dello stack Activepieces) per

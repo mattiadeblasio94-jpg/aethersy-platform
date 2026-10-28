@@ -135,6 +135,9 @@ services:
       # CONSOLE_SECRETS_KEY non e' impostata, il BFF ricade su AP_ENCRYPTION_KEY.
       - CONSOLE_SECRETS_KEY=${CONSOLE_SECRETS_KEY:-}
       - AP_ENCRYPTION_KEY=${AP_ENCRYPTION_KEY}
+      # Canale outbound (P0.6): fallback di stack per le notifiche lead/consegna
+      # quando il tenant non ha una credenziale `slack` dedicata. Vuoto = no-op.
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
     depends_on:
       - app
       - postgres

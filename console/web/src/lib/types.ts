@@ -249,3 +249,44 @@ export interface UsageEvents {
   metering: boolean;
   events: UsageEvent[];
 }
+
+// --- Lead + integrazioni (P0.6) ----------------------------------------------
+
+export type LeadStatus = "new" | "contacted" | "qualified" | "won" | "lost" | "spam";
+
+export interface Lead {
+  id: string;
+  tenant_id: string;
+  run_id: string | null;
+  source: string;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+  message: string | null;
+  utm: unknown;
+  payload: unknown;
+  status: LeadStatus;
+  notified_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LeadsResponse {
+  leads: Lead[];
+  counts: { status: string; count: number }[];
+}
+
+export type IntegrationKind = "oauth" | "webhook" | "api_key";
+
+export interface IntegrationCredential {
+  id: string;
+  tenant_id: string;
+  provider: string;
+  kind: IntegrationKind;
+  label: string;
+  scopes: string[];
+  status: "active" | "revoked" | "error";
+  meta: unknown;
+  created_at: string;
+  updated_at: string;
+}
