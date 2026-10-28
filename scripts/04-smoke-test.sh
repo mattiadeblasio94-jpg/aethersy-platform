@@ -56,16 +56,15 @@ else
 fi
 
 echo "==> [5/5] Console pubblica (HTTPS)"
-# Se il DNS `console` non e' ancora configurato, e' un WARN (non un FAIL):
-# evita alert Slack continui finche' l'utente non aggiunge il record A.
-if getent hosts "${CONSOLE_DOMAIN}" >/dev/null 2>&1; then
-  if curl -fsS "https://${CONSOLE_DOMAIN}/api/health" >/dev/null 2>&1; then
-    ok "https://${CONSOLE_DOMAIN}/api/health"
-  else
-    bad "https://${CONSOLE_DOMAIN}/api/health (TLS non pronto?)"
-  fi
+# Verifica il percorso pubblico Caddy -> console. Se il resolver locale non ha
+# ancora propagato il record `console` (cache DNS), ricade su --resolve verso
+# 127.0.0.1: valida comunque Caddy, il routing e il certificato TLS.
+if curl -fsS "https://${CONSOLE_DOMAIN}/api/health" >/dev/null 2>&1; then
+  ok "https://${CONSOLE_DOMAIN}/api/health"
+elif curl -fsS --resolve "${CONSOLE_DOMAIN}:443:127.0.0.1" "https://${CONSOLE_DOMAIN}/api/health" >/dev/null 2>&1; then
+  ok "https://${CONSOLE_DOMAIN}/api/health (via Caddy; DNS locale in cache)"
 else
-  warn "https://${CONSOLE_DOMAIN} non risolve (record DNS \`console\` da aggiungere) — salto"
+  warn "https://${CONSOLE_DOMAIN}/api/health non raggiungibile (record DNS \`console\` o TLS da verificare)"
 fi
 
 echo

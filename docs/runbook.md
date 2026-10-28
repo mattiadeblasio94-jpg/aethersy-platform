@@ -179,6 +179,41 @@ Trigger manuale: `curl -X POST https://app.aethersy.online/api/v1/webhooks/frmFo
 > Nota: il piece Slack nativo richiede OAuth (non accetta webhook in ingresso) → si usa `piece-http` con `body_type=json` e payload annidato in `body.data`.
 
 
+## 6.4 Aethersy Console (Fase 11)
+
+App proprietaria (frontend React + BFF Fastify) su `https://console.aethersy.online`, servita da Caddy (`console:3000`) — **in aggiunta** ad Activepieces, che resta engine/admin/fallback.
+
+**Env necessarie** (nel `.env` del VPS):
+- `CONSOLE_DOMAIN` (default `console.aethersy.online`)
+- `CONSOLE_VERSION` (tag immagine, default `0.1.0`)
+- `CONSOLE_SESSION_SECRET` (firma HMAC del cookie di sessione; `openssl rand -hex 32`)
+- `OPENROUTER_API_KEY` (usata dall'AI Router lato BFF)
+
+**Rebuild/update:**
+
+```bash
+docker compose build console
+docker compose up -d --force-recreate console
+```
+
+**Verifica:**
+
+```bash
+curl -fsS https://console.aethersy.online/api/health          # {"status":"ok",...}
+curl -s -o /dev/null -w '%{http_code}\n' https://console.aethersy.online/api/ai/catalog   # 401 senza sessione
+```
+
+> **Importante — Caddy:** il `Caddyfile` è montato come **singolo file** (`./caddy/Caddyfile:/etc/caddy/Caddyfile:ro`). Sostituendo il file cambia l'inode e il container continua a leggere la versione vecchia; anche `caddy reload` non basta (la env `CONSOLE_DOMAIN` non è nel processo). Dopo **qualsiasi** modifica al `Caddyfile` o alle env di Caddy: `docker compose up -d --force-recreate caddy`.
+
+**Troubleshooting:**
+
+| Sintomo | Diagnosi | Rimedio |
+|---|---|---|
+| `caddy reload` → `config is unchanged` | container stale (bind-mount di file / env vecchie) | `docker compose up -d --force-recreate caddy` |
+| Console raggiunta ma TLS alert / cert assente | emissione ACME non avvenuta | verifica che il record A `console` risolva; una richiesta HTTPS innesca l'emissione; controlla `docker compose logs caddy` per `tls-alpn-01` |
+| `/api/health` 200 ma login fallisce | Activepieces non raggiungibile dal BFF | il BFF usa `AP_INTERNAL_URL=http://app:80`; verifica `docker compose logs console` |
+
+
 ## 7. Backup
 
 ```bash
