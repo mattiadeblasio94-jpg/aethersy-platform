@@ -1,4 +1,4 @@
-// Catalogo degli stadi di pipeline (P0: 4 stadi) e macchina a stati dei job.
+// Catalogo degli stadi di pipeline (P0: 4 stadi) e macchine a stati dei job.
 // Puro e senza dipendenze: e' la fonte unica di verita' su "cosa fa uno stadio",
 // importata dall'orchestratore, dalle rotte e dai test.
 // Riferimento: docs/platform-consumption.md sez. 5 (dall'idea al traffico).
@@ -182,4 +182,69 @@ export function derivedRunStatus(tasks: { status: string }[]): "draft" | "in_pro
   if (tasks.every((t) => t.status === "done" || t.status === "skipped")) return "in_review";
   if (tasks.some((t) => t.status === "running" || t.status === "done")) return "in_progress";
   return "draft";
+}
+
+// --- Asset (libreria deliverable, P0.4) --------------------------------------
+
+export type AssetStatus = "draft" | "in_review" | "approved" | "rejected" | "delivered";
+
+export type AssetKind =
+  | "document"
+  | "image"
+  | "video"
+  | "audio"
+  | "code"
+  | "link"
+  | "dataset"
+  | "archive";
+
+/**
+ * Transizioni ammesse di `asset.status`. Un deliverable nasce `draft`, entra in
+ * `in_review` quando l'agente lo propone, e diventa `approved`/`rejected` con la
+ * decisione umana (HITL). Un `rejected` puo' essere ripresentato; un `approved`
+ * viene marcato `delivered` quando il run e' consegnato. `delivered` e' terminale.
+ */
+const ASSET_TRANSITIONS: Record<AssetStatus, AssetStatus[]> = {
+  draft: ["in_review", "rejected"],
+  in_review: ["approved", "rejected", "draft"],
+  rejected: ["in_review", "draft"],
+  approved: ["delivered", "in_review"],
+  delivered: [],
+};
+
+export function canTransitionAsset(from: AssetStatus, to: AssetStatus): boolean {
+  return (ASSET_TRANSITIONS[from] ?? []).includes(to);
+}
+
+/** Solo gli asset in revisione sono decidibili (approva/rifiuta). */
+export function isAssetDecidable(status: AssetStatus): boolean {
+  return status === "in_review";
+}
+
+/** Un asset e' "consegnabile" quando e' approvato (o gia' consegnato). */
+export function isAssetAccepted(status: AssetStatus): boolean {
+  return status === "approved" || status === "delivered";
+}
+
+/** Chiave della "famiglia" di versione: run (o globale) + kind + name. */
+export function assetFamilyKey(
+  runId: string | null | undefined,
+  kind: string,
+  name: string,
+): string {
+  return `${runId ?? "global"}|${kind}|${name}`;
+}
+
+/**
+ * Versione approvata corrente di una famiglia: l'ultima versione approvata o
+ * consegnata. Usata dalla Console per mostrare "cosa e' stato accettato"
+ * distinto dall'ultima bozza in lavorazione.
+ */
+export function approvedVersion<T extends { version: number; status: string }>(
+  versions: T[],
+): T | null {
+  const accepted = versions
+    .filter((v) => isAssetAccepted(v.status as AssetStatus))
+    .sort((a, b) => b.version - a.version);
+  return accepted[0] ?? null;
 }

@@ -5,10 +5,15 @@ import type {
   AiCatalog,
   AiChatResult,
   AppConnection,
+  Asset,
+  AssetFamily,
+  AssetKind,
   Flow,
   FlowRun,
   Project,
+  RunDetail,
   SessionUser,
+  StageSpec,
 } from "./types";
 
 export function useSession() {
@@ -112,5 +117,82 @@ export function useAiChat() {
       preferFree?: boolean;
       fileUrl?: string;
     }) => api.post<AiChatResult>("/ai/chat", body),
+  });
+}
+
+// --- Pipeline / libreria asset -----------------------------------------------
+
+export function useStages() {
+  return useQuery<{ stages: StageSpec[] }>({
+    queryKey: ["pipeline-stages"],
+    queryFn: () => api.get<{ stages: StageSpec[] }>("/pipeline/stages"),
+    staleTime: 10 * 60_000,
+  });
+}
+
+export function usePipelineRuns(opts: { stage?: string; status?: string } = {}) {
+  const qs = new URLSearchParams();
+  if (opts.stage) qs.set("stage", opts.stage);
+  if (opts.status) qs.set("status", opts.status);
+  const suffix = qs.toString() ? `?${qs}` : "";
+  return useQuery<RunDetail["run"][]>({
+    queryKey: ["pipeline-runs", opts.stage ?? "", opts.status ?? ""],
+    queryFn: () => api.get<RunDetail["run"][]>(`/pipeline/runs${suffix}`),
+  });
+}
+
+export function useRunDetail(runId?: string) {
+  return useQuery<RunDetail>({
+    queryKey: ["pipeline-run", runId],
+    enabled: !!runId,
+    queryFn: () => api.get<RunDetail>(`/pipeline/runs/${runId}`),
+  });
+}
+
+/** Libreria deliverable raggruppata per famiglia (versioning). */
+export function useAssetFamilies(opts: { runId?: string; kind?: AssetKind } = {}) {
+  const qs = new URLSearchParams();
+  if (opts.runId) qs.set("runId", opts.runId);
+  if (opts.kind) qs.set("kind", opts.kind);
+  const suffix = qs.toString() ? `?${qs}` : "";
+  return useQuery<AssetFamily[]>({
+    queryKey: ["asset-families", opts.runId ?? "", opts.kind ?? ""],
+    queryFn: () => api.get<AssetFamily[]>(`/pipeline/assets/families${suffix}`),
+  });
+}
+
+/** Storico revisioni di una famiglia (dalla piu' recente). */
+export function useAssetVersions(assetId?: string) {
+  return useQuery<{ versions: Asset[] }>({
+    queryKey: ["asset-versions", assetId],
+    enabled: !!assetId,
+    queryFn: () => api.get<{ versions: Asset[] }>(`/pipeline/assets/${assetId}/versions`),
+  });
+}
+
+function useAssetInvalidate() {
+  const qc = useQueryClient();
+  return () => {
+    qc.invalidateQueries({ queryKey: ["asset-families"] });
+    qc.invalidateQueries({ queryKey: ["asset-versions"] });
+  };
+}
+
+/** Sottomette una bozza alla revisione umana (draft -> in_review). */
+export function useSubmitAsset() {
+  const invalidate = useAssetInvalidate();
+  return useMutation({
+    mutationFn: (assetId: string) => api.post<Asset>(`/pipeline/assets/${assetId}/submit`),
+    onSuccess: invalidate,
+  });
+}
+
+/** Approva o rifiuta un deliverable in revisione (HITL). */
+export function useDecideAsset() {
+  const invalidate = useAssetInvalidate();
+  return useMutation({
+    mutationFn: (v: { assetId: string; decision: "approved" | "rejected" }) =>
+      api.post<Asset>(`/pipeline/assets/${v.assetId}/decide`, { decision: v.decision }),
+    onSuccess: invalidate,
   });
 }

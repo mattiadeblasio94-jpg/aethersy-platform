@@ -6,8 +6,8 @@
 >
 > **Stato P0 (28/10/2026):** il nucleo è implementato in `console/server/src/metering/` (schema
 > idempotente, repo, guard, motore di prezzo, pattern matching) e `console/server/src/ai-gen/`
-> (generazione Venice metrata). Vedi §9 per il delta aggiornato. Pipeline `pipeline/` (P0.3) e
-> libreria asset (P0.4) restano da fare.
+> (generazione Venice metrata). Pipeline `pipeline/` (P0.3) e libreria asset (P0.4, con UI di
+> approvazione in Console) sono implementate. Vedi §9 per il delta aggiornato.
 >
 > Fonti dati: catalogo OpenRouter (`GET /models`, 464 modelli, 19 gratuiti) e Venice
 > (`GET /api/v1/models`, 142 modelli), rilevati il **28/10/2026**. I valori sono snapshot e
@@ -863,12 +863,15 @@ testing automatico sui creative, attribution avanzata, SLA e supporto enterprise
 | Metering orchestrazione (P0.3) | **fatto** — `capability='flow_run'`, `unit='request'`, 1 × 0.0020 € per task; `recordFlowRun()` = estimate → reserve → `recordUsage` → release su errore; `runUsage()`/`runUsageSummary()` aggregano per run | metrica "tasso di fallback a pagamento" |
 | Stato pipeline (P0.3) | **fatto** — `pipeline/catalog.ts` puro: `STAGES` (brand/website/content/social), `RUN_TRANSITIONS`, `canTransitionRun`/`derivedRunStatus` | stadi P1 (idea, strategia, ads, growth) |
 | Segreti integrazione (P0.6, anticipato) | **fatto** — `pipeline/secrets.ts` (AES-256-GCM, formato `v1:…`), chiave da `CONSOLE_SECRETS_KEY`; `secret_enc` mai in chiaro nel DB | rotazione chiave + re-encrypt |
-| Rotte pipeline (P0.3) | **fatto** — `/api/pipeline/{stages,runs,runs/:id,usage,execute,approve,deliver,retry,assets,leads,integrations}` | — |
-| Test | **fatto** — `npm run test:metering` (27 asserzioni pure: prezzi + pattern + catalogo/stati pipeline) | test di integrazione con DB reale |
+| Rotte pipeline (P0.3) | **fatto** — `/api/pipeline/{stages,runs,runs/:id,usage,execute,approve,deliver,retry,assets,assets/families,assets/:id/versions,assets/:id/submit,assets/:id/decide,leads,integrations}` | — |
+| Libreria asset (P0.4) | **fatto** — `pipeline/catalog.ts`: macchina a stati asset (`draft→in_review→approved→delivered`, `rejected` ripresentabile) con `canTransitionAsset`/`isAssetDecidable`/`isAssetAccepted`/`assetFamilyKey`/`approvedVersion`; `repo.ts`: `transitionAsset`, `listAssetVersions`, `listAssetFamilies` (famiglie run/kind/name con `latest_version`/`approved_version`/`latest_asset_id`), `deliverRunAssets`; `deliverRun` marca `delivered` gli asset approvati | UI download/preview artefatti binari (oggi solo metadati) |
+| Console libreria asset (P0.4) | **fatto** — `console/web/src/pages/Assets.tsx` (filtri per kind, tabella famiglie con rev./versione approvata, pannello revisioni con invio in revisione/approva/rifiuta), hook `useAssetFamilies`/`useAssetVersions`/`useSubmitAsset`/`useDecideAsset`, voce di nav "Libreria asset" + rotta `/assets` | preview inline, bulk actions, download |
+| Test | **fatto** — `npm run test:metering` (34 asserzioni pure: prezzi + pattern + catalogo/stati pipeline + macchina a stati asset) | test di integrazione con DB reale |
 | Snapshot listini | **solo seed** statico (price book v1) | cron di aggiornamento `price_book` + `fx_usd_eur` |
 
 ---
 
 *Documento di progettazione + stato implementativo. P0.1/P0.2 sono in `24c1d1f`; P0.3 (schema
-`pipeline`, orchestratore, segreti, rotte, metering `flow_run`) è implementato. Le voci
+`pipeline`, orchestratore, segreti, rotte, metering `flow_run`) è in `94f65a9`; P0.4 (libreria
+asset: versioning, macchina a stati, approvazione in Console) è implementato e verificato. Le voci
 `[DA VERIFICARE]` restanti vanno risolte prima della fase di build.*

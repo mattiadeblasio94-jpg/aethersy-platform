@@ -717,6 +717,57 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
+  /**
+   * Libreria deliverable raggruppata per famiglia (run/kind/name): una riga per
+   * deliverable con la versione piu' recente, quella approvata e il conteggio
+   * delle revisioni. E' la vista principale della libreria asset (P0.4).
+   */
+  app.get("/api/pipeline/assets/families", async (request, reply) => {
+    const tenant = await pipelineTenant(request, reply);
+    if (!tenant) return;
+    const { runId, kind, limit } = request.query as {
+      runId?: string;
+      kind?: string;
+      limit?: string;
+    };
+    const { listAssetFamilies } = await import("./pipeline/repo.js");
+    return listAssetFamilies(tenant.tenantId, {
+      runId,
+      kind,
+      limit: limit ? Number(limit) : undefined,
+    });
+  });
+
+  /** Storico revisioni della famiglia a cui appartiene l'asset, dalla piu' recente. */
+  app.get("/api/pipeline/assets/:assetId/versions", async (request, reply) => {
+    const tenant = await pipelineTenant(request, reply);
+    if (!tenant) return;
+    const { assetId } = request.params as { assetId: string };
+    const { listAssetVersions } = await import("./pipeline/repo.js");
+    const versions = await listAssetVersions(tenant.tenantId, assetId);
+    if (!versions.length) {
+      return reply.code(404).send({ code: "NOT_FOUND", message: "Asset inesistente" });
+    }
+    return { versions };
+  });
+
+  /** Sottomette un deliverable alla revisione umana (`draft -> in_review`). */
+  app.post("/api/pipeline/assets/:assetId/submit", async (request, reply) => {
+    const tenant = await pipelineTenant(request, reply);
+    if (!tenant) return;
+    const { assetId } = request.params as { assetId: string };
+    const { transitionAsset } = await import("./pipeline/repo.js");
+    const asset = await transitionAsset(tenant.tenantId, assetId, "in_review", {
+      by: tenant.email ?? tenant.tenantName,
+    });
+    if (!asset) {
+      return reply
+        .code(409)
+        .send({ code: "INVALID_TRANSITION", message: "Sottomissione non ammessa dallo stato corrente" });
+    }
+    return asset;
+  });
+
   app.post("/api/pipeline/assets/:assetId/decide", async (request, reply) => {
     const tenant = await pipelineTenant(request, reply);
     if (!tenant) return;

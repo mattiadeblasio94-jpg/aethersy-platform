@@ -5,6 +5,7 @@ const nav = [
   { to: "/", label: "Dashboard", icon: "◈" },
   { to: "/flows", label: "Flows", icon: "⧉" },
   { to: "/runs", label: "Runs", icon: "▤" },
+  { to: "/assets", label: "Libreria asset", icon: "◫" },
   { to: "/connections", label: "Connections", icon: "⚯" },
   { to: "/ai", label: "AI Center", icon: "✦" },
 ];

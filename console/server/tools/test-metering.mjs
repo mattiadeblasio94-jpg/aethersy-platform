@@ -280,6 +280,63 @@ check("derivedRunStatus dai task", () => {
   eq(derivedRunStatus([{ status: "failed" }]), "failed", "fallimento");
 });
 
+// --- pipeline/catalog.ts (macchina a stati degli asset, P0.4) -----------------
+const {
+  canTransitionAsset,
+  isAssetDecidable,
+  isAssetAccepted,
+  assetFamilyKey,
+  approvedVersion,
+} = await import("../src/pipeline/catalog.ts");
+
+console.log("pipeline/catalog.ts — asset");
+
+check("transizioni asset ammesse nel percorso felice", () => {
+  eq(canTransitionAsset("draft", "in_review"), true, "draft->in_review");
+  eq(canTransitionAsset("in_review", "approved"), true, "in_review->approved");
+  eq(canTransitionAsset("in_review", "rejected"), true, "in_review->rejected");
+  eq(canTransitionAsset("approved", "delivered"), true, "approved->delivered");
+});
+
+check("transizioni asset non ammesse rifiutate", () => {
+  eq(canTransitionAsset("draft", "approved"), false, "niente approvazione senza revisione");
+  eq(canTransitionAsset("delivered", "in_review"), false, "delivered e' terminale");
+  eq(canTransitionAsset("rejected", "approved"), false, "rejected non si approva diretto");
+});
+
+check("rejected/draft possono essere ripresentati", () => {
+  eq(canTransitionAsset("rejected", "in_review"), true, "rejected->in_review");
+  eq(canTransitionAsset("rejected", "draft"), true, "rejected->draft");
+});
+
+check("isAssetDecidable solo su in_review", () => {
+  eq(isAssetDecidable("in_review"), true, "in_review");
+  eq(isAssetDecidable("draft"), false, "draft");
+  eq(isAssetDecidable("approved"), false, "approved");
+});
+
+check("isAssetAccepted su approved/delivered", () => {
+  eq(isAssetAccepted("approved"), true, "approved");
+  eq(isAssetAccepted("delivered"), true, "delivered");
+  eq(isAssetAccepted("rejected"), false, "rejected");
+});
+
+check("assetFamilyKey raggruppa per run/kind/name", () => {
+  eq(assetFamilyKey(null, "image", "logo.png"), "global|image|logo.png", "senza run");
+  eq(assetFamilyKey("abc", "image", "logo.png"), "abc|image|logo.png", "con run");
+});
+
+check("approvedVersion sceglie l'ultima approvata/consegnata", () => {
+  const versions = [
+    { version: 3, status: "in_review" },
+    { version: 2, status: "approved" },
+    { version: 1, status: "approved" },
+  ];
+  eq(approvedVersion(versions)?.version, 2, "ultima accettata");
+  eq(approvedVersion([{ version: 1, status: "draft" }]), null, "nessuna accettata");
+  eq(approvedVersion([{ version: 4, status: "delivered" }])?.version, 4, "delivered conta");
+});
+
 console.log(`\n${passed} test superati, ${failures.length} falliti`);
 if (failures.length) {
   for (const f of failures) console.error(`- ${f.name}: ${f.message}`);

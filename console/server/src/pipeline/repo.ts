@@ -11,8 +11,12 @@ import {
 } from "../metering/repo.js";
 import type { Capability, Unit } from "../metering/price.js";
 import {
+  assetFamilyKey,
+  canTransitionAsset,
   canTransitionRun,
   derivedRunStatus,
+  isAssetDecidable,
+  type AssetStatus,
   type RunStatus,
   type StageId,
   type StageSpec,
@@ -335,17 +339,166 @@ export async function decideAsset(
   decision: "approved" | "rejected",
   approvedBy: string,
 ): Promise<AssetRow | null> {
-  const { rows } = await withTx((client) =>
-    client.query<AssetRow>(
+  return withTx(async (client) => {
+    const { rows: cur } = await client.query<AssetRow>(
+      `SELECT * FROM pipeline.asset WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+      [assetId, tenantId],
+    );
+    const current = cur[0];
+    if (!current) return null;
+    if (!isAssetDecidable(current.status as AssetStatus)) return null;
+    if (!canTransitionAsset(current.status as AssetStatus, decision)) return null;
+
+    const { rows } = await client.query<AssetRow>(
       `UPDATE pipeline.asset SET
          status = $3, approved_by = CASE WHEN $3 = 'approved' THEN $4 ELSE approved_by END,
          approved_at = CASE WHEN $3 = 'approved' THEN now() ELSE approved_at END
-       WHERE id = $1 AND tenant_id = $2 AND status = 'in_review'
+       WHERE id = $1 AND tenant_id = $2
        RETURNING *`,
       [assetId, tenantId, decision, approvedBy],
+    );
+    return rows[0] ?? null;
+  });
+}
+
+/**
+ * Transizione generica di stato di un asset, filtrata dalla macchina a stati di
+ * `catalog.ts`: nessuna transizione inventata sul DB. Ritorna `null` se lo stato
+ * corrente non ammette quello richiesto.
+ */
+export async function transitionAsset(
+  tenantId: string,
+  assetId: string,
+  to: AssetStatus,
+  opts: { by?: string } = {},
+): Promise<AssetRow | null> {
+  return withTx(async (client) => {
+    const { rows: cur } = await client.query<AssetRow>(
+      `SELECT * FROM pipeline.asset WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+      [assetId, tenantId],
+    );
+    const current = cur[0];
+    if (!current) return null;
+    if (!canTransitionAsset(current.status as AssetStatus, to)) return null;
+
+    const { rows } = await client.query<AssetRow>(
+      `UPDATE pipeline.asset SET
+         status = $3,
+         approved_by = CASE WHEN $3 = 'approved' THEN COALESCE($4, approved_by) ELSE approved_by END,
+         approved_at = CASE WHEN $3 = 'approved' THEN now() ELSE approved_at END
+       WHERE id = $1 AND tenant_id = $2
+       RETURNING *`,
+      [assetId, tenantId, to, opts.by ?? null],
+    );
+    return rows[0] ?? null;
+  });
+}
+
+/**
+ * Tutte le versioni della famiglia a cui appartiene l'asset (stesso run/kind/name),
+ * dalla piu' recente. E' la vista "storico revisioni" della libreria asset.
+ */
+export async function listAssetVersions(
+  tenantId: string,
+  assetId: string,
+): Promise<AssetRow[]> {
+  const { rows } = await withTx(async (client) => {
+    const { rows: cur } = await client.query<AssetRow>(
+      `SELECT * FROM pipeline.asset WHERE id = $1 AND tenant_id = $2`,
+      [assetId, tenantId],
+    );
+    const asset = cur[0];
+    if (!asset) return { rows: [] as AssetRow[] };
+    return client.query<AssetRow>(
+      `SELECT * FROM pipeline.asset
+        WHERE tenant_id = $1 AND kind = $2 AND name = $3
+          AND COALESCE(run_id, '00000000-0000-0000-0000-000000000000'::uuid)
+              = COALESCE($4::uuid, '00000000-0000-0000-0000-000000000000'::uuid)
+        ORDER BY version DESC`,
+      [asset.tenant_id, asset.kind, asset.name, asset.run_id],
+    );
+  });
+  return rows;
+}
+
+export interface AssetFamily {
+  key: string;
+  runId: string | null;
+  kind: string;
+  name: string;
+  latestVersion: number;
+  latestStatus: string;
+  /** Id della revisione piu' recente: da qui la Console carica lo storico. */
+  latestAssetId: string;
+  approvedVersion: number | null;
+  versions: number;
+  updatedAt: Date;
+}
+
+/**
+ * Elenco delle famiglie di deliverable (una per run/kind/name) con la versione
+ * piu' recente, quella approvata e il numero di revisioni. E' il raggruppamento
+ * che la Console mostra: una riga per deliverable, non una per revisione.
+ */
+export async function listAssetFamilies(
+  tenantId: string,
+  opts: { runId?: string; kind?: string; limit?: number } = {},
+): Promise<AssetFamily[]> {
+  const limit = Math.min(Math.max(opts.limit ?? 200, 1), 500);
+  const { rows } = await withTx((client) =>
+    client.query<{
+      run_id: string | null;
+      kind: string;
+      name: string;
+      latest_version: string;
+      latest_status: string;
+      latest_asset_id: string;
+      approved_version: string | null;
+      versions: string;
+      updated_at: Date;
+    }>(
+      `SELECT run_id, kind, name,
+              MAX(version) AS latest_version,
+              COUNT(*) AS versions,
+              MAX(created_at) AS updated_at,
+              (ARRAY_AGG(status ORDER BY version DESC))[1] AS latest_status,
+              (ARRAY_AGG(id ORDER BY version DESC))[1] AS latest_asset_id,
+              (ARRAY_AGG(version ORDER BY version DESC)
+                 FILTER (WHERE status IN ('approved','delivered')))[1] AS approved_version
+         FROM pipeline.asset
+        WHERE tenant_id = $1
+          AND ($2::uuid IS NULL OR run_id = $2::uuid)
+          AND ($3::text IS NULL OR kind = $3)
+        GROUP BY run_id, kind, name
+        ORDER BY MAX(created_at) DESC
+        LIMIT $4`,
+      [tenantId, opts.runId ?? null, opts.kind ?? null, limit],
     ),
   );
-  return rows[0] ?? null;
+  return rows.map((r) => ({
+    key: assetFamilyKey(r.run_id, r.kind, r.name),
+    runId: r.run_id,
+    kind: r.kind,
+    name: r.name,
+    latestVersion: Number(r.latest_version),
+    latestStatus: r.latest_status,
+    latestAssetId: r.latest_asset_id,
+    approvedVersion: r.approved_version === null ? null : Number(r.approved_version),
+    versions: Number(r.versions),
+    updatedAt: r.updated_at,
+  }));
+}
+
+/** Marca `delivered` tutti gli asset approvati di un run (alla consegna). */
+export async function deliverRunAssets(tenantId: string, runId: string): Promise<number> {
+  const { rowCount } = await withTx((client) =>
+    client.query(
+      `UPDATE pipeline.asset SET status = 'delivered'
+        WHERE tenant_id = $1 AND run_id = $2 AND status = 'approved'`,
+      [tenantId, runId],
+    ),
+  );
+  return rowCount ?? 0;
 }
 
 // --- Lead --------------------------------------------------------------------

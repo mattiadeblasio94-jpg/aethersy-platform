@@ -1,5 +1,6 @@
 import {
   createRun,
+  deliverRunAssets,
   finishTask,
   getRun,
   listTasks,
@@ -225,9 +226,12 @@ export async function approveRun(
   return transitionRun(tenantId, runId, "approved", { approvedBy });
 }
 
-/** Consegna un run approvato. */
+/** Consegna un run approvato e marca `delivered` i suoi asset approvati. */
 export async function deliverRun(tenantId: string, runId: string): Promise<PipelineRunRow | null> {
-  return transitionRun(tenantId, runId, "delivered");
+  const run = await transitionRun(tenantId, runId, "delivered");
+  if (!run) return null;
+  await deliverRunAssets(tenantId, runId);
+  return run;
 }
 
 /** Riporta un run fallito in lavorazione (retry dopo fix). */

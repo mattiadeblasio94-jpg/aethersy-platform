@@ -3,7 +3,7 @@
 > Aggiornare dopo **ogni** fase con: data/ora, esito, comandi di verifica, note.
 > Stati ammessi: `DONE`, `BLOCKED: input #N`, `NOTE`.
 >
-> Ultima revisione: 2026-10-28 (tutte le fasi `DONE`; restano solo azioni utente per la rotazione credenziali)
+> Ultima revisione: 2026-10-28 (fasi 0–12 `DONE`; restano solo azioni utente per la rotazione credenziali)
 
 ## Stato sintetico
 
@@ -21,6 +21,7 @@
 | 9 | Backup e monitoraggio | `DONE` — `backup.sh` corretto (rotazione robusta a glob vuoto) ed eseguito; **restore testato** su DB temporaneo (83 tabelle, dati coerenti) |
 | 10 | Review finale e consegna | `DONE` — audit infrastrutturale **completato** (tutte le verifiche OK) e **clean-clone** verificato (tarball da `git ls-files`, 73 file, nessun `.env` → `docker compose config` OK + build `console` OK). Restano solo **azioni utente**: rotazione credenziali esposte in chat (P0–P2, `docs/security.md` §6.1) e backup offline dei due segreti critici |
 | 11 | Aethersy Console (fusion A+B+C) | `DONE` — frontend proprietario React 19 + Vite + TS + Tailwind v4 + TanStack Query + React Router + BFF Fastify con sessione httpOnly firmata, proxy `/api/ap/*` verso Activepieces e **AI Router** multimodale (selezione automatica di modelli gratuiti OpenRouter per capacità testo/immagine/audio/video). Deployato su `https://console.aethersy.online` con TLS Let's Encrypt; smoke test 5/5 OK |
+| 12 | Piattaforma a consumo (P0) — pipeline + libreria asset | `DONE` — metering/billing (P0.1/P0.2, `24c1d1f`), pipeline multi-stadio + orchestratore HITL + segreti (P0.3, `94f65a9`), **libreria asset con versioning e approvazione in Console** (P0.4). Test 34/34; web build OK |
 
 ## Verifica §11 — nomi variabili, versioni, route
 
@@ -225,3 +226,12 @@ Limiti confermati (default upstream, ora espliciti in `.env.example`): `AP_WEBHO
   - `scripts/04-smoke-test.sh` → **5/5 OK** (il check Console ora usa `--resolve … :127.0.0.1` come fallback quando il resolver locale ha ancora in cache il vecchio NXDOMAIN, così valida Caddy/TLS in modo deterministico).
 - **Nota DNS:** a livello autoritativo/DoH il record è live; i resolver ricorsivi di PC e VPS avevano ancora in cache il NXDOMAIN al momento della verifica (propagazione in corso, TTL 600). Let's Encrypt e i browser risolvono correttamente.
 - **Prossimi passi:** (1) Fase 10 (rotazione segreti esposti in chat + backup offline dei due segreti critici); (2) ~~collegare un client MCP reale~~ (Fase 7 acceptance **CHIUSA** 28/10/2026 — handshake reale, 42 tool).
+
+### Fase 12 — Piattaforma a consumo (P0): pipeline + libreria asset (P0.4)
+- **Esito:** `DONE` (28/10/2026). Trasformazione della piattaforma verso un modello **pay-per-use**: nucleo di metering/billing (P0.1/P0.2), pipeline multi-stadio (P0.3) e **libreria asset con versioning + approvazione** (P0.4). Documento di progetto e delta implementativo: [`docs/platform-consumption.md`](platform-consumption.md) (§9).
+- **Nucleo (P0.1/P0.2, commit `24c1d1f`):** schema `metering` idempotente (`usage_event`, `ledger`, `price_book`, `tenant`, …), repo `reserve`/`settle`/`top-up`, motore di prezzo (markup 15000 bps = margine 60%, `credit_unit = 0.0001 €`), guard con clamp-to-zero + degrade + `402`; generazione Venice metrata (`img_out`/`tts`/`vid_out`).
+- **Pipeline (P0.3, commit `94f65a9`):** schema `pipeline` (`pipeline_run`, `agent_task`, `asset`, `integration_credential`, `lead`), catalogo puro (`STAGES` brand/website/content/social, macchina a stati del run), orchestratore con esecutore **iniettato** (`TaskExecutor`) e **HITL** obbligatorio su `approved→delivered`, segreti integrazione AES-256-GCM (`CONSOLE_SECRETS_KEY`), metering `flow_run` (1 × 0.0020 €/task).
+- **Libreria asset (P0.4):** `pipeline/catalog.ts` — macchina a stati asset (`draft → in_review → approved → delivered`; `rejected` ripresentabile) con `canTransitionAsset`/`isAssetDecidable`/`isAssetAccepted`/`assetFamilyKey`/`approvedVersion`. `pipeline/repo.ts` — `transitionAsset` (con `SELECT … FOR UPDATE`), `listAssetVersions`, `listAssetFamilies` (una riga per deliverable run/kind/name con `latest_version`, `approved_version`, `latest_asset_id`, conteggio revisioni), `deliverRunAssets`; `deliverRun` ora marca `delivered` gli asset approvati. Rotte: `GET /api/pipeline/assets/families`, `GET /api/pipeline/assets/:assetId/versions`, `POST …/:assetId/submit`, `POST …/:assetId/decide`.
+- **Console:** `console/web/src/pages/Assets.tsx` — filtri per tipo, tabella famiglie (revisioni + versione approvata), pannello revisioni con invio in revisione / approva / rifiuta; hook `useAssetFamilies`/`useAssetVersions`/`useSubmitAsset`/`useDecideAsset`; voce di navigazione "Libreria asset" e rotta `/assets`.
+- **Verifica (28/10/2026):** server `gen:schema` OK, `tsc --noEmit` **0**, `build` **0**, `npm run test:metering` **34/34** (incluse 7 asserzioni sulla macchina a stati asset); web `tsc -b --noEmit` **0**, `vite build` OK (97 moduli, 328.99 kB js).
+- **Residuo:** preview/download inline degli artefatti binari, azioni bulk; P0.5 (Console run/crediti), P0.6 (integrazioni), P0.7 (QA E2E), P0.8 (consolidamento frontend).
