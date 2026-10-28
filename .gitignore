@@ -12,6 +12,14 @@ caddy/config/
 # Log
 *.log
 
+# Aethersy Console — dipendenze e build (rigenerabili)
+console/node_modules/
+console/web/node_modules/
+console/server/node_modules/
+console/web/dist/
+console/server/dist/
+*.tsbuildinfo
+
 # Scratch / work-in-progress
 .tmp/
 

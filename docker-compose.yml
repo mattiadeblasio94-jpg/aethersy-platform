@@ -20,6 +20,7 @@ services:
       - ACME_EMAIL=${ACME_EMAIL}
       - APP_DOMAIN=${APP_DOMAIN:-app.aethersy.online}
       - MCP_DOMAIN=${MCP_DOMAIN:-mcp.aethersy.online}
+      - CONSOLE_DOMAIN=${CONSOLE_DOMAIN:-console.aethersy.online}
       - APEX_DOMAIN=${APEX_DOMAIN:-aethersy.online}
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
@@ -27,6 +28,7 @@ services:
       - ./caddy/config:/config
     depends_on:
       - app
+      - console
     networks:
       - aethersy
     logging:
@@ -89,6 +91,33 @@ services:
       - aethersy
     deploy:
       replicas: 1
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # Console proprietaria Aethersy (fusion A+B+C): frontend React + BFF Fastify.
+  # Parla con l'app Activepieces sulla rete interna; l'AI Router usa OpenRouter.
+  # Nessuna porta pubblicata: entra solo da Caddy su CONSOLE_DOMAIN.
+  console:
+    build:
+      context: ./console
+      dockerfile: Dockerfile
+    image: aethersy-console:${CONSOLE_VERSION:-0.1.0}
+    container_name: aethersy-console
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - AP_INTERNAL_URL=http://app:80
+      - AP_PUBLIC_URL=https://${APP_DOMAIN:-app.aethersy.online}
+      - CONSOLE_SESSION_SECRET=${CONSOLE_SESSION_SECRET}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+    depends_on:
+      - app
+    networks:
+      - aethersy
     logging:
       driver: json-file
       options:

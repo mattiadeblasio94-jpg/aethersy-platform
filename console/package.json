@@ -1,0 +1,15 @@
+{
+  "name": "aethersy-console",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Aethersy Console - frontend proprietario + BFF sopra le API Activepieces",
+  "scripts": {
+    "install:all": "npm --prefix web install && npm --prefix server install",
+    "build": "npm --prefix web run build && npm --prefix server run build",
+    "build:web": "npm --prefix web run build",
+    "build:server": "npm --prefix server run build",
+    "typecheck": "npm --prefix web run typecheck && npm --prefix server run typecheck",
+    "dev:web": "npm --prefix web run dev",
+    "dev:server": "npm --prefix server run dev"
+  }
+}
