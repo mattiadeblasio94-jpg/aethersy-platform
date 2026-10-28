@@ -52,12 +52,29 @@
 		}
 	}
 
-	# Endpoint OAuth.
-	@oauth path /authorize /token /register /revoke /userinfo
+	# Endpoint OAuth (tranne /authorize, gestito sotto).
+	@oauth path /token /register /revoke /userinfo
 	handle @oauth {
 		reverse_proxy app:80 {
 			header_up Host {host}
 			header_up X-Forwarded-Host {host}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
+	# /authorize: il controller MCP costruisce la consent page a partire da
+	# X-Forwarded-Host (getPublicUrlFromRequest). Con l'immagine pinnata (0.92.3)
+	# il redirect punterebbe a https://{$MCP_DOMAIN}/mcp-authorize, che questo
+	# hostname NON serve (404). La consent page è una SPA dell'app, con login e
+	# sessione su {$APP_DOMAIN}: forziamo quindi X-Forwarded-Host su APP_DOMAIN,
+	# così il browser viene reindirizzato a https://{$APP_DOMAIN}/mcp-authorize.
+	# Allineato al design upstream (PR #15376: consent sul main host).
+	@authorize path /authorize
+	handle @authorize {
+		reverse_proxy app:80 {
+			header_up Host {host}
+			header_up X-Forwarded-Host {$APP_DOMAIN}
 			header_up X-Real-IP {remote_host}
 			header_up X-Forwarded-Proto {scheme}
 		}

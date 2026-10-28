@@ -149,7 +149,10 @@ curl -s https://mcp.aethersy.online/.well-known/oauth-authorization-server | jq 
 curl -s https://mcp.aethersy.online/.well-known/oauth-protected-resource/mcp | jq .
 ```
 
-Troubleshooting: `/mcp` risponde 404 pubblico → Caddy non instrada (verifica `AP_MCP_URL` e le route nel Caddyfile; l'hostname MCP deve differire da `AP_FRONTEND_URL`). Il consent screen va servito su `AP_FRONTEND_URL`, quindi il dominio MCP **non** deve essere lo stesso dell'app.
+Troubleshooting:
+- `/mcp` risponde 404 pubblico → Caddy non instrada (verifica `AP_MCP_URL` e le route nel Caddyfile; l'hostname MCP deve differire da `AP_FRONTEND_URL`). Il consent screen va servito su `AP_FRONTEND_URL`, quindi il dominio MCP **non** deve essere lo stesso dell'app.
+- Dopo `/authorize` il browser finisce su `https://mcp.aethersy.online/mcp-authorize` → **404**. Causa: l'immagine pinnata `0.92.3-hotfix.1` costruisce l'URL del consent dall'host della richiesta (upstream PR #15376 ha poi spostato la consent sull'host app, ma la versione pinnata ha il comportamento vecchio). **Fix già in `caddy/Caddyfile`:** blocco dedicato `@authorize path /authorize` con `header_up X-Forwarded-Host {$APP_DOMAIN}`, così la consent viene annunciata su `app.aethersy.online`. Se il bug ricompare, verifica che quel blocco esista e che Caddy sia stato ricreato (`docker compose up -d --force-recreate caddy`).
+- `POST /mcp` → **401 "Invalid or expired access token"** con token valido: il token è **platform-scoped**. `/mcp` accetta solo token **project-scoped** (passa `projectId` in `POST /v1/mcp-oauth/approve`); i token di piattaforma vanno usati su `POST /mcp/platform`.
 
 
 ## 6.3 Notifiche Slack (Fase 6)
