@@ -17,7 +17,33 @@ await app.register(cookie);
 
 app.get("/api/health", async () => ({ status: "ok", service: "aethersy-console" }));
 
+// Migrazione idempotente dello schema `metering` (no-op se METERING_ENABLED=false).
+// Un DB non raggiungibile NON blocca l'avvio: le rotte AI rispondono comunque,
+// ma il metering resta inerte finche' il DB non torna disponibile.
+try {
+  const { migrateMetering } = await import("./metering/migrate.js");
+  const res = await migrateMetering();
+  if (res.applied) app.log.info("schema metering applicato");
+} catch (err) {
+  app.log.error({ err }, "migrazione metering fallita: metering inerte");
+}
+
 await registerRoutes(app);
+
+// Chiusura ordinata dei pool (Postgres/Redis) su SIGTERM/SIGINT.
+for (const signal of ["SIGTERM", "SIGINT"] as const) {
+  process.once(signal, async () => {
+    app.log.info(`ricevuto ${signal}: chiusura in corso`);
+    try {
+      const { closeRedis } = await import("./metering/guard.js");
+      const { closePool } = await import("./metering/db.js");
+      await Promise.allSettled([closeRedis(), closePool()]);
+      await app.close();
+    } finally {
+      process.exit(0);
+    }
+  });
+}
 
 // SPA statica + fallback su index.html per il client router.
 // In sviluppo la cartella public/ puo' non esistere: in quel caso il frontend

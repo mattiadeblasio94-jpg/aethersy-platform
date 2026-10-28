@@ -1,4 +1,5 @@
 import { config } from "./config.js";
+import { recordUsage, type TenantContext } from "./metering/repo.js";
 
 // =============================================================================
 // AI Router — sceglie automaticamente il modello LLM in base alla capacita'
@@ -186,6 +187,35 @@ export interface ChatResult {
   latencyMs: number;
   /** Modelli provati e scartati per errore, con motivo. */
   attempts: { model: string; error: string }[];
+  /** Addebito effettivo (assente se il metering e' disattivato). */
+  billing?: ChatBilling;
+}
+
+export interface ChatBilling {
+  requestId: string;
+  credits: number;
+  charged: number;
+  priceEur: number;
+  balance: number;
+  available: number;
+  duplicate: boolean;
+  degraded: boolean;
+}
+
+/** Attribuzione del consumo a un tenant (fornita dal guard di metering). */
+export interface MeterInfo {
+  tenant: TenantContext;
+  requestId: string;
+  reservation: number;
+  flowRunId?: string | null;
+  /** true = il guard ha forzato i modelli gratuiti (credito quasi esaurito). */
+  degraded?: boolean;
+}
+
+interface OpenRouterUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
 }
 
 export async function chat(params: {
@@ -194,6 +224,7 @@ export async function chat(params: {
   model?: string;
   preferFree?: boolean;
   fileUrl?: string;
+  meter?: MeterInfo;
 }): Promise<ChatResult> {
   const ranked = await rankModels(params.capability, {
     requested: params.model,
@@ -268,15 +299,60 @@ export async function chat(params: {
       continue;
     }
 
+    const usage = (body?.usage ?? null) as OpenRouterUsage | null;
+    const billing = params.meter
+      ? await billChat(params.meter, body?.model ?? chosen.id, usage, latencyMs)
+      : undefined;
+
     return {
       model: body?.model ?? chosen.id,
       capability: params.capability,
       answer,
-      usage: body?.usage ?? null,
+      usage,
       latencyMs,
       attempts,
+      billing,
     };
   }
 
   throw new Error(lastError);
+}
+
+/**
+ * Addebita una chat completata. Il consumo e' token-based: le chiamate
+ * multimodali (vision/audio/video input) sono comunque completions a token,
+ * quindi vengono prezzate come `text` (token_in/token_out).
+ */
+async function billChat(
+  meter: MeterInfo,
+  model: string,
+  usage: OpenRouterUsage | null,
+  latencyMs: number,
+): Promise<ChatBilling> {
+  const inputTokens = usage?.prompt_tokens ?? 0;
+  const outputTokens = usage?.completion_tokens ?? 0;
+  const res = await recordUsage({
+    tenant: meter.tenant,
+    requestId: meter.requestId,
+    reservation: meter.reservation,
+    flowRunId: meter.flowRunId ?? null,
+    capability: "text",
+    provider: "openrouter",
+    model,
+    units: { token_in: inputTokens, token_out: outputTokens },
+    inputTokens,
+    outputTokens,
+    latencyMs,
+    source: meter.tenant.sourceTag,
+  });
+  return {
+    requestId: meter.requestId,
+    credits: res.credits,
+    charged: res.charged,
+    priceEur: res.priceEur,
+    balance: res.balance,
+    available: res.available,
+    duplicate: res.duplicate,
+    degraded: false,
+  };
 }

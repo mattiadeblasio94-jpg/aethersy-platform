@@ -7,15 +7,20 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "gen:schema": "node tools/gen-schema.mjs",
+    "test:metering": "node tools/test-metering.mjs",
     "dev": "node --watch --experimental-strip-types src/index.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^10.0.1",
     "@fastify/static": "^8.0.3",
-    "fastify": "^5.2.0"
+    "fastify": "^5.2.0",
+    "ioredis": "^6.0.0",
+    "pg": "^8.23.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "@types/pg": "^8.23.1",
     "typescript": "^5.7.0"
   }
 }

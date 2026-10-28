@@ -1,8 +1,13 @@
 # Aethersy — Piattaforma a consumo: struttura, modello di costo, pipeline agente
 
-> Documento di progetto (design, non ancora implementato). Sintesi di tre analisi parallele:
+> Documento di progetto **+ stato di implementazione**. Sintesi di tre analisi parallele:
 > **product design** (cosa fa l'agente, dall'idea al traffico), **architettura di metering/billing**
 > (come si misura e si fattura il consumo) e **ricerca prezzi provider/competitor** (listini reali).
+>
+> **Stato P0 (28/10/2026):** il nucleo è implementato in `console/server/src/metering/` (schema
+> idempotente, repo, guard, motore di prezzo, pattern matching) e `console/server/src/ai-gen/`
+> (generazione Venice metrata). Vedi §9 per il delta aggiornato. Pipeline `pipeline/` (P0.3) e
+> libreria asset (P0.4) restano da fare.
 >
 > Fonti dati: catalogo OpenRouter (`GET /models`, 464 modelli, 19 gratuiti) e Venice
 > (`GET /api/v1/models`, 142 modelli), rilevati il **28/10/2026**. I valori sono snapshot e
@@ -30,8 +35,9 @@ Tre pilastri:
 3. **Billing a crediti** con price book versionato, markup per piano, quote e integrazione
    Stripe/Lago.
 
-**Prerequisito tecnico P0:** l'AI Router attuale copre solo `text`, `img_in`, `stt`, `vid_in`.
-**`img_out`, `tts`, `vid_out` non esistono** e sono indispensabili per Brand/Social/Ads.
+**Prerequisito tecnico P0 (risolto):** l'AI Router copriva solo `text`, `img_in`, `stt`, `vid_in`.
+`img_out`, `tts`, `vid_out` sono ora implementati in `console/server/src/ai-gen/` (Venice, metrati),
+indispensabili per Brand/Social/Ads.
 
 **Decisione architetturale chiave:** Activepieces resta il **braccio esecutivo deterministico**
 (webhook, scheduling, retry, worker, MCP). Aethersy è **cervello + banco di conto**: decide la
@@ -238,14 +244,13 @@ flow_run:  cost = 0 (metrica non-AI) → prezzo da price book, unit = request
 | 150% | 60,0% ✔ |
 | 233% | 70,0% ✔ |
 
-**Default proposto:** `markup_bps = 12000` (120% → 54,5% margine), con gradazione per piano:
+**Default deciso dal committente (28/10/2026):** `markup_bps = 15000` (**150% → 60,0% margine**) su
+tutti i piani, con override per piano disponibile in `tenant_price_override` / `tenant.markup_bps`:
 
 | Piano | `markup_bps` | margine |
 |---|---|---|
-| `free` | 5000 | 33,3% (incentivo a pagare) |
-| `starter` | 12000 | 54,5% |
-| `pro` | 15000 | 60,0% |
-| `enterprise` | 0–8000 | contratto |
+| default (tutti) | **15000** | **60,0%** |
+| override possibile | 0–23300 | contratto / promozioni |
 
 **Free tier:** i 19 modelli gratuiti hanno costo provider = 0 → prezzo = 0. Per coprire il costo
 infrastrutturale si applica un `min_charge` (es. 1 credito = 0,0001 €) sulle capability `text`
@@ -278,7 +283,7 @@ CREATE TABLE IF NOT EXISTS metering.tenant (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name            text NOT NULL,
   plan            text NOT NULL DEFAULT 'free',      -- free | starter | pro | enterprise
-  markup_bps      integer NOT NULL DEFAULT 12000,    -- 120% => ~54,5% margine
+  markup_bps      integer NOT NULL DEFAULT 15000,    -- 150% => 60,0% margine (deciso 28/10/2026)
   credit_unit     numeric(18,8) NOT NULL DEFAULT 0.0001, -- 1 credito = 0,0001 EUR
   hard_stop_on_empty boolean NOT NULL DEFAULT true,
   billing_customer_ref text,                          -- cus_... (Stripe) o external_customer_id (Lago)
@@ -310,7 +315,7 @@ CREATE INDEX IF NOT EXISTS api_key_tenant_idx ON metering.api_key(tenant_id) WHE
 CREATE TABLE IF NOT EXISTS metering.price_book (
   id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   version            integer NOT NULL,
-  default_markup_bps integer NOT NULL DEFAULT 12000,
+  default_markup_bps integer NOT NULL DEFAULT 15000,
   fx_usd_eur         numeric(12,6) NOT NULL DEFAULT 0.92,
   effective_from     timestamptz NOT NULL DEFAULT now(),
   effective_to       timestamptz,
@@ -831,24 +836,30 @@ testing automatico sui creative, attribution avanzata, SLA e supporto enterprise
    retention, informativa. → `vault`.
 8. **`[DA VERIFICARE]`** — (a) endpoint/oggetti Stripe Billing Meters; (b) payload/versione Lago
    events; (c) esistenza di un webhook push "run completed" in Activepieces CE `0.92.3-hotfix.1`;
-   (d) decisione clamp-vs-negativo sul saldo; (e) conferma `credit_unit = 0.0001 €` e
-   `markup_bps = 12000` di default.
+   (d) ~~decisione clamp-vs-negativo sul saldo~~ → **risolta (28/10/2026): clamp a zero**
+   (`CHECK (balance_credits >= 0)`, eccedenza in `credit_ledger(kind='adjust',
+   reason='unbilled_overflow:…')`); (e) ~~conferma `credit_unit = 0.0001 €` e `markup_bps = 12000`
+   di default~~ → **confermata (28/10/2026): `credit_unit = 0.0001 €`, `markup_bps = 15000`
+   (150%, margine lordo 60%)**.
 
 ---
 
 ## 9. Delta operativo rispetto al repo (fase implementativa)
 
-| Elemento | Stato attuale | Intervento richiesto |
+| Elemento | Stato (28/10/2026) | Residuo |
 |---|---|---|
-| Driver DB nel BFF | **assente** (`package.json` senza `pg`) | aggiungere `pg` (+ `ioredis` per rate limit) |
-| Config BFF | `config.ts` senza DB/Redis | nuove env **nostre**: `CONSOLE_DB_URL`, `REDIS_URL`, `METERING_ENABLED` (kill-switch) — da aggiungere a `.env.example` (§14 AGENTS.md) |
-| Sessione | `Session` senza tenant | aggiungere `tenantId` al sign-in (`session.ts`), lookup in `tenant_user` |
-| `chat()` | nessun metering | parametro opzionale `meter?: MeterContext` + evento per attempt |
-| `routes.ts` | `requireSession` su `/api/ai/*` | `requireTenant` (cookie **o** API key) + `preHandler` guard |
-| Compose `console` | env-only | passare `CONSOLE_DB_URL`, `REDIS_URL`; nessun nuovo container (riuso postgres/redis) |
-| Redis | usato solo da Activepieces | riuso con lo stesso `AP_REDIS_PASSWORD`, namespace `rl:`/`billing:` per non collidere |
-| Migrazioni | nessuna | schema `metering` con migrator idempotente (`CREATE … IF NOT EXISTS`), **mai** toccando lo schema Activepieces |
-| Snapshot listini | nessuno | cron che aggiorna `price_book` (versionato) + `fx_usd_eur` da fonte quotazioni |
+| Driver DB nel BFF | **fatto** — `pg` + `ioredis` in `package.json` | — |
+| Config BFF | **fatto** — `config.ts`: `dbUrl`, `redisUrl`, `meteringEnabled`, `ratePerMinute`, `signupCredits`, `veniceKey` | — |
+| Env documentate | **fatto** — `.env.example` (root) e `console/.env.example` con blocco metering | — |
+| Sessione | **non toccata** — il tenant si risolve a ogni richiesta da email/chiave, non dalla sessione | `tenantId` in `Session` solo se serve caching |
+| `chat()` | **fatto** — `meter?: MeterInfo`, `billChat()` token-based | `attempt_no` incrementale sui fallback (oggi `1`) |
+| Generazione | **fatto** — `ai-gen/{select,venice,generate}.ts` + `img_out`/`tts`/`vid_out` in `/api/ai/generate` | — |
+| `routes.ts` | **fatto** — `authorizeAi()` (cookie **o** Bearer key) + release su errore; `/api/ai/balance` e `/api/ai/usage` | `flow_run` (P0.3) |
+| Compose `console` | **fatto** — parametri discreti `CONSOLE_PG*`/`CONSOLE_REDIS_*` derivati da `AP_POSTGRES_*`/`AP_REDIS_PASSWORD` (nessuna URL con credenziali); dipendenze su `postgres`/`redis` | — |
+| Redis | **fatto** — riuso dello stack, namespace `rl:` | quota negativa su Redis non necessaria |
+| Migrazioni | **fatto** — `metering/schema.sql` → `schema.ts` (bundle) + `migrate.ts` idempotente all'avvio, schema isolato | — |
+| Test | **fatto** — `npm run test:metering` (19 asserzioni pure su prezzi + pattern) | test di integrazione con DB reale |
+| Snapshot listini | **solo seed** statico (price book v1) | cron di aggiornamento `price_book` + `fx_usd_eur` |
 
 ---
 

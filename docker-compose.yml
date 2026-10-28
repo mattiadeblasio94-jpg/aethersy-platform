@@ -114,8 +114,27 @@ services:
       - AP_PUBLIC_URL=https://${APP_DOMAIN:-app.aethersy.online}
       - CONSOLE_SESSION_SECRET=${CONSOLE_SESSION_SECRET}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      # Venice: generazione img/tts/video (OpenRouter copre solo testo+comprensione).
+      - VENICE_API_KEY=${VENICE_API_KEY:-}
+      - VENICE_BASE_URL=${VENICE_BASE_URL:-https://api.venice.ai/api/v1}
+      # Metering/billing: schema Postgres `metering` (stesso DB dell'app, creato
+      # dallo schema applicativo all'avvio). Parametri discreti: niente
+      # credenziali dentro una URL, quindi nessun carattere da percent-encodare.
+      - CONSOLE_PGHOST=postgres
+      - CONSOLE_PGPORT=5432
+      - CONSOLE_PGUSER=${AP_POSTGRES_USERNAME}
+      - CONSOLE_PGPASSWORD=${AP_POSTGRES_PASSWORD}
+      - CONSOLE_PGDATABASE=${AP_POSTGRES_DATABASE}
+      - CONSOLE_REDIS_HOST=redis
+      - CONSOLE_REDIS_PORT=6379
+      - CONSOLE_REDIS_PASSWORD=${AP_REDIS_PASSWORD}
+      - METERING_ENABLED=${METERING_ENABLED:-false}
+      - METERING_RATE_PER_MINUTE=${METERING_RATE_PER_MINUTE:-120}
+      - METERING_SIGNUP_CREDITS=${METERING_SIGNUP_CREDITS:-0}
     depends_on:
       - app
+      - postgres
+      - redis
     networks:
       - aethersy
     logging:

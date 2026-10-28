@@ -22,7 +22,48 @@ export const config = {
   openRouterKey: req("OPENROUTER_API_KEY"),
   openRouterBase: (process.env.OPENROUTER_BASE ?? "https://openrouter.ai/api/v1").replace(/\/$/, ""),
 
+  // Venice: usata per la GENERAZIONE (img_out / tts / vid_out), che OpenRouter
+  // non offre. Se la chiave manca, le capability generative rispondono 503.
+  veniceKey: process.env.VENICE_API_KEY ?? "",
+  veniceBase: (process.env.VENICE_BASE_URL ?? "https://api.venice.ai/api/v1").replace(/\/$/, ""),
+
+  // --- Metering / billing (schema Postgres `metering`, vedi docs) -------------
+  // Kill-switch: se `false` il metering e' disattivato (nessuna scrittura DB).
+  meteringEnabled: (process.env.METERING_ENABLED ?? "false") === "true",
+  // Postgres: si accetta un DSN completo (`CONSOLE_DB_URL`) oppure i parametri
+  // discreti PG*. I discreti evitano di mettere user/password dentro una URL
+  // (niente segreti in chiaro nei file di config e nei log di connessione).
+  dbUrl: process.env.CONSOLE_DB_URL ?? "",
+  pg: {
+    host: process.env.CONSOLE_PGHOST ?? "",
+    port: Number(process.env.CONSOLE_PGPORT ?? 5432),
+    user: process.env.CONSOLE_PGUSER ?? "",
+    password: process.env.CONSOLE_PGPASSWORD ?? "",
+    database: process.env.CONSOLE_PGDATABASE ?? "",
+  },
+  // Redis per rate limit / lock. Se assente, il rate limit viene saltato.
+  redisUrl: process.env.REDIS_URL ?? "",
+  redis: {
+    host: process.env.CONSOLE_REDIS_HOST ?? "",
+    port: Number(process.env.CONSOLE_REDIS_PORT ?? 6379),
+    password: process.env.CONSOLE_REDIS_PASSWORD ?? "",
+  },
+  // Richieste AI per minuto e per tenant/chiave (rate limit).
+  ratePerMinute: Number(process.env.METERING_RATE_PER_MINUTE ?? 120),
+  // Credito di benvenuto assegnato al provisioning del primo accesso (0 = nessuno).
+  signupCredits: Number(process.env.METERING_SIGNUP_CREDITS ?? 0),
+
   // Nome cookie di sessione.
   cookieName: "aethersy_session",
   cookieMaxAgeSec: 60 * 60 * 24 * 7,
 };
+
+/** Vero se esiste una configurazione Postgres utilizzabile (DSN o parametri). */
+export function hasDbConfig(): boolean {
+  return Boolean(config.dbUrl) || Boolean(config.pg.host && config.pg.database);
+}
+
+/** Vero se esiste una configurazione Redis utilizzabile (URL o parametri). */
+export function hasRedisConfig(): boolean {
+  return Boolean(config.redisUrl) || Boolean(config.redis.host);
+}
