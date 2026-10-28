@@ -3,7 +3,7 @@
 > Aggiornare dopo **ogni** fase con: data/ora, esito, comandi di verifica, note.
 > Stati ammessi: `DONE`, `BLOCKED: input #N`, `NOTE`.
 >
-> Ultima revisione: 2026-10-28
+> Ultima revisione: 2026-10-28 (tutte le fasi `DONE`; restano solo azioni utente per la rotazione credenziali)
 
 ## Stato sintetico
 
@@ -16,10 +16,10 @@
 | 4 | Primo accesso e chiusura signup | `DONE` — admin `mattiadeblasio94@gmail.com` (ADMIN, ACTIVE) su `app.aethersy.online`; registrazioni pubbliche chiuse (`AP_ALLOW_OPEN_SIGN_UP` assente → `INVITATION_ONLY_SIGN_UP`) |
 | 5 | Provider AI (OpenRouter/Venice) | `DONE` — **OpenRouter** creato via API admin, `status=active`, `enabledForChat=true`, 464 modelli; acceptance con flow reale "Ask AI" (webhook → `askAi`) → run `SUCCEEDED`, output `PONG`. Venice: chiave valida ma senza credito → non aggiunto (opzionale) |
 | 6 | Slack | `DONE` — webhook in `.env` VPS; alert su fallimento smoke test (cron ogni 15 min) + flow Activepieces "Slack notification" (`ENABLED`, run `SUCCEEDED`) |
-| 7 | Endpoint MCP | `DONE` — hostname `mcp.aethersy.online` esposto via Caddy; discovery OAuth + handshake verificati (401 con `WWW-Authenticate` → resource metadata) |
+| 7 | Endpoint MCP | `DONE` — hostname `mcp.aethersy.online` esposto via Caddy; **acceptance chiusa con client MCP reale**: handshake OAuth completo (DCR → PKCE S256 → consent → token) → `tools/list` = **42 tool** (project-scoped); `/mcp/platform` per token di piattaforma; `/mcp` senza token → 401. Bug consent 404 corretto in Caddy (`@authorize` → `X-Forwarded-Host {$APP_DOMAIN}`) |
 | 8 | Branding | `DONE` — nome **Aethersy**, logo reale fornito dal committente; palette ufficiale (primary `#00D4FF`, glow `#4DEEFF`, secondary `#1A0F4A`, accent `#FF9F1C`, bg `#0A0518`); asset trasparenti (`logo.png`, `full-logo.png`, `favicon.ico`) + **Layer A** re-skin via design token (`brand/aethersy.css`) con dark mode orbitale; verificato live (header/logo/bottone primario/screenshot) |
 | 9 | Backup e monitoraggio | `DONE` — `backup.sh` corretto (rotazione robusta a glob vuoto) ed eseguito; **restore testato** su DB temporaneo (83 tabelle, dati coerenti) |
-| 10 | Review finale e consegna | `IN CORSO` — audit infrastrutturale **completato** (tutte le verifiche OK); restano azioni utente (rotazione credenziali, backup segreti offline) e asset brand definitivi |
+| 10 | Review finale e consegna | `DONE` — audit infrastrutturale **completato** (tutte le verifiche OK) e **clean-clone** verificato (tarball da `git ls-files`, 73 file, nessun `.env` → `docker compose config` OK + build `console` OK). Restano solo **azioni utente**: rotazione credenziali esposte in chat (P0–P2, `docs/security.md` §6.1) e backup offline dei due segreti critici |
 | 11 | Aethersy Console (fusion A+B+C) | `DONE` — frontend proprietario React 19 + Vite + TS + Tailwind v4 + TanStack Query + React Router + BFF Fastify con sessione httpOnly firmata, proxy `/api/ap/*` verso Activepieces e **AI Router** multimodale (selezione automatica di modelli gratuiti OpenRouter per capacità testo/immagine/audio/video). Deployato su `https://console.aethersy.online` con TLS Let's Encrypt; smoke test 5/5 OK |
 
 ## Verifica §11 — nomi variabili, versioni, route
