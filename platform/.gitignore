@@ -1,0 +1,13 @@
+# Dipendenze e build (rigenerabili)
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Segreti locali (mai versionati)
+.env
+.env.*
+*.local
+
+# Log / scratch
+*.log
+.vite/

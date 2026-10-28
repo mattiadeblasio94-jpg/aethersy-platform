@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="it" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#1a0f4a" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta
+      name="description"
+      content="Aethersy — l'AI che gestisce la tua presenza digitale: agenti autonomi per social, contenuti, outreach e analytics."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Aethersy" />
+    <meta property="og:title" content="Aethersy — AI Operating Officer" />
+    <meta
+      property="og:description"
+      content="Agenti AI autonomi per social, contenuti, outreach e analytics. Trasforma gli obiettivi in lavoro reale."
+    />
+    <meta property="og:image" content="/brand/logo-192.png" />
+    <meta property="og:url" content="https://aethersy.online" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Aethersy — AI Operating Officer" />
+    <meta
+      name="twitter:description"
+      content="Agenti AI autonomi per social, contenuti, outreach e analytics. Trasforma gli obiettivi in lavoro reale."
+    />
+    <meta name="twitter:image" content="/brand/logo-192.png" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+    <link rel="icon" type="image/png" href="/brand/logo-192.png" />
+    <link rel="apple-touch-icon" href="/brand/logo-180.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <title>Aethersy — AI Operating Officer</title>
+    <script>
+      // Applica il tema prima del primo paint per evitare il flash del tema
+      // sbagliato. Legge la preferenza persistita da zustand (chiave "aethersy-ui").
+      (function () {
+        try {
+          var raw = localStorage.getItem("aethersy-ui");
+          var mode = raw ? (JSON.parse(raw).state || {}).theme : null;
+          if (mode !== "light" && mode !== "dark" && mode !== "system") mode = "dark";
+          var resolved =
+            mode === "system"
+              ? window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light"
+              : mode;
+          var root = document.documentElement;
+          root.classList.remove("dark", "light");
+          root.classList.add(resolved);
+          root.style.colorScheme = resolved;
+        } catch (e) {
+          document.documentElement.classList.add("dark");
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

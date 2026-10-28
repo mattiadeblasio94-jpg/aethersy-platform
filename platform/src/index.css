@@ -1,0 +1,178 @@
+/* =============================================================================
+ * Aethersy Platform — design system (Tailwind v3 + CSS variables).
+ *
+ * I token qui definiti sono la fonte di verita' visiva della piattaforma e
+ * restano allineati a tailwind.config.js e alla Console (stessa palette).
+ *
+ * Dal tema scuro/chiaro: i colori sono espressi come triplette RGB (canali)
+ * cosi' Tailwind puo' applicare le opacita' (es. bg-primary/60) e i due temi
+ * condividono gli stessi nomi di utility. Il tema si attiva aggiungendo la
+ * classe `dark`/`light` sull'elemento <html>.
+ * =========================================================================== */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* --- Design token — tema scuro (default, brief §1.2/§1.3) ----------------- */
+:root {
+  /* Colori (canali RGB) */
+  --aethersy-primary: 26 15 74;
+  --aethersy-secondary: 0 212 255;
+  --aethersy-tertiary: 255 159 28;
+  --aethersy-bg-dark: 13 8 37;
+  --aethersy-bg-card: 37 27 92;
+  --aethersy-bg-hover: 54 42 122;
+  --aethersy-bg-hover-strong: 69 55 150;
+  --aethersy-text-primary: 255 255 255;
+  --aethersy-text-secondary: 168 163 199;
+  --aethersy-text-muted: 107 101 133;
+  --aethersy-success: 0 230 118;
+  --aethersy-error: 255 82 82;
+  --aethersy-warning: 255 215 64;
+  /* Testo su superfici accent (gradiente cyan/arancio): sempre scuro. */
+  --aethersy-accent-foreground: 26 15 74;
+  /* Colore pieno usato dai bordi/accent raw (shadow inset del drawer). */
+  --aethersy-secondary-solid: #00d4ff;
+
+  /* Gradienti */
+  --aethersy-gradient-primary: linear-gradient(135deg, #1a0f4a 0%, #2d1b6e 50%, #1a0f4a 100%);
+  --aethersy-gradient-accent: linear-gradient(90deg, #00d4ff 0%, #ff9f1c 100%);
+
+  /* Ombre */
+  --aethersy-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.25);
+  --aethersy-shadow-glow: 0 0 30px rgba(0, 212, 255, 0.15);
+  --aethersy-shadow-glow-strong: 0 0 40px rgba(0, 212, 255, 0.35);
+  --aethersy-shadow-fab: 0 8px 16px rgba(255, 159, 28, 0.4);
+
+  /* Layout */
+  --header-height: 56px;
+  --bottom-nav-height: 64px;
+  --drawer-width: 280px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: env(safe-area-inset-top, 0px);
+
+  color-scheme: dark;
+}
+
+/* --- Design token — tema chiaro ------------------------------------------ *
+ * Mantiene l'identita' del brand (accenti cyan/arancio, indaco) ma su superfici
+ * chiare con testo scuro. I valori di secondary/success/error/warning sono
+ * scuriti per garantire un contrasto >= 4.5:1 sul bianco. */
+html.light {
+  --aethersy-primary: 255 255 255;
+  --aethersy-secondary: 8 111 146;
+  --aethersy-bg-dark: 244 243 249;
+  --aethersy-bg-card: 255 255 255;
+  --aethersy-bg-hover: 236 234 244;
+  --aethersy-bg-hover-strong: 222 219 238;
+  --aethersy-text-primary: 15 11 46;
+  --aethersy-text-secondary: 74 69 104;
+  --aethersy-text-muted: 98 93 122;
+  --aethersy-success: 11 122 52;
+  --aethersy-error: 198 40 40;
+  --aethersy-warning: 138 97 0;
+  --aethersy-accent-foreground: 26 15 74;
+  --aethersy-secondary-solid: #086f92;
+
+  --aethersy-gradient-primary: linear-gradient(135deg, #ece9f8 0%, #ffffff 50%, #ece9f8 100%);
+
+  --aethersy-shadow-card: 0 1px 2px rgba(26, 15, 74, 0.06), 0 8px 24px rgba(26, 15, 74, 0.1);
+  --aethersy-shadow-glow: 0 0 30px rgba(8, 111, 146, 0.12);
+  --aethersy-shadow-glow-strong: 0 0 40px rgba(8, 111, 146, 0.22);
+  --aethersy-shadow-fab: 0 8px 16px rgba(217, 119, 6, 0.3);
+
+  color-scheme: light;
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --header-height: 64px;
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(0, 212, 255, 0.1), transparent 60%),
+    radial-gradient(900px 500px at 0% 110%, rgba(255, 159, 28, 0.07), transparent 55%),
+    rgb(var(--aethersy-bg-dark));
+  color: rgb(var(--aethersy-text-primary));
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* --- Focus visibile e coerente (WCAG AA) -------------------------------- */
+:focus-visible {
+  outline: 2px solid rgb(var(--aethersy-secondary));
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.wordmark {
+  font-family: "Space Grotesk", Inter, ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: -0.02em;
+}
+
+/* --- Utility ricorrenti ------------------------------------------------ */
+.gradient-primary {
+  background: var(--aethersy-gradient-primary);
+}
+.gradient-accent {
+  background: var(--aethersy-gradient-accent);
+}
+.text-gradient-accent {
+  background: var(--aethersy-gradient-accent);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.surface-card {
+  background: rgb(var(--aethersy-bg-card));
+  border: 1px solid rgba(0, 212, 255, 0.1);
+  border-radius: 12px;
+}
+
+/* Nel tema chiaro l'arancio del brand resta "pieno" per badge e fondi, ma come
+ * testo su bianco non raggiungerebbe il contrasto minimo: lo scuriamo. */
+html.light .text-tertiary {
+  color: rgb(168 90 0);
+}
+
+/* --- Scrollbar discreta ------------------------------------------------- */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--aethersy-bg-hover));
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--aethersy-text-muted));
+  background-clip: padding-box;
+}
+
+/* --- Rispetto di prefers-reduced-motion (brief §5.7) -------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
