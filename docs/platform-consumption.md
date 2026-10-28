@@ -866,6 +866,7 @@ testing automatico sui creative, attribution avanzata, SLA e supporto enterprise
 | Rotte pipeline (P0.3) | **fatto** — `/api/pipeline/{stages,runs,runs/:id,usage,execute,approve,deliver,retry,assets,assets/families,assets/:id/versions,assets/:id/submit,assets/:id/decide,leads,integrations}` | — |
 | Libreria asset (P0.4) | **fatto** — `pipeline/catalog.ts`: macchina a stati asset (`draft→in_review→approved→delivered`, `rejected` ripresentabile) con `canTransitionAsset`/`isAssetDecidable`/`isAssetAccepted`/`assetFamilyKey`/`approvedVersion`; `repo.ts`: `transitionAsset`, `listAssetVersions`, `listAssetFamilies` (famiglie run/kind/name con `latest_version`/`approved_version`/`latest_asset_id`), `deliverRunAssets`; `deliverRun` marca `delivered` gli asset approvati | UI download/preview artefatti binari (oggi solo metadati) |
 | Console libreria asset (P0.4) | **fatto** — `console/web/src/pages/Assets.tsx` (filtri per kind, tabella famiglie con rev./versione approvata, pannello revisioni con invio in revisione/approva/rifiuta), hook `useAssetFamilies`/`useAssetVersions`/`useSubmitAsset`/`useDecideAsset`, voce di nav "Libreria asset" + rotta `/assets` | preview inline, bulk actions, download |
+| Console run + crediti (P0.5) | **fatto** — `pages/Pipeline.tsx` (griglia stadi → apertura run, filtri stadio/stato, elenco run, pannello dettaglio con task/consumo per capacità/deliverable e azioni HITL esegui/approva/consegna/riprova) e `pages/Credits.tsx` (saldo/prenotato/disponibile/tenant, barra quota con soglie soft+`402`, tabella eventi di consumo, avviso `METERING_ENABLED=false`); tipi `ExecuteResult`/`CreditBalance`/`UsageEvents` e hook `useOpenRun`/`useExecuteRun`/`useApproveRun`/`useDeliverRun`/`useRetryRun`/`useCreditBalance`/`useUsageEvents`; rotte `/pipeline`+`/credits` e nav | onboarding/workspace guidato (P0.5 "onboarding" formale), grafici storici |
 | Test | **fatto** — `npm run test:metering` (34 asserzioni pure: prezzi + pattern + catalogo/stati pipeline + macchina a stati asset) | test di integrazione con DB reale |
 | Snapshot listini | **solo seed** statico (price book v1) | cron di aggiornamento `price_book` + `fx_usd_eur` |
 
@@ -873,5 +874,6 @@ testing automatico sui creative, attribution avanzata, SLA e supporto enterprise
 
 *Documento di progettazione + stato implementativo. P0.1/P0.2 sono in `24c1d1f`; P0.3 (schema
 `pipeline`, orchestratore, segreti, rotte, metering `flow_run`) è in `94f65a9`; P0.4 (libreria
-asset: versioning, macchina a stati, approvazione in Console) è implementato e verificato. Le voci
-`[DA VERIFICARE]` restanti vanno risolte prima della fase di build.*
+asset: versioning, macchina a stati, approvazione in Console) e P0.5 (Console: run di pipeline +
+display crediti/consumo) sono implementati e verificati. Le voci `[DA VERIFICARE]` restanti vanno
+risolte prima della fase di build.*

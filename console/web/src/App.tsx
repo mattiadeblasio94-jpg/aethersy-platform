@@ -8,6 +8,8 @@ import Runs from "./pages/Runs";
 import Connections from "./pages/Connections";
 import AiCenter from "./pages/AiCenter";
 import Assets from "./pages/Assets";
+import Pipeline from "./pages/Pipeline";
+import Credits from "./pages/Credits";
 
 export default function App() {
   return (
@@ -25,6 +27,8 @@ export default function App() {
         <Route path="/runs" element={<Runs />} />
         <Route path="/connections" element={<Connections />} />
         <Route path="/assets" element={<Assets />} />
+        <Route path="/pipeline" element={<Pipeline />} />
+        <Route path="/credits" element={<Credits />} />
         <Route path="/ai" element={<AiCenter />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

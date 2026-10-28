@@ -189,3 +189,63 @@ export interface RunDetail {
   assets: Asset[];
   usage: RunUsageSummary;
 }
+
+export interface ExecuteOutcome {
+  taskId: string;
+  seq: number;
+  droid: string;
+  status: string;
+  flowRunId: string;
+  credits: number;
+  assets: number;
+  error: string | null;
+}
+
+export interface ExecuteResult {
+  run: PipelineRun | null;
+  outcomes: ExecuteOutcome[];
+  credits: number;
+  failed: boolean;
+}
+
+// --- Crediti / metering (P0.5) ----------------------------------------------
+
+export interface CreditQuota {
+  limitCredits: number;
+  window: "day" | "month";
+  softPct: number;
+  consumed: number;
+}
+
+export interface CreditBalance {
+  metering: boolean;
+  tenant?: string;
+  balance: number | null;
+  reserved?: number;
+  available: number | null;
+  quota: CreditQuota | null;
+}
+
+export interface UsageEvent {
+  id: string;
+  created_at: string;
+  capability: string;
+  provider: string | null;
+  model: string | null;
+  unit: string;
+  billable_units: number | string;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  price_eur: number | string;
+  credits: number;
+  status: string;
+  latency_ms: number | null;
+  source: string | null;
+  flow_run_id: string | null;
+  request_id: string | null;
+}
+
+export interface UsageEvents {
+  metering: boolean;
+  events: UsageEvent[];
+}

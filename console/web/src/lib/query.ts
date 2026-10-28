@@ -8,12 +8,15 @@ import type {
   Asset,
   AssetFamily,
   AssetKind,
+  CreditBalance,
+  ExecuteResult,
   Flow,
   FlowRun,
   Project,
   RunDetail,
   SessionUser,
   StageSpec,
+  UsageEvents,
 } from "./types";
 
 export function useSession() {
@@ -194,5 +197,85 @@ export function useDecideAsset() {
     mutationFn: (v: { assetId: string; decision: "approved" | "rejected" }) =>
       api.post<Asset>(`/pipeline/assets/${v.assetId}/decide`, { decision: v.decision }),
     onSuccess: invalidate,
+  });
+}
+
+// --- Pipeline run (esecuzione + HITL) e crediti ------------------------------
+
+function useRunInvalidate() {
+  const qc = useQueryClient();
+  return (runId: string) => {
+    qc.invalidateQueries({ queryKey: ["pipeline-runs"] });
+    qc.invalidateQueries({ queryKey: ["pipeline-run", runId] });
+    qc.invalidateQueries({ queryKey: ["asset-families"] });
+    qc.invalidateQueries({ queryKey: ["credit-balance"] });
+    qc.invalidateQueries({ queryKey: ["usage-events"] });
+  };
+}
+
+/** Apre un nuovo run di pipeline per uno stadio. */
+export function useOpenRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { stage: string; title?: string; brief?: unknown }) =>
+      api.post<RunDetail["run"]>("/pipeline/runs", body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["pipeline-runs"] }),
+  });
+}
+
+/** Esegue i task pendenti del run (executor iniettato lato server). */
+export function useExecuteRun() {
+  const invalidate = useRunInvalidate();
+  return useMutation({
+    mutationFn: (v: { runId: string; results?: Record<string, unknown>; continueOnError?: boolean }) =>
+      api.post<ExecuteResult>(`/pipeline/runs/${v.runId}/execute`, {
+        results: v.results,
+        continueOnError: v.continueOnError,
+      }),
+    onSuccess: (_r, v) => invalidate(v.runId),
+  });
+}
+
+/** Approva un run in revisione (HITL). */
+export function useApproveRun() {
+  const invalidate = useRunInvalidate();
+  return useMutation({
+    mutationFn: (runId: string) => api.post<RunDetail["run"]>(`/pipeline/runs/${runId}/approve`),
+    onSuccess: (_r, runId) => invalidate(runId),
+  });
+}
+
+/** Consegna un run approvato (marca delivered gli asset approvati). */
+export function useDeliverRun() {
+  const invalidate = useRunInvalidate();
+  return useMutation({
+    mutationFn: (runId: string) => api.post<RunDetail["run"]>(`/pipeline/runs/${runId}/deliver`),
+    onSuccess: (_r, runId) => invalidate(runId),
+  });
+}
+
+/** Riporta un run fallito in lavorazione. */
+export function useRetryRun() {
+  const invalidate = useRunInvalidate();
+  return useMutation({
+    mutationFn: (runId: string) => api.post<RunDetail["run"]>(`/pipeline/runs/${runId}/retry`),
+    onSuccess: (_r, runId) => invalidate(runId),
+  });
+}
+
+/** Saldo crediti + quota del tenant (display, P0.5). */
+export function useCreditBalance() {
+  return useQuery<CreditBalance>({
+    queryKey: ["credit-balance"],
+    queryFn: () => api.get<CreditBalance>("/ai/balance"),
+    refetchInterval: 30_000,
+  });
+}
+
+/** Ultimi eventi di consumo del tenant (display, P0.5). */
+export function useUsageEvents(limit = 50) {
+  return useQuery<UsageEvents>({
+    queryKey: ["usage-events", limit],
+    queryFn: () => api.get<UsageEvents>(`/ai/usage?limit=${limit}`),
   });
 }
