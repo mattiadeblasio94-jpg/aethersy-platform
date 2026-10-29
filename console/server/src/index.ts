@@ -38,6 +38,16 @@ try {
   app.log.error({ err }, "migrazione pipeline fallita: pipeline inerte");
 }
 
+// Migrazione idempotente dello schema `business` (P1.1): substrato aziendale
+// (obiettivi, memoria, prodotti/servizi). Dipende da `metering.tenant` (FK).
+try {
+  const { migrateBusiness } = await import("./business/migrate.js");
+  const res = await migrateBusiness();
+  if (res.applied) app.log.info("schema business applicato");
+} catch (err) {
+  app.log.error({ err }, "migrazione business fallita: business inerte");
+}
+
 await registerRoutes(app);
 
 // Chiusura ordinata dei pool (Postgres/Redis) su SIGTERM/SIGINT.

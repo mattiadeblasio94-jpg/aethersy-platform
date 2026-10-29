@@ -16,6 +16,9 @@ import Pulse from "./pages/Pulse";
 import Opportunities from "./pages/Opportunities";
 import Schedule from "./pages/Schedule";
 import AgentRoster from "./pages/AgentRoster";
+import Goals from "./pages/Goals";
+import Memory from "./pages/Memory";
+import Products from "./pages/Products";
 import { APP_ROUTES } from "./preview/pages/routes";
 
 // Layer "Anteprima": porting delle pagine di platform/ (dati demo, nessun
@@ -48,6 +51,9 @@ export default function App() {
           <Route path="/opportunities" element={<Opportunities />} />
           <Route path="/schedule" element={<Schedule />} />
           <Route path="/agents" element={<AgentRoster />} />
+          <Route path="/goals" element={<Goals />} />
+          <Route path="/memory" element={<Memory />} />
+          <Route path="/products" element={<Products />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/flows" element={<Flows />} />
           <Route path="/runs" element={<Runs />} />

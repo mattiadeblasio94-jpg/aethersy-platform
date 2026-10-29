@@ -3,7 +3,7 @@
 > Aggiornare dopo **ogni** fase con: data/ora, esito, comandi di verifica, note.
 > Stati ammessi: `DONE`, `BLOCKED: input #N`, `NOTE`.
 >
-> Ultima revisione: 2026-10-29 (fasi 0–12 `DONE`; P0.1–P0.10 implementati e deployati; restano solo azioni utente per la rotazione credenziali)
+> Ultima revisione: 2026-10-29 (fasi 0–12 `DONE`; P0.1–P0.10 + P1.1 implementati e deployati; restano solo azioni utente per la rotazione credenziali)
 
 ## Stato sintetico
 
@@ -21,7 +21,7 @@
 | 9 | Backup e monitoraggio | `DONE` — `backup.sh` corretto (rotazione robusta a glob vuoto) ed eseguito; **restore testato** su DB temporaneo (83 tabelle, dati coerenti) |
 | 10 | Review finale e consegna | `DONE` — audit infrastrutturale **completato** (tutte le verifiche OK) e **clean-clone** verificato (tarball da `git ls-files`, 73 file, nessun `.env` → `docker compose config` OK + build `console` OK). Restano solo **azioni utente**: rotazione credenziali esposte in chat (P0–P2, `docs/security.md` §6.1) e backup offline dei due segreti critici |
 | 11 | Aethersy Console (fusion A+B+C) | `DONE` — frontend proprietario React 19 + Vite + TS + Tailwind v4 + TanStack Query + React Router + BFF Fastify con sessione httpOnly firmata, proxy `/api/ap/*` verso Activepieces e **AI Router** multimodale (selezione automatica di modelli gratuiti OpenRouter per capacità testo/immagine/audio/video). Deployato su `https://console.aethersy.online` con TLS Let's Encrypt; smoke test 5/5 OK |
-| 12 | Piattaforma a consumo (P0) — pipeline + libreria asset + Console run/crediti | `IN CORSO` — metering/billing (P0.1/P0.2, `24c1d1f`), pipeline multi-stadio + orchestratore HITL + segreti (P0.3, `94f65a9`), **libreria asset con versioning e approvazione in Console** (P0.4), **Console run/crediti** (P0.5), **lead webhook + canale Slack + export pacchettizzato + UI lead** (P0.6), **QA E2E + backup off-site** (P0.7), **layer Anteprima `/preview`** (P0.8), **deploy Console+Platform** (P0.9), **modulo piattaforma Business Pulse + `pipeline.schedule`** (P0.10, 29/10/2026). QA E2E **51/51 OK**; web build OK; deployato sul VPS |
+| 12 | Piattaforma a consumo (P0) — pipeline + libreria asset + Console run/crediti | `IN CORSO` — metering/billing (P0.1/P0.2, `24c1d1f`), pipeline multi-stadio + orchestratore HITL + segreti (P0.3, `94f65a9`), **libreria asset con versioning e approvazione in Console** (P0.4), **Console run/crediti** (P0.5), **lead webhook + canale Slack + export pacchettizzato + UI lead** (P0.6), **QA E2E + backup off-site** (P0.7), **layer Anteprima `/preview`** (P0.8), **deploy Console+Platform** (P0.9), **modulo piattaforma Business Pulse + `pipeline.schedule`** (P0.10, 29/10/2026), **substrato aziendale multi-tenant: schema `business` (obiettivi/memoria/prodotti) + API + Console** (P1.1, 29/10/2026). QA E2E **65/65 OK**; metering 44/44; web+server build OK; deployato sul VPS |
 
 ## Verifica §11 — nomi variabili, versioni, route
 
@@ -445,4 +445,60 @@ dei 17 file cambiati → `docker compose build console` → `up -d --force-recre
 
 **Debito residuo:** `accountSummary` non è esposto da nessuna rotta (dead code: la pagina Crediti copre
 già saldo/quota/consumo); snapshot listini ancora seed statico; stadi P1 (idea/strategia/ads/growth).
+
+### Fase 12 — P1.1: substrato aziendale multi-tenant (obiettivi, memoria, prodotti) (29/10/2026)
+
+Primo incremento del piano **piattaforma multi-tenant** (gestire business di qualunque settore). Qui si
+pone la **base dati proprietaria del business** — distinta dal lavoro della pipeline — su cui poggeranno
+gli incrementi successivi (P1.2 scheduler reale, P1.3 chat centrale, P1.4 moduli di settore, P1.5 OAuth +
+email aziendale + gate di autorizzazione, P1.6 dashboard risultati). Nessuna operazione simulata: solo
+persistenza reale + API + UI + test.
+
+**Schema** — nuovo schema Postgres `business` (`console/server/src/business/schema.sql`), creato
+idempotentemente all'avvio del BFF dopo `metering` e `pipeline`:
+- `business.goal` — obiettivi dell'impresa: `title, description, status` (`active|achieved|paused|abandoned`),
+  `priority` (1–5 CHECK), `metric`, `target_date`, `meta jsonb`, `achieved_at`; indici `(tenant_id,status,priority)`
+  e `(tenant_id,created_at)`.
+- `business.memory` — base di conoscenza: `kind` (`fact|note|preference|constraint|decision|contact`),
+  `title, content, source, tags text[]` (indice GIN), `pinned` (indice parziale).
+- `business.product` — catalogo offerta: `kind` (`product|service`), `name, sku, description,
+  price_cents (>=0), currency char(3) default EUR, status` (`draft|active|archived`); vincolo unico
+  `(tenant_id, sku)` dove `sku <> ''`.
+- FK `tenant_id → metering.tenant`.
+
+**Backend** — nuovo modulo `console/server/src/business/`:
+- `catalog.ts` — fonte unica (puro): stati/kind/etichette + validatori (`isGoalStatus`, `isGoalPriority`,
+  `isMemoryKind`, `isProductKind`, `isProductStatus`).
+- `migrate.ts` — `migrateBusiness()` idempotente (guarded da `meteringActive()`), usa `BUSINESS_SCHEMA_SQL`.
+- `repo.ts` — CRUD tenant-scoped via `withTx` per goal/memory/product; `updateGoal` valorizza/azzera
+  `achieved_at` sulle transizioni di stato; `listMemory` filtra per kind/tag (`tags @> ARRAY[]`)/pinned/ricerca
+  ILIKE; `businessSummary(tenantId)` restituisce i conteggi per dashboard.
+- `routes.ts` — `registerBusinessRoutes(app)`: `GET /api/platform/business/catalog`,
+  `GET /api/platform/business/summary`, CRUD `/api/platform/{goals,memory,products}`, tutti dietro
+  `requireMeteredTenant`.
+- Wiring: `index.ts` esegue `migrateBusiness()` dopo la pipeline; `routes.ts` registra le rotte.
+  `tools/gen-schema.mjs` (+`business`) e `tools/test-metering.mjs` (loop guardrail su `["metering","pipeline","business"]`).
+
+**Frontend (Console)** — pagine on-brand: `Goals.tsx` (`/goals`, metriche + priorità + raggiungi/riattiva),
+`Memory.tsx` (`/memory`, card + filtri tipo/ricerca + pin/unpin), `Products.tsx` (`/products`, catalogo +
+filtri stato/tipo). Tipi (+~90) e hook (+14: `useBusinessSummary`, CRUD `useGoals`/`useMemory`/`useProducts`
+con invalidazione del riepilogo). Rotte in `App.tsx`, voci di nav in `Layout.tsx` (Obiettivi/Memoria/Prodotti & Servizi).
+
+**Deploy (VPS non-git, copia file):** backup sorgente console → tarball → `docker compose build console`
+→ `up -d --force-recreate console` → container **healthy**. Verificato: schema `business` live con le 3
+tabelle; `GET /api/platform/{goals,memory,products,business/summary}` senza sessione → **401** (atteso).
+
+**Verifica (29/10/2026):**
+- `npm run typecheck` (web+server) **0**; `npm run build` **0**.
+- `npm run test:metering` → **44/44** (incluse le guardrail keyword-riservate e allineamento `schema.ts`
+  per `business`).
+- **QA E2E esteso** (`test-e2e-pilot.mjs`): nuova sezione "substrato aziendale" + isolamento multi-tenant.
+  Eseguito sul VPS contro il DB temporaneo `console_e2e`: **65 ok, 0 falliti** (era 51) — migrazione
+  business idempotente, CRUD goal (con `achieved_at`), filtri memoria (kind/tag/pinned/ricerca), validazioni
+  prodotto (prezzo/valuta/SKU duplicato), riepilogo, delete, isolamento fra tenant.
+- Telegram relay: report inviato su `outbox.jsonl`.
+
+**Prossimo incremento:** P1.2 — scheduler reale (l'esecutore preleva le voci `pipeline.schedule` dovute,
+apre run/task, registra il risultato verificato come asset approvato; formalizza la triade
+pianificato/eseguito/verificato + log errori).
 

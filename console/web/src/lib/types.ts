@@ -396,3 +396,69 @@ export interface CronPreview {
   runs: string[];
 }
 
+// --- Substrato aziendale (P1.1): obiettivi, memoria, prodotti/servizi --------
+
+export type GoalStatus = "active" | "achieved" | "paused" | "abandoned";
+
+export interface Goal {
+  id: string;
+  tenant_id: string;
+  title: string;
+  description: string;
+  status: GoalStatus;
+  priority: number;
+  metric: string;
+  target_date: string | null;
+  meta: unknown;
+  achieved_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type MemoryKind = "fact" | "note" | "preference" | "constraint" | "decision" | "contact";
+
+export interface MemoryEntry {
+  id: string;
+  tenant_id: string;
+  kind: MemoryKind;
+  title: string;
+  content: string;
+  source: string;
+  tags: string[];
+  pinned: boolean;
+  meta: unknown;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ProductKind = "product" | "service";
+export type ProductStatus = "draft" | "active" | "archived";
+
+export interface Product {
+  id: string;
+  tenant_id: string;
+  kind: ProductKind;
+  name: string;
+  sku: string;
+  description: string;
+  price_cents: string;
+  currency: string;
+  status: ProductStatus;
+  meta: unknown;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BusinessSummary {
+  goals: { total: number; active: number; achieved: number; byStatus: Record<string, number> };
+  memory: { total: number; pinned: number; byKind: Record<string, number> };
+  products: { total: number; active: number; byStatus: Record<string, number> };
+}
+
+export interface BusinessCatalog {
+  goalStatuses: { id: GoalStatus; label: string }[];
+  memoryKinds: { id: MemoryKind; label: string }[];
+  productKinds: { id: ProductKind; label: string }[];
+  productStatuses: { id: ProductStatus; label: string }[];
+}
+

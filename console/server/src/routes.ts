@@ -7,6 +7,7 @@ import { authorizeAi, flowRunId, estimateTokens } from "./metering/guard.js";
 import { balanceSnapshot, recentUsage } from "./metering/repo.js";
 import { selectGenModel } from "./ai-gen/select.js";
 import { registerPlatformRoutes } from "./platform/routes.js";
+import { registerBusinessRoutes } from "./business/routes.js";
 import type { NotifyResult } from "./pipeline/notify.js";
 
 // Rotte BFF:
@@ -962,4 +963,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   // /api/platform/* e legge le entita' reali della pipeline (nessun nuovo schema
   // oltre a `pipeline.schedule`).
   await registerPlatformRoutes(app);
+  // Substrato aziendale (P1.1): obiettivi, memoria, prodotti/servizi. Vive
+  // sotto /api/platform/* accanto a Business Pulse (schema `business`).
+  await registerBusinessRoutes(app);
 }

@@ -3,6 +3,9 @@ import { useLogout, useSession } from "../lib/query";
 
 const nav = [
   { to: "/", label: "Business Pulse", icon: "◈" },
+  { to: "/goals", label: "Obiettivi", icon: "◬" },
+  { to: "/memory", label: "Memoria", icon: "❂" },
+  { to: "/products", label: "Prodotti & Servizi", icon: "▣" },
   { to: "/opportunities", label: "Opportunità", icon: "◎" },
   { to: "/schedule", label: "Tasks & Calendar", icon: "▦" },
   { to: "/agents", label: "Agenti", icon: "❖" },

@@ -9,17 +9,25 @@ import type {
   AssetFamily,
   AssetKind,
   BusinessPulse,
+  BusinessSummary,
   CreditBalance,
   CronPreview,
   ExecuteResult,
   Flow,
   FlowRun,
+  Goal,
+  GoalStatus,
   IntegrationCredential,
   IntegrationKind,
   Lead,
   LeadsResponse,
   LeadStatus,
+  MemoryEntry,
+  MemoryKind,
   OpportunityRun,
+  Product,
+  ProductKind,
+  ProductStatus,
   Project,
   RosterEntry,
   RunDetail,
@@ -495,6 +503,203 @@ export function useCronPreview() {
   return useMutation({
     mutationFn: (body: { cron: string; timezone?: string; count?: number }) =>
       api.post<CronPreview>("/platform/cron/preview", body),
+  });
+}
+
+// --- Substrato aziendale (P1.1): obiettivi, memoria, prodotti/servizi --------
+
+/** Conteggi aggregati del substrato aziendale (obiettivi, memoria, prodotti). */
+export function useBusinessSummary() {
+  return useQuery<BusinessSummary>({
+    queryKey: ["business-summary"],
+    queryFn: () => api.get<BusinessSummary>("/platform/business/summary"),
+    refetchInterval: 30_000,
+  });
+}
+
+/** Obiettivi dell'impresa, ordinati per priorita'. */
+export function useGoals(opts: { status?: string } = {}) {
+  const qs = new URLSearchParams();
+  if (opts.status) qs.set("status", opts.status);
+  const suffix = qs.toString() ? `?${qs}` : "";
+  return useQuery<Goal[]>({
+    queryKey: ["business-goals", opts.status ?? ""],
+    queryFn: () => api.get<Goal[]>(`/platform/goals${suffix}`),
+  });
+}
+
+function useGoalInvalidate() {
+  const qc = useQueryClient();
+  return () => {
+    qc.invalidateQueries({ queryKey: ["business-goals"] });
+    qc.invalidateQueries({ queryKey: ["business-summary"] });
+  };
+}
+
+export function useCreateGoal() {
+  const invalidate = useGoalInvalidate();
+  return useMutation({
+    mutationFn: (body: {
+      title: string;
+      description?: string;
+      status?: GoalStatus;
+      priority?: number;
+      metric?: string;
+      targetDate?: string | null;
+    }) => api.post<Goal>("/platform/goals", body),
+    onSuccess: invalidate,
+  });
+}
+
+export function useUpdateGoal() {
+  const invalidate = useGoalInvalidate();
+  return useMutation({
+    mutationFn: (v: { id: string } & Partial<{
+      title: string;
+      description: string;
+      status: GoalStatus;
+      priority: number;
+      metric: string;
+      targetDate: string | null;
+    }>) => {
+      const { id, ...patch } = v;
+      return api.patch<Goal>(`/platform/goals/${id}`, patch);
+    },
+    onSuccess: invalidate,
+  });
+}
+
+export function useDeleteGoal() {
+  const invalidate = useGoalInvalidate();
+  return useMutation({
+    mutationFn: (id: string) => api.del<{ ok: boolean }>(`/platform/goals/${id}`),
+    onSuccess: invalidate,
+  });
+}
+
+/** Memoria dell'impresa (fatti, note, preferenze, vincoli, ...). */
+export function useMemory(opts: { kind?: string; tag?: string; pinned?: boolean; search?: string } = {}) {
+  const qs = new URLSearchParams();
+  if (opts.kind) qs.set("kind", opts.kind);
+  if (opts.tag) qs.set("tag", opts.tag);
+  if (opts.pinned !== undefined) qs.set("pinned", String(opts.pinned));
+  if (opts.search) qs.set("search", opts.search);
+  const suffix = qs.toString() ? `?${qs}` : "";
+  return useQuery<MemoryEntry[]>({
+    queryKey: ["business-memory", opts.kind ?? "", opts.tag ?? "", opts.pinned ?? null, opts.search ?? ""],
+    queryFn: () => api.get<MemoryEntry[]>(`/platform/memory${suffix}`),
+  });
+}
+
+function useMemoryInvalidate() {
+  const qc = useQueryClient();
+  return () => {
+    qc.invalidateQueries({ queryKey: ["business-memory"] });
+    qc.invalidateQueries({ queryKey: ["business-summary"] });
+  };
+}
+
+export function useCreateMemory() {
+  const invalidate = useMemoryInvalidate();
+  return useMutation({
+    mutationFn: (body: {
+      kind?: MemoryKind;
+      title?: string;
+      content: string;
+      source?: string;
+      tags?: string[];
+      pinned?: boolean;
+    }) => api.post<MemoryEntry>("/platform/memory", body),
+    onSuccess: invalidate,
+  });
+}
+
+export function useUpdateMemory() {
+  const invalidate = useMemoryInvalidate();
+  return useMutation({
+    mutationFn: (v: { id: string } & Partial<{
+      kind: MemoryKind;
+      title: string;
+      content: string;
+      source: string;
+      tags: string[];
+      pinned: boolean;
+    }>) => {
+      const { id, ...patch } = v;
+      return api.patch<MemoryEntry>(`/platform/memory/${id}`, patch);
+    },
+    onSuccess: invalidate,
+  });
+}
+
+export function useDeleteMemory() {
+  const invalidate = useMemoryInvalidate();
+  return useMutation({
+    mutationFn: (id: string) => api.del<{ ok: boolean }>(`/platform/memory/${id}`),
+    onSuccess: invalidate,
+  });
+}
+
+/** Catalogo prodotti/servizi dell'impresa. */
+export function useProducts(opts: { status?: string; kind?: string } = {}) {
+  const qs = new URLSearchParams();
+  if (opts.status) qs.set("status", opts.status);
+  if (opts.kind) qs.set("kind", opts.kind);
+  const suffix = qs.toString() ? `?${qs}` : "";
+  return useQuery<Product[]>({
+    queryKey: ["business-products", opts.status ?? "", opts.kind ?? ""],
+    queryFn: () => api.get<Product[]>(`/platform/products${suffix}`),
+  });
+}
+
+function useProductInvalidate() {
+  const qc = useQueryClient();
+  return () => {
+    qc.invalidateQueries({ queryKey: ["business-products"] });
+    qc.invalidateQueries({ queryKey: ["business-summary"] });
+  };
+}
+
+export function useCreateProduct() {
+  const invalidate = useProductInvalidate();
+  return useMutation({
+    mutationFn: (body: {
+      kind?: ProductKind;
+      name: string;
+      sku?: string;
+      description?: string;
+      priceCents?: number;
+      currency?: string;
+      status?: ProductStatus;
+    }) => api.post<Product>("/platform/products", body),
+    onSuccess: invalidate,
+  });
+}
+
+export function useUpdateProduct() {
+  const invalidate = useProductInvalidate();
+  return useMutation({
+    mutationFn: (v: { id: string } & Partial<{
+      kind: ProductKind;
+      name: string;
+      sku: string;
+      description: string;
+      priceCents: number;
+      currency: string;
+      status: ProductStatus;
+    }>) => {
+      const { id, ...patch } = v;
+      return api.patch<Product>(`/platform/products/${id}`, patch);
+    },
+    onSuccess: invalidate,
+  });
+}
+
+export function useDeleteProduct() {
+  const invalidate = useProductInvalidate();
+  return useMutation({
+    mutationFn: (id: string) => api.del<{ ok: boolean }>(`/platform/products/${id}`),
+    onSuccess: invalidate,
   });
 }
 

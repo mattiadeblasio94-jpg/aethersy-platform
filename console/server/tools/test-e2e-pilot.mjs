@@ -101,6 +101,7 @@ process.env.SLACK_WEBHOOK_URL = `http://127.0.0.1:${port}/hook`;
 const { hasDbConfig } = await import(`${DIST}/config.js`);
 const { migrateMetering } = await import(`${DIST}/metering/migrate.js`);
 const { migratePipeline } = await import(`${DIST}/pipeline/migrate.js`);
+const { migrateBusiness } = await import(`${DIST}/business/migrate.js`);
 const { closePool, meteringActive } = await import(`${DIST}/metering/db.js`);
 const metering = await import(`${DIST}/metering/repo.js`);
 const catalog = await import(`${DIST}/pipeline/catalog.js`);
@@ -108,6 +109,7 @@ const repo = await import(`${DIST}/pipeline/repo.js`);
 const platformCatalog = await import(`${DIST}/platform/catalog.js`);
 const platformCron = await import(`${DIST}/platform/cron.js`);
 const platformRepo = await import(`${DIST}/platform/repo.js`);
+const businessRepo = await import(`${DIST}/business/repo.js`);
 const orchestrator = await import(`${DIST}/pipeline/orchestrator.js`);
 const notify = await import(`${DIST}/pipeline/notify.js`);
 const secrets = await import(`${DIST}/pipeline/secrets.js`);
@@ -541,6 +543,160 @@ try {
     eq(await platformRepo.deleteSchedule(tenant.tenantId, schedule.id), false, "seconda delete no-op");
   });
 
+  // ------------------------------------------------- substrato aziendale P1.1
+  console.log("\nsubstrato aziendale (obiettivi, memoria, prodotti)");
+
+  await recordAsync("migrazione business", async () => {
+    ok((await migrateBusiness()).applied, "applicata");
+  });
+
+  await recordAsync("la migrazione business e' idempotente", async () => {
+    eq((await migrateBusiness()).applied, false, "business al secondo giro");
+  });
+
+  const goal = await recordAsync("creazione obiettivo con priorita'", async () => {
+    const g = await businessRepo.createGoal({
+      tenantId: tenant.tenantId,
+      title: "Raggiungere 100 clienti attivi",
+      description: "Obiettivo di crescita e2e",
+      priority: 1,
+      metric: "clienti attivi",
+    });
+    ok(g.id, "id obiettivo");
+    eq(g.status, "active", "stato iniziale");
+    eq(g.priority, 1, "priorita'");
+    return g;
+  });
+
+  await recordAsync("priorita' fuori range rifiutata", async () => {
+    let threw = false;
+    try {
+      await businessRepo.createGoal({ tenantId: tenant.tenantId, title: "x", priority: 9 });
+    } catch {
+      threw = true;
+    }
+    ok(threw, "priority 9 rifiutata");
+  });
+
+  await recordAsync("elenco obiettivi con filtro di stato", async () => {
+    eq((await businessRepo.listGoals(tenant.tenantId, { status: "active" })).length, 1, "un attivo");
+    eq((await businessRepo.listGoals(tenant.tenantId, { status: "achieved" })).length, 0, "nessun raggiunto");
+  });
+
+  await recordAsync("raggiungere un obiettivo valorizza achieved_at", async () => {
+    const updated = await businessRepo.updateGoal(tenant.tenantId, goal.id, { status: "achieved" });
+    ok(updated, "aggiornato");
+    eq(updated.status, "achieved", "stato");
+    ok(updated.achieved_at, "achieved_at valorizzato");
+    const back = await businessRepo.updateGoal(tenant.tenantId, goal.id, { status: "active" });
+    eq(back.achieved_at, null, "riattivazione azzera achieved_at");
+  });
+
+  const memory = await recordAsync("creazione voce di memoria con tag", async () => {
+    const m = await businessRepo.createMemory({
+      tenantId: tenant.tenantId,
+      kind: "preference",
+      title: "Tone of voice",
+      content: "Professionale ma diretto.",
+      tags: ["brand", "copy"],
+      pinned: true,
+    });
+    ok(m.id, "id voce");
+    eq(m.kind, "preference", "tipo");
+    eq(m.tags.length, 2, "tag");
+    eq(m.pinned, true, "fissata");
+    return m;
+  });
+
+  await recordAsync("la memoria si filtra per tipo, tag, fissate e ricerca", async () => {
+    await businessRepo.createMemory({
+      tenantId: tenant.tenantId,
+      kind: "constraint",
+      content: "Budget mensile massimo 500 EUR.",
+      tags: ["budget"],
+    });
+    eq((await businessRepo.listMemory(tenant.tenantId, { kind: "preference" })).length, 1, "per tipo");
+    eq((await businessRepo.listMemory(tenant.tenantId, { tag: "budget" })).length, 1, "per tag");
+    eq((await businessRepo.listMemory(tenant.tenantId, { pinned: true })).length, 1, "fissate");
+    eq((await businessRepo.listMemory(tenant.tenantId, { search: "budget" })).length, 1, "ricerca");
+    eq((await businessRepo.listMemory(tenant.tenantId, { search: "inesistente" })).length, 0, "ricerca vuota");
+  });
+
+  await recordAsync("pin/unpin aggiorna la memoria", async () => {
+    const unpinned = await businessRepo.updateMemory(tenant.tenantId, memory.id, { pinned: false });
+    eq(unpinned.pinned, false, "sbloccata");
+    const tagged = await businessRepo.updateMemory(tenant.tenantId, memory.id, { tags: ["brand"] });
+    eq(tagged.tags.length, 1, "tag aggiornati");
+  });
+
+  const product = await recordAsync("creazione prodotto con prezzo e valuta", async () => {
+    const p = await businessRepo.createProduct({
+      tenantId: tenant.tenantId,
+      kind: "service",
+      name: "Consulenza SEO",
+      sku: "SEO-01",
+      priceCents: 25000,
+      currency: "eur",
+      status: "active",
+    });
+    ok(p.id, "id prodotto");
+    eq(p.currency, "EUR", "valuta normalizzata");
+    eq(String(p.price_cents), "25000", "prezzo in centesimi");
+    eq(p.status, "active", "stato");
+    return p;
+  });
+
+  await recordAsync("validazioni prodotto", async () => {
+    let threw = 0;
+    try {
+      await businessRepo.createProduct({ tenantId: tenant.tenantId, name: "x", priceCents: -1 });
+    } catch {
+      threw += 1;
+    }
+    try {
+      await businessRepo.createProduct({ tenantId: tenant.tenantId, name: "x", currency: "EURO" });
+    } catch {
+      threw += 1;
+    }
+    eq(threw, 2, "prezzo negativo e valuta non valida rifiutati");
+    eq((await businessRepo.listProducts(tenant.tenantId, { kind: "service" })).length, 1, "per tipo");
+    eq((await businessRepo.listProducts(tenant.tenantId, { status: "draft" })).length, 0, "nessuna bozza");
+  });
+
+  await recordAsync("sku duplicato viene rifiutato per lo stesso tenant", async () => {
+    let threw = false;
+    try {
+      await businessRepo.createProduct({
+        tenantId: tenant.tenantId,
+        name: "Altro",
+        sku: "SEO-01",
+      });
+    } catch {
+      threw = true;
+    }
+    ok(threw, "sku duplicato rifiutato");
+  });
+
+  await recordAsync("riepilogo del substrato aziendale", async () => {
+    const s = await businessRepo.businessSummary(tenant.tenantId);
+    eq(s.goals.total, 1, "un obiettivo");
+    eq(s.goals.active, 1, "un obiettivo attivo");
+    eq(s.memory.total, 2, "due voci di memoria");
+    eq(s.memory.byKind.preference, 1, "una preferenza");
+    eq(s.products.total, 1, "un prodotto");
+    eq(s.products.active, 1, "un prodotto attivo");
+  });
+
+  await recordAsync("delete rimuove obiettivo, memoria e prodotto", async () => {
+    eq(await businessRepo.deleteGoal(tenant.tenantId, goal.id), true, "obiettivo eliminato");
+    eq(await businessRepo.deleteGoal(tenant.tenantId, goal.id), false, "seconda delete no-op");
+    ok(await businessRepo.deleteMemory(tenant.tenantId, memory.id), "memoria eliminata");
+    ok(await businessRepo.deleteProduct(tenant.tenantId, product.id), "prodotto eliminato");
+    const s = await businessRepo.businessSummary(tenant.tenantId);
+    eq(s.goals.total, 0, "zero obiettivi");
+    eq(s.products.total, 0, "zero prodotti");
+  });
+
   // ------------------------------------------------------------- isolamento ---
   console.log("\nisolamento fra tenant");
 
@@ -554,6 +710,13 @@ try {
     const otherSchedule = await platformRepo.listSchedule(other.tenantId);
     eq(otherSchedule.length, 0, "agenda altrui vuota");
     eq(await platformRepo.droidDetail(other.tenantId, spec.tasks[0].droid).then((d) => d.tasks), 0, "carico droid altrui a zero");
+    eq((await businessRepo.listGoals(other.tenantId)).length, 0, "obiettivi altrui invisibili");
+    eq((await businessRepo.listMemory(other.tenantId)).length, 0, "memoria altrui invisibile");
+    eq((await businessRepo.listProducts(other.tenantId)).length, 0, "prodotti altrui invisibili");
+    const otherSummary = await businessRepo.businessSummary(other.tenantId);
+    eq(otherSummary.goals.total, 0, "riepilogo obiettivi altrui a zero");
+    eq(otherSummary.memory.total, 0, "riepilogo memoria altrui a zero");
+    eq(otherSummary.products.total, 0, "riepilogo prodotti altrui a zero");
   });
 
   await recordAsync("consumo registrato negli ultimi eventi", async () => {

@@ -382,7 +382,7 @@ check("spam raggiungibile da ogni stato non terminale", () => {
   const srcDir = path.resolve(here, "..", "src");
 
   // `window` e' riservata in Postgres: come nome di colonna rompe il DDL.
-  for (const dir of ["metering", "pipeline"]) {
+  for (const dir of ["metering", "pipeline", "business"]) {
     check(`${dir}/schema.sql non usa keyword riservate come colonne`, () => {
       const sql = fs.readFileSync(path.join(srcDir, dir, "schema.sql"), "utf8");
       const offenders = sql
