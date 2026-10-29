@@ -115,6 +115,7 @@ services:
       - AP_INTERNAL_URL=http://app:80
       - AP_PUBLIC_URL=https://${APP_DOMAIN:-app.aethersy.online}
       - CONSOLE_SESSION_SECRET=${CONSOLE_SESSION_SECRET}
+      - CONSOLE_COOKIE_DOMAIN=${CONSOLE_COOKIE_DOMAIN:-}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       # Venice: generazione img/tts/video (OpenRouter copre solo testo+comprensione).
       - VENICE_API_KEY=${VENICE_API_KEY:-}

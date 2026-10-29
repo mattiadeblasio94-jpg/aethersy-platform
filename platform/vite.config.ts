@@ -2,9 +2,9 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
 
-// Dev: Vite su :5173. I dati dello Stadio A vivono nel mock layer (src/mocks),
-// quindi non serve alcun proxy. Quando gli endpoint reali saranno disponibili
-// (brief §7), si attivera' un proxy verso il BFF, come in console/web.
+// Dev: Vite su :5173. La SPA parla al BFF Console via `/api/*`: in produzione
+// Caddy fa da reverse proxy sulla stessa origine, in sviluppo Vite inoltra
+// `/api` al BFF locale (:3000) preservando i cookie di sessione.
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -12,6 +12,12 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    proxy: {
+      "/api": {
+        target: process.env.VITE_DEV_API_TARGET ?? "http://localhost:3000",
+        changeOrigin: true,
+      },
+    },
   },
   build: {
     outDir: "dist",

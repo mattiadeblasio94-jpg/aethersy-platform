@@ -69,8 +69,8 @@ export default function App() {
       </Route>
 
       {/* --- Reindirizzamenti --------------------------------------------- */}
-      <Route path="/" element={<Navigate to="/dashboard" replace />} />
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      <Route path="/" element={<Navigate to="/studio" replace />} />
+      <Route path="*" element={<Navigate to="/studio" replace />} />
     </Routes>
   );
 }

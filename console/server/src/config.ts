@@ -68,6 +68,11 @@ export const config = {
   // Nome cookie di sessione.
   cookieName: "aethersy_session",
   cookieMaxAgeSec: 60 * 60 * 24 * 7,
+  // Dominio del cookie di sessione. Vuoto = host-only (il cookie vale solo per
+  // l'host che l'ha emesso). Impostandolo a `.aethersy.online` la sessione vale
+  // su tutti i sottodomini (Console di backoffice + sito Platform), cosi'
+  // l'utente fa login una volta sola.
+  cookieDomain: process.env.CONSOLE_COOKIE_DOMAIN ?? "",
 };
 
 /** Vero se esiste una configurazione Postgres utilizzabile (DSN o parametri). */

@@ -1,19 +1,20 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowRight, Mail } from "lucide-react";
+import { ArrowRight, Lock, Mail } from "lucide-react";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { useAuthStore } from "@/store/auth";
+import { HttpError } from "@/lib/http";
 
 interface LocationState {
   from?: string;
 }
 
 /**
- * Login (brief §4.2). Stadio A: autenticazione mock — nessuna password
- * transitata o salvata, si richiede solo l'email per creare la sessione locale.
- * Il redirect post-login rispetta la rotta di provenienza.
+ * Login (brief §4.2). Autenticazione reale: le credenziali vanno al BFF
+ * (`POST /api/auth/login`), che apre la sessione in un cookie httpOnly. Il
+ * redirect post-login rispetta la rotta di provenienza.
  */
 export default function Login() {
   const login = useAuthStore((state) => state.login);
@@ -22,22 +23,36 @@ export default function Login() {
   const state = location.state as LocationState | null;
 
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       setError("Inserisci un indirizzo email valido.");
       return;
     }
+    if (password.length < 1) {
+      setError("Inserisci la password.");
+      return;
+    }
     setError(null);
     setSubmitting(true);
-    // Simula la latenza della chiamata di auth (mock).
-    window.setTimeout(() => {
-      login(email);
-      navigate(state?.from ?? "/dashboard", { replace: true });
-    }, 350);
+    try {
+      await login(email.trim(), password);
+      navigate(state?.from ?? "/studio", { replace: true });
+    } catch (err) {
+      const message =
+        err instanceof HttpError && err.status === 401
+          ? "Email o password non corretti."
+          : err instanceof Error
+            ? err.message
+            : "Accesso non riuscito.";
+      setError(message);
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -71,7 +86,7 @@ export default function Login() {
 
           <h2 className="font-display text-2xl font-semibold text-text-primary">Accedi</h2>
           <p className="mt-1 text-sm text-text-secondary">
-            Inserisci la tua email per entrare nel workspace.
+            Entra con le credenziali del tuo account Aethersy.
           </p>
 
           <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-4" noValidate>
@@ -83,8 +98,20 @@ export default function Login() {
               placeholder="nome@azienda.it"
               leftIcon={<Mail className="h-4 w-4" aria-hidden="true" />}
               value={email}
-              error={error ?? undefined}
               onChange={(event) => setEmail(event.target.value)}
+              required
+            />
+
+            <Input
+              label="Password"
+              type="password"
+              name="password"
+              autoComplete="current-password"
+              placeholder="••••••••"
+              leftIcon={<Lock className="h-4 w-4" aria-hidden="true" />}
+              value={password}
+              error={error ?? undefined}
+              onChange={(event) => setPassword(event.target.value)}
               required
             />
 

@@ -1,19 +1,23 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Mail, User } from "lucide-react";
+import { ArrowRight, Lock, Mail, User } from "lucide-react";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { useAuthStore } from "@/store/auth";
+import { HttpError } from "@/lib/http";
 
 interface FormErrors {
   name?: string;
   email?: string;
+  password?: string;
 }
 
 /**
- * Registrazione (brief §4.2). Stadio A: nessuna password raccolta o trasmessa;
- * al submit si crea la sessione mock e si prosegue nell'onboarding.
+ * Registrazione (brief §4.2). Chiama il BFF (`POST /api/auth/register`), che
+ * proxa il sign-up di Activepieces. Il gate reale di apertura e'
+ * `AP_ALLOW_OPEN_SIGN_UP` lato piattaforma: con le registrazioni chiuse la
+ * risposta e' `INVITATION_ONLY_SIGN_UP` e viene mostrata all'utente.
  */
 export default function Register() {
   const register = useAuthStore((state) => state.register);
@@ -21,6 +25,7 @@ export default function Register() {
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [errors, setErrors] = useState<FormErrors>({});
   const [submitting, setSubmitting] = useState(false);
 
@@ -30,18 +35,35 @@ export default function Register() {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       next.email = "Inserisci un indirizzo email valido.";
     }
+    if (password.length < 8) next.password = "Almeno 8 caratteri.";
     setErrors(next);
     return Object.keys(next).length === 0;
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!validate()) return;
     setSubmitting(true);
-    window.setTimeout(() => {
-      register(name.trim(), email.trim());
-      navigate("/onboarding", { replace: true });
-    }, 350);
+    try {
+      const [firstName, ...rest] = name.trim().split(/\s+/);
+      await register({
+        email: email.trim(),
+        password,
+        firstName,
+        lastName: rest.join(" "),
+      });
+      navigate("/login", { replace: true, state: { registered: true } });
+    } catch (err) {
+      const message =
+        err instanceof HttpError && err.code === "INVITATION_ONLY_SIGN_UP"
+          ? "Le registrazioni sono su invito: chiedi un accesso all'amministratore."
+          : err instanceof Error
+            ? err.message
+            : "Registrazione non riuscita.";
+      setErrors({ email: message });
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -104,6 +126,19 @@ export default function Register() {
               value={email}
               error={errors.email}
               onChange={(event) => setEmail(event.target.value)}
+              required
+            />
+
+            <Input
+              label="Password"
+              type="password"
+              name="password"
+              autoComplete="new-password"
+              placeholder="Almeno 8 caratteri"
+              leftIcon={<Lock className="h-4 w-4" aria-hidden="true" />}
+              value={password}
+              error={errors.password}
+              onChange={(event) => setPassword(event.target.value)}
               required
             />
 

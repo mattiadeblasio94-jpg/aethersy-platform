@@ -81,3 +81,39 @@ CREATE INDEX IF NOT EXISTS product_tenant_status
   ON business.product(tenant_id, status, name);
 CREATE UNIQUE INDEX IF NOT EXISTS product_tenant_sku_uniq
   ON business.product(tenant_id, sku) WHERE sku <> '';
+
+-- Conversazioni (P1.3) --------------------------------------------------------
+-- Il canale centrale: l'utente scrive in linguaggio naturale e l'orchestratore
+-- decide se rispondere o accodare lavoro agli specialisti (pipeline_run). Ogni
+-- conversazione e' locale al tenant.
+CREATE TABLE IF NOT EXISTS business.conversation (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id  uuid NOT NULL REFERENCES metering.tenant(id) ON DELETE CASCADE,
+  title      text NOT NULL DEFAULT 'Nuova conversazione',
+  kind       text NOT NULL DEFAULT 'chat',
+  meta       jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT conversation_kind CHECK (kind IN ('chat', 'run'))
+);
+CREATE INDEX IF NOT EXISTS conversation_tenant_time
+  ON business.conversation(tenant_id, updated_at DESC);
+
+-- Messaggi della conversazione ------------------------------------------------
+-- `role`: user (umano), agent (specialista/orchestratore), system (esito
+-- strutturato di un'azione: run aperto, task eseguito). `droid` identifica lo
+-- specialista quando role='agent'. `credits` e' il consumo attribuito al turno.
+CREATE TABLE IF NOT EXISTS business.message (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  conversation_id uuid NOT NULL REFERENCES business.conversation(id) ON DELETE CASCADE,
+  tenant_id       uuid NOT NULL REFERENCES metering.tenant(id) ON DELETE CASCADE,
+  role            text NOT NULL,
+  droid           text NOT NULL DEFAULT '',
+  content         text NOT NULL DEFAULT '',
+  credits         integer NOT NULL DEFAULT 0,
+  meta            jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT message_role CHECK (role IN ('user', 'agent', 'system'))
+);
+CREATE INDEX IF NOT EXISTS message_conversation_time
+  ON business.message(conversation_id, created_at ASC);

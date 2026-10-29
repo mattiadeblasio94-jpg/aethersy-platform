@@ -324,4 +324,56 @@ export async function registerBusinessRoutes(app: FastifyInstance): Promise<void
     if (!ok) return reply.code(404).send({ code: "NOT_FOUND", message: "Prodotto inesistente" });
     return { ok: true };
   });
+
+  // -------------------------------------------------- Chat centrale (P1.3) ----
+  // Il canale in linguaggio naturale: l'utente scrive, l'orchestratore risponde
+  // o apre uno stadio di pipeline (gli agenti lavorano). Vedi agent/engine.ts.
+
+  app.get("/api/platform/chat/conversations", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+    const { listConversations } = await import("./chat.js");
+    return { conversations: await listConversations(tenant.tenantId) };
+  });
+
+  app.post("/api/platform/chat/conversations", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+    const body = (request.body ?? {}) as { title?: string };
+    const { createConversation } = await import("./chat.js");
+    return reply.code(201).send(await createConversation(tenant.tenantId, body.title));
+  });
+
+  app.get("/api/platform/chat/conversations/:id", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+    const { id } = request.params as { id: string };
+    const { getConversation, listMessages } = await import("./chat.js");
+    const conversation = await getConversation(tenant.tenantId, id);
+    if (!conversation) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversazione inesistente" });
+    return { conversation, messages: await listMessages(tenant.tenantId, id) };
+  });
+
+  app.post("/api/platform/chat", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+    const body = (request.body ?? {}) as {
+      text?: string;
+      conversationId?: string | null;
+      autoStartRun?: boolean;
+    };
+    if (!body.text?.trim()) {
+      return reply.code(400).send({ code: "BAD_REQUEST", message: "text richiesto" });
+    }
+    const { handleTurn } = await import("../agent/engine.js");
+    try {
+      return await handleTurn(tenant, {
+        text: body.text,
+        conversationId: body.conversationId ?? null,
+        autoStartRun: body.autoStartRun,
+      });
+    } catch (err) {
+      return reply.code(502).send({ code: "AGENT_ERROR", message: (err as Error).message });
+    }
+  });
 }

@@ -95,6 +95,33 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     return session.user;
   });
 
+  app.post("/api/auth/register", async (request, reply) => {
+    const { email, password, firstName, lastName } = (request.body ?? {}) as {
+      email?: string;
+      password?: string;
+      firstName?: string;
+      lastName?: string;
+    };
+    if (!email || !password) {
+      return reply.code(400).send({ code: "BAD_REQUEST", message: "Email e password richiesti" });
+    }
+    if (password.length < 8) {
+      return reply.code(400).send({ code: "WEAK_PASSWORD", message: "La password deve avere almeno 8 caratteri" });
+    }
+    try {
+      const created = await apFetch<any>("/api/v1/authentication/sign-up", {
+        method: "POST",
+        body: JSON.stringify({ email, password, firstName: firstName ?? "", lastName: lastName ?? "" }),
+      });
+      return { ok: true, id: created?.id ?? null, email };
+    } catch (err) {
+      if (err instanceof ApError) {
+        return reply.code(err.status).send({ code: err.code ?? "SIGN_UP_FAILED", message: err.message });
+      }
+      throw err;
+    }
+  });
+
   app.post("/api/auth/logout", async (_request, reply) => {
     clearSessionCookie(reply);
     return { ok: true };
@@ -622,10 +649,18 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   });
 
   /**
-   * Esecuzione assistita dei task pendenti: l'esecutore e' iniettato dal
-   * chiamante (payload `results` per task). E' il punto in cui la produzione
-   * sostituira' l'executor con l'accodamento su Activepieces; qui la logica di
-   * stato e di metering (`flow_run`) e' gia' quella definitiva.
+   * Esecuzione dei task pendenti di un run.
+   *
+   * Due modalita':
+   *  - `results` fornito per un task: l'esecutore e' iniettato dal chiamante
+   *    (test deterministici, worker esterni che riportano un esito gia' pronto);
+   *  - `results` assente: si usa l'ESECUTORE AI REALE (`pipeline/executor.ts`),
+   *    che impersona lo specialista del task, produce un deliverable reale e
+   *    metra ogni chiamata. Questo e' il percorso che fa "lavorare gli agenti".
+   *
+   * La logica di stato e di metering (`flow_run`) e' la stessa in entrambi i casi.
+   * Default: esecuzione AI. Passare `{ executor: "manual" }` senza risultati
+   * equivale a segnare i task come falliti (nessun risultato fornito).
    */
   app.post("/api/pipeline/runs/:runId/execute", async (request, reply) => {
     const tenant = await pipelineTenant(request, reply);
@@ -634,6 +669,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     const body = (request.body ?? {}) as {
       continueOnError?: boolean;
       meter?: boolean;
+      executor?: "ai" | "manual";
       results?: Record<
         string,
         {
@@ -646,23 +682,29 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     };
     const { orchestrateRun } = await import("./pipeline/orchestrator.js");
     const results = body.results ?? {};
-    const result = await orchestrateRun(
-      tenant.tenantId,
-      runId,
-      async (ctx) => {
+    const useManual = body.executor === "manual" || Object.keys(results).length > 0;
+
+    let executor;
+    if (useManual) {
+      executor = async (ctx: any) => {
         const r = results[ctx.task.id];
-        if (!r) {
-          return { status: "failed", error: "nessun risultato fornito per il task" };
-        }
+        if (!r) return { status: "failed" as const, error: "nessun risultato fornito per il task" };
         return {
           status: r.status,
           output: r.output,
           error: r.error ?? null,
           assets: (r.assets ?? []) as any,
         };
-      },
-      { continueOnError: body.continueOnError, meter: body.meter },
-    );
+      };
+    } else {
+      const { buildAiExecutor } = await import("./pipeline/executor.js");
+      executor = buildAiExecutor();
+    }
+
+    const result = await orchestrateRun(tenant.tenantId, runId, executor, {
+      continueOnError: body.continueOnError,
+      meter: body.meter,
+    });
     if (!result.run) return reply.code(404).send({ code: "NOT_FOUND", message: "Run inesistente" });
     return result;
   });

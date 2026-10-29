@@ -11,6 +11,7 @@ import type { ComponentType } from "react";
 // Caricamento differito: un chunk per pagina (vedi anche manualChunks in
 // vite.config.ts per i vendor condivisi).
 const Agents = lazy(() => import("./Agents"));
+const Studio = lazy(() => import("./Studio"));
 const AgentCreate = lazy(() => import("./AgentCreate"));
 const AgentDetail = lazy(() => import("./AgentDetail"));
 const AgentLogs = lazy(() => import("./AgentLogs"));
@@ -37,6 +38,13 @@ export interface RouteSpec {
 }
 
 export const APP_ROUTES: RouteSpec[] = [
+  {
+    path: "studio",
+    title: "Studio",
+    description:
+      "La regia degli agenti: scrivi una richiesta e guarda gli specialisti produrre lavoro reale.",
+    component: Studio,
+  },
   {
     path: "agents",
     title: "Agenti",

@@ -135,13 +135,33 @@
 }
 
 # -----------------------------------------------------------------------------
-# Platform: piattaforma Aethersy (SPA mock-first) su container `platform:80`.
+# Platform: piattaforma Aethersy (SPA) su container `platform:80`.
+#
+# La SPA vive sull'hostname PLATFORM_DOMAIN ma il suo backend (BFF Console su
+# console:3000) sta sull'hostname CONSOLE_DOMAIN. Per far funzionare l'app come
+# sito autonomo con una sola origine, inoltriamo /api/* direttamente alla
+# Console: il browser vede un'unica origine (platform.aethersy.online) e il
+# cookie di sessione viaggia con `credentials: include` senza CORS.
 # -----------------------------------------------------------------------------
 {$PLATFORM_DOMAIN} {
 	encode zstd gzip
-	reverse_proxy platform:80 {
-		header_up X-Real-IP {remote_host}
-		header_up X-Forwarded-Proto {scheme}
+
+	# /api/* -> BFF Console (stesso container che serve CONSOLE_DOMAIN).
+	@api path /api/*
+	handle @api {
+		reverse_proxy console:3000 {
+			header_up Host {host}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
+	# Tutto il resto -> SPA statica.
+	handle {
+		reverse_proxy platform:80 {
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
 	}
 }
 

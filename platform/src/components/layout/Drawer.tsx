@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { motion, useReducedMotion } from "framer-motion";
 import {
   BarChart3,
+  Bot,
   HelpCircle,
   Home,
   Megaphone,
@@ -78,6 +79,7 @@ export const Drawer = memo(function Drawer({ variant }: DrawerProps) {
       {
         title: "Operazioni",
         items: [
+          { to: "/studio", label: "Studio", icon: Bot },
           { to: "/dashboard", label: "Dashboard", icon: Home, badge: 3 },
           { to: "/agents", label: "Agenti", icon: Sparkles, badge: activeAgents },
           {

@@ -60,11 +60,17 @@ export function setSessionCookie(reply: FastifyReply, session: Session): void {
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     maxAge: config.cookieMaxAgeSec,
+    // Cookie di dominio quando configurato (`CONSOLE_COOKIE_DOMAIN`), per
+    // condividere la sessione tra Console e il sito Platform.
+    ...(config.cookieDomain ? { domain: config.cookieDomain } : {}),
   });
 }
 
 export function clearSessionCookie(reply: FastifyReply): void {
-  reply.clearCookie(config.cookieName, { path: "/" });
+  reply.clearCookie(config.cookieName, {
+    path: "/",
+    ...(config.cookieDomain ? { domain: config.cookieDomain } : {}),
+  });
 }
 
 export function getSession(request: FastifyRequest): Session | null {
