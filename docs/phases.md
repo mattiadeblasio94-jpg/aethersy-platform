@@ -3,7 +3,7 @@
 > Aggiornare dopo **ogni** fase con: data/ora, esito, comandi di verifica, note.
 > Stati ammessi: `DONE`, `BLOCKED: input #N`, `NOTE`.
 >
-> Ultima revisione: 2026-10-29 (fasi 0–12 `DONE`; P0.1–P0.10 + P1.1 implementati e deployati; restano solo azioni utente per la rotazione credenziali)
+> Ultima revisione: 2026-10-29 (fasi 0–12 `DONE`; P0.1–P0.10 + P1.1 + **P2.1/P2.2** implementati e deployati; restano solo azioni utente per la rotazione credenziali)
 
 ## Stato sintetico
 
@@ -21,7 +21,7 @@
 | 9 | Backup e monitoraggio | `DONE` — `backup.sh` corretto (rotazione robusta a glob vuoto) ed eseguito; **restore testato** su DB temporaneo (83 tabelle, dati coerenti) |
 | 10 | Review finale e consegna | `DONE` — audit infrastrutturale **completato** (tutte le verifiche OK) e **clean-clone** verificato (tarball da `git ls-files`, 73 file, nessun `.env` → `docker compose config` OK + build `console` OK). Restano solo **azioni utente**: rotazione credenziali esposte in chat (P0–P2, `docs/security.md` §6.1) e backup offline dei due segreti critici |
 | 11 | Aethersy Console (fusion A+B+C) | `DONE` — frontend proprietario React 19 + Vite + TS + Tailwind v4 + TanStack Query + React Router + BFF Fastify con sessione httpOnly firmata, proxy `/api/ap/*` verso Activepieces e **AI Router** multimodale (selezione automatica di modelli gratuiti OpenRouter per capacità testo/immagine/audio/video). Deployato su `https://console.aethersy.online` con TLS Let's Encrypt; smoke test 5/5 OK |
-| 12 | Piattaforma a consumo (P0) — pipeline + libreria asset + Console run/crediti | `IN CORSO` — metering/billing (P0.1/P0.2, `24c1d1f`), pipeline multi-stadio + orchestratore HITL + segreti (P0.3, `94f65a9`), **libreria asset con versioning e approvazione in Console** (P0.4), **Console run/crediti** (P0.5), **lead webhook + canale Slack + export pacchettizzato + UI lead** (P0.6), **QA E2E + backup off-site** (P0.7), **layer Anteprima `/preview`** (P0.8), **deploy Console+Platform** (P0.9), **modulo piattaforma Business Pulse + `pipeline.schedule`** (P0.10, 29/10/2026), **substrato aziendale multi-tenant: schema `business` (obiettivi/memoria/prodotti) + API + Console** (P1.1, 29/10/2026). QA E2E **65/65 OK**; metering 44/44; web+server build OK; deployato sul VPS |
+| 12 | Piattaforma a consumo (P0) — pipeline + libreria asset + Console run/crediti | `IN CORSO` — metering/billing (P0.1/P0.2, `24c1d1f`), pipeline multi-stadio + orchestratore HITL + segreti (P0.3, `94f65a9`), **libreria asset con versioning e approvazione in Console** (P0.4), **Console run/crediti** (P0.5), **lead webhook + canale Slack + export pacchettizzato + UI lead** (P0.6), **QA E2E + backup off-site** (P0.7), **layer Anteprima `/preview`** (P0.8), **deploy Console+Platform** (P0.9), **modulo piattaforma Business Pulse + `pipeline.schedule`** (P0.10, 29/10/2026), **substrato aziendale multi-tenant: schema `business` (obiettivi/memoria/prodotti) + API + Console** (P1.1, 29/10/2026), **motore agenti P2.1 + piattaforma reale P2.2 (`platform.aethersy.online`)** (29/10/2026). QA E2E **65/65 OK**; metering 44/44; web+server build OK; deployato sul VPS |
 
 ## Verifica §11 — nomi variabili, versioni, route
 
@@ -501,4 +501,46 @@ tabelle; `GET /api/platform/{goals,memory,products,business/summary}` senza sess
 **Prossimo incremento:** P1.2 — scheduler reale (l'esecutore preleva le voci `pipeline.schedule` dovute,
 apre run/task, registra il risultato verificato come asset approvato; formalizza la triade
 pianificato/eseguito/verificato + log errori).
+
+### Fase 12 — P2.1/P2.2: motore agenti + piattaforma reale (`platform.aethersy.online`) (29/10/2026)
+
+**Contesto.** Il codice P2.1 (motore agenti: `console/server/src/agent/*`, `pipeline/executor.ts`,
+`business/chat.ts`) e P2.2 (SPA reale `platform/`: auth cookie-based condiviso, `Protected`,
+Studio) era **già presente nel commit `a388492`** ma **non era mai stato deployato** sul VPS.
+La decisione del committente: la Console resta **backoffice interno**; `platform.aethersy.online`
+è **l'unica app utente reale**, dove gli agenti eseguono lavoro vero e producono deliverable.
+
+**Deploy (VPS non-git, copia file).**
+- Bundle da `git archive a388492` (142 file) → backup sorgenti `backups/console.platform.src.bak.20261029-p2.tgz`
+  → estrazione sul VPS → `docker compose build console platform` → `up -d --force-recreate console platform`.
+- `.env` VPS: `CONSOLE_COOKIE_DOMAIN=.aethersy.online` (sessione condivisa tra `platform.` e `console.`)
+  e `AP_ALLOW_OPEN_SIGN_UP=true` (self-service: la registrazione pubblica è **riattivata**, reversibile).
+- `caddy/Caddyfile`: aggiunta la rotta `/api/*` → `console:3000` per l'hostname `platform.aethersy.online`.
+  **Nota operativa:** il bind-mount del Caddyfile è un file singolo; sostituendo l'inode (tar) il container
+  continua a servire la versione vecchia → serve `docker compose up -d --force-recreate caddy`.
+  Sintomo risolto: register/chat → 405 (routing su nginx `platform:80`) invece che 400/401.
+
+**Bug reali emersi solo a runtime (corretti).**
+1. **`console/server/src/routes.ts`** — la rotta `register` non inviava `trackEvents`/`newsLetter`;
+   le API Activepieces rifiutavano con `FST_ERR_VALIDATION` (400). Aggiunti `trackEvents:false,
+   newsLetter:false`.
+2. **`console/server/src/metering/repo.ts`** — `metering.usage_event.request_id` è di tipo `uuid`, ma
+   gli orchestratori generano id idempotenti testuali (`chat:<conv>:<rand>`, `task:<id>:<rand>`,
+   `${stage}:<run>:<seq>:<rand>`), causando su ogni turno di chat/settled un `502 AGENT_ERROR:
+   invalid input syntax for type uuid "chat:…"`. Aggiunto l'helper `toRequestUuid()` (hash SHA-256
+   deterministico → UUID a forma valida; gli id già UUID passano invariati) applicato all'unico INSERT
+   in `settleUsageTx`. L'idempotenza `(request_id, attempt_no)` è preservata (stesso id testuale →
+   stesso UUID).
+
+**Verifica live (29/10/2026):**
+- `platform.aethersy.online`: register/login/session/overview → **200**; cookie `HttpOnly` su
+  `.aethersy.online`.
+- Chat AI reale: risposta dell'Operating Officer (nessun 502).
+- Richiesta di **lavoro** ("Crea il brand…"): apre lo stadio **Brand**, assegna gli specialisti
+  (prism, quill, scout, vault), esegue i task con AI reale e genera **asset markdown reali**; il run
+  raggiunge `in_review` con **tutti i task `done`, 0 errori**.
+- `npm run typecheck` web+server **0** (locale). QA E2E `test-e2e-pilot.mjs` su DB temporaneo
+  `console_e2e`: **65 ok, 0 falliti**.
+
+**Prossimo incremento:** P1.2 — scheduler reale.
 

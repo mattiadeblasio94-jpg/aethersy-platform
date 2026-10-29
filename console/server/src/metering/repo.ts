@@ -4,6 +4,22 @@ import { computePrice, type Capability, type Unit, type PriceBreakdown } from ".
 import { withTx } from "./db.js";
 import { patternScore } from "./pattern.js";
 
+/**
+ * `metering.usage_event.request_id` e' di tipo `uuid`, ma gli orchestratori
+ * producono idempotenti di forma testuale (es. `chat:<conv>:<rand>`,
+ * `task:<id>:<rand>`). Qui li normalizziamo a UUID con un hash deterministico:
+ * lo stesso id testuale mappa sempre allo stesso UUID, cosi' il vincolo unico
+ * `(request_id, attempt_no)` continua a deduplicare i retry. Gli id gia' in
+ * forma UUID passano invariati.
+ */
+function toRequestUuid(requestId: string): string {
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId)) {
+    return requestId;
+  }
+  const h = crypto.createHash("sha256").update(requestId).digest("hex");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
+}
+
 // =============================================================================
 // Repository del metering: risoluzione tenant/prezzi e movimenti sui crediti.
 //
@@ -526,7 +542,7 @@ async function settleUsageTx(
      ON CONFLICT (request_id, attempt_no) DO NOTHING
      RETURNING id`,
     [
-      u.tenantId, u.apiKeyId, u.requestId, u.attemptNo, u.flowRunId,
+      u.tenantId, u.apiKeyId, toRequestUuid(u.requestId), u.attemptNo, u.flowRunId,
       u.capability, u.provider, u.model, u.unit, u.billableUnits,
       u.inputTokens ?? null, u.outputTokens ?? null, u.cachedTokens ?? null,
       u.providerCostUsd, u.providerFeeUsd ?? 0, u.priceEur, u.markupBps, u.credits,

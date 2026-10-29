@@ -111,7 +111,16 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     try {
       const created = await apFetch<any>("/api/v1/authentication/sign-up", {
         method: "POST",
-        body: JSON.stringify({ email, password, firstName: firstName ?? "", lastName: lastName ?? "" }),
+        // L'API sign-up di Activepieces valida `trackEvents` e `newsLetter` come
+        // booleani obbligatori: senza di essi risponde 400 (FST_ERR_VALIDATION).
+        body: JSON.stringify({
+          email,
+          password,
+          firstName: firstName ?? "",
+          lastName: lastName ?? "",
+          trackEvents: false,
+          newsLetter: false,
+        }),
       });
       return { ok: true, id: created?.id ?? null, email };
     } catch (err) {
