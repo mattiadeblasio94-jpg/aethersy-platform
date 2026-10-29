@@ -6,6 +6,7 @@ import { meteringActive } from "./metering/db.js";
 import { authorizeAi, flowRunId, estimateTokens } from "./metering/guard.js";
 import { balanceSnapshot, recentUsage } from "./metering/repo.js";
 import { selectGenModel } from "./ai-gen/select.js";
+import { registerPlatformRoutes } from "./platform/routes.js";
 import type { NotifyResult } from "./pipeline/notify.js";
 
 // Rotte BFF:
@@ -955,4 +956,10 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     if (!ok) return reply.code(404).send({ code: "NOT_FOUND", message: "Integrazione inesistente" });
     return { ok: true };
   });
+
+  // ------------------------------------------- Piattaforma (Business Pulse) ----
+  // Modello pazi.ai adattato: overview, opportunita', roster, agenda. Vive sotto
+  // /api/platform/* e legge le entita' reali della pipeline (nessun nuovo schema
+  // oltre a `pipeline.schedule`).
+  await registerPlatformRoutes(app);
 }

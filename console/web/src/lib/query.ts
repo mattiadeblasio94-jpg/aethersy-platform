@@ -8,7 +8,9 @@ import type {
   Asset,
   AssetFamily,
   AssetKind,
+  BusinessPulse,
   CreditBalance,
+  CronPreview,
   ExecuteResult,
   Flow,
   FlowRun,
@@ -17,8 +19,13 @@ import type {
   Lead,
   LeadsResponse,
   LeadStatus,
+  OpportunityRun,
   Project,
+  RosterEntry,
   RunDetail,
+  ScheduleEntry,
+  ScheduleKind,
+  ScheduleStatus,
   SessionUser,
   StageSpec,
   UsageEvents,
@@ -371,3 +378,123 @@ export function useExportRun() {
     },
   });
 }
+
+// --- Piattaforma (Business Pulse, modello pazi.ai adattato) ------------------
+
+/** Business Pulse: contatori reali, saldo, agenda imminente, attenzione HITL. */
+export function usePulse() {
+  return useQuery<BusinessPulse>({
+    queryKey: ["platform-pulse"],
+    queryFn: () => api.get<BusinessPulse>("/platform/overview"),
+    refetchInterval: 30_000,
+  });
+}
+
+/** Roadmap/opportunita': i run di pipeline con lo stato pazi derivato. */
+export function useOpportunities(opts: { stage?: string } = {}) {
+  const qs = new URLSearchParams();
+  if (opts.stage) qs.set("stage", opts.stage);
+  const suffix = qs.toString() ? `?${qs}` : "";
+  return useQuery<OpportunityRun[]>({
+    queryKey: ["platform-opportunities", opts.stage ?? ""],
+    queryFn: () => api.get<OpportunityRun[]>(`/platform/opportunities${suffix}`),
+  });
+}
+
+/** Roster degli specialisti con il carico reale del tenant. */
+export function useRoster() {
+  return useQuery<RosterEntry[]>({
+    queryKey: ["platform-roster"],
+    queryFn: () => api.get<RosterEntry[]>("/platform/roster"),
+    staleTime: 60_000,
+  });
+}
+
+/** Scheda di un singolo specialista (carico del tenant). */
+export function useDroid(droidId?: string) {
+  return useQuery<RosterEntry>({
+    queryKey: ["platform-droid", droidId],
+    enabled: !!droidId,
+    queryFn: () => api.get<RosterEntry>(`/platform/roster/${droidId}`),
+  });
+}
+
+/** Agenda (Tasks & Calendar) con la prossima esecuzione calcolata. */
+export function useSchedule(opts: { status?: string; kind?: string } = {}) {
+  const qs = new URLSearchParams();
+  if (opts.status) qs.set("status", opts.status);
+  if (opts.kind) qs.set("kind", opts.kind);
+  const suffix = qs.toString() ? `?${qs}` : "";
+  return useQuery<ScheduleEntry[]>({
+    queryKey: ["platform-schedule", opts.status ?? "", opts.kind ?? ""],
+    queryFn: () => api.get<ScheduleEntry[]>(`/platform/schedule${suffix}`),
+  });
+}
+
+function useScheduleInvalidate() {
+  const qc = useQueryClient();
+  return () => {
+    qc.invalidateQueries({ queryKey: ["platform-schedule"] });
+    qc.invalidateQueries({ queryKey: ["platform-pulse"] });
+  };
+}
+
+export interface ScheduleInput {
+  title: string;
+  kind?: ScheduleKind;
+  stage?: string;
+  runId?: string | null;
+  cron?: string | null;
+  runAt?: string | null;
+  timezone?: string;
+  meta?: unknown;
+}
+
+/** Crea una voce di agenda (cron ricorrente o esecuzione singola). */
+export function useCreateSchedule() {
+  const invalidate = useScheduleInvalidate();
+  return useMutation({
+    mutationFn: (body: ScheduleInput) => api.post<ScheduleEntry>("/platform/schedule", body),
+    onSuccess: invalidate,
+  });
+}
+
+/** Aggiorna una voce di agenda. */
+export function useUpdateSchedule() {
+  const invalidate = useScheduleInvalidate();
+  return useMutation({
+    mutationFn: (v: { id: string } & Partial<ScheduleInput> & { status?: ScheduleStatus }) => {
+      const { id, ...patch } = v;
+      return api.patch<ScheduleEntry>(`/platform/schedule/${id}`, patch);
+    },
+    onSuccess: invalidate,
+  });
+}
+
+/** Mette in pausa o riattiva una voce di agenda. */
+export function useToggleSchedule() {
+  const invalidate = useScheduleInvalidate();
+  return useMutation({
+    mutationFn: (v: { id: string; action: "pause" | "resume" }) =>
+      api.post<ScheduleEntry>(`/platform/schedule/${v.id}/${v.action}`),
+    onSuccess: invalidate,
+  });
+}
+
+/** Elimina una voce di agenda. */
+export function useDeleteSchedule() {
+  const invalidate = useScheduleInvalidate();
+  return useMutation({
+    mutationFn: (id: string) => api.del<{ ok: boolean }>(`/platform/schedule/${id}`),
+    onSuccess: invalidate,
+  });
+}
+
+/** Anteprima delle prossime esecuzioni di un'espressione cron (on demand). */
+export function useCronPreview() {
+  return useMutation({
+    mutationFn: (body: { cron: string; timezone?: string; count?: number }) =>
+      api.post<CronPreview>("/platform/cron/preview", body),
+  });
+}
+

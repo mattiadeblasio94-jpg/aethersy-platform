@@ -2,13 +2,17 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useLogout, useSession } from "../lib/query";
 
 const nav = [
-  { to: "/", label: "Dashboard", icon: "◈" },
-  { to: "/flows", label: "Flows", icon: "⧉" },
-  { to: "/runs", label: "Runs", icon: "▤" },
+  { to: "/", label: "Business Pulse", icon: "◈" },
+  { to: "/opportunities", label: "Opportunità", icon: "◎" },
+  { to: "/schedule", label: "Tasks & Calendar", icon: "▦" },
+  { to: "/agents", label: "Agenti", icon: "❖" },
   { to: "/pipeline", label: "Pipeline", icon: "⧗" },
   { to: "/leads", label: "Lead", icon: "✉" },
   { to: "/assets", label: "Libreria asset", icon: "◫" },
-  { to: "/credits", label: "Crediti", icon: "◎" },
+  { to: "/credits", label: "Crediti", icon: "◉" },
+  { to: "/dashboard", label: "Dashboard", icon: "▤" },
+  { to: "/flows", label: "Flows", icon: "⧉" },
+  { to: "/runs", label: "Runs", icon: "▥" },
   { to: "/connections", label: "Connections", icon: "⚯" },
   { to: "/ai", label: "AI Center", icon: "✦" },
 ];

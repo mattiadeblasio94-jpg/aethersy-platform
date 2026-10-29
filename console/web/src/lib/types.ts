@@ -290,3 +290,109 @@ export interface IntegrationCredential {
   created_at: string;
   updated_at: string;
 }
+
+// --- Piattaforma (Business Pulse, modello pazi.ai adattato) ------------------
+
+export type OpportunityState =
+  | "open"
+  | "in_progress"
+  | "awaiting_input"
+  | "ready"
+  | "done"
+  | "error";
+
+export interface OpportunityStateMeta {
+  state: OpportunityState;
+  label: string;
+  tone: "neutral" | "info" | "warning" | "success" | "danger";
+  needsHuman: boolean;
+}
+
+export interface OpportunityRun {
+  id: string;
+  stage: StageId;
+  title: string;
+  status: PipelineRun["status"];
+  opportunity: OpportunityStateMeta;
+  approved_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ScheduleStatus = "scheduled" | "paused" | "done" | "canceled";
+export type ScheduleKind = "pipeline" | "social" | "report" | "reminder";
+
+export interface ScheduleEntry {
+  id: string;
+  tenant_id: string;
+  run_id: string | null;
+  stage: string;
+  title: string;
+  kind: ScheduleKind;
+  cron: string | null;
+  run_at: string | null;
+  timezone: string;
+  status: ScheduleStatus;
+  meta: unknown;
+  last_run_at: string | null;
+  created_at: string;
+  updated_at: string;
+  nextRunAt: string | null;
+}
+
+export interface PulseCounters {
+  runs: { total: number; byStatus: Record<string, number>; open: number; awaitingInput: number };
+  tasks: { total: number; running: number; failed: number; pending: number };
+  assets: { total: number; inReview: number; approved: number; delivered: number };
+  leads: { total: number; byStatus: Record<string, number>; new: number };
+  schedule: { active: number; next: string | null };
+}
+
+export interface BusinessPulse {
+  tenantId: string;
+  counters: PulseCounters;
+  credits: {
+    balance: number;
+    reserved: number;
+    available: number;
+    quota: CreditQuota | null;
+  };
+  upcoming: ScheduleEntry[];
+  attention: OpportunityRun[];
+}
+
+export type DroidDepartment =
+  | "Product"
+  | "Engineering"
+  | "Design"
+  | "Growth"
+  | "Data"
+  | "Quality"
+  | "Ops"
+  | "Security"
+  | "Support";
+
+export interface DroidProfile {
+  id: string;
+  name: string;
+  role: string;
+  department: DroidDepartment;
+  tagline: string;
+  skills: string[];
+  stages: string[];
+}
+
+export interface RosterEntry extends DroidProfile {
+  tasks: number;
+  running: number;
+  done: number;
+  failed: number;
+  lastTaskAt: string | null;
+}
+
+export interface CronPreview {
+  cron: string;
+  timezone: string;
+  runs: string[];
+}
+

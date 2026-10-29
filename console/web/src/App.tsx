@@ -12,6 +12,10 @@ import Assets from "./pages/Assets";
 import Pipeline from "./pages/Pipeline";
 import Leads from "./pages/Leads";
 import Credits from "./pages/Credits";
+import Pulse from "./pages/Pulse";
+import Opportunities from "./pages/Opportunities";
+import Schedule from "./pages/Schedule";
+import AgentRoster from "./pages/AgentRoster";
 import { APP_ROUTES } from "./preview/pages/routes";
 
 // Layer "Anteprima": porting delle pagine di platform/ (dati demo, nessun
@@ -38,7 +42,13 @@ export default function App() {
             </Protected>
           }
         >
-          <Route path="/" element={<Dashboard />} />
+          {/* Business Pulse e' la landing: lo stato dell'azienda in un colpo
+              d'occhio. La Dashboard tecnica resta su /dashboard. */}
+          <Route path="/" element={<Pulse />} />
+          <Route path="/opportunities" element={<Opportunities />} />
+          <Route path="/schedule" element={<Schedule />} />
+          <Route path="/agents" element={<AgentRoster />} />
+          <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/flows" element={<Flows />} />
           <Route path="/runs" element={<Runs />} />
           <Route path="/connections" element={<Connections />} />

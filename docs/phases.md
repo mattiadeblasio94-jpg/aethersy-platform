@@ -3,7 +3,7 @@
 > Aggiornare dopo **ogni** fase con: data/ora, esito, comandi di verifica, note.
 > Stati ammessi: `DONE`, `BLOCKED: input #N`, `NOTE`.
 >
-> Ultima revisione: 2026-10-28 (fasi 0–12 `DONE`; restano solo azioni utente per la rotazione credenziali)
+> Ultima revisione: 2026-10-29 (fasi 0–12 `DONE`; P0.1–P0.10 implementati e deployati; restano solo azioni utente per la rotazione credenziali)
 
 ## Stato sintetico
 
@@ -21,7 +21,7 @@
 | 9 | Backup e monitoraggio | `DONE` — `backup.sh` corretto (rotazione robusta a glob vuoto) ed eseguito; **restore testato** su DB temporaneo (83 tabelle, dati coerenti) |
 | 10 | Review finale e consegna | `DONE` — audit infrastrutturale **completato** (tutte le verifiche OK) e **clean-clone** verificato (tarball da `git ls-files`, 73 file, nessun `.env` → `docker compose config` OK + build `console` OK). Restano solo **azioni utente**: rotazione credenziali esposte in chat (P0–P2, `docs/security.md` §6.1) e backup offline dei due segreti critici |
 | 11 | Aethersy Console (fusion A+B+C) | `DONE` — frontend proprietario React 19 + Vite + TS + Tailwind v4 + TanStack Query + React Router + BFF Fastify con sessione httpOnly firmata, proxy `/api/ap/*` verso Activepieces e **AI Router** multimodale (selezione automatica di modelli gratuiti OpenRouter per capacità testo/immagine/audio/video). Deployato su `https://console.aethersy.online` con TLS Let's Encrypt; smoke test 5/5 OK |
-| 12 | Piattaforma a consumo (P0) — pipeline + libreria asset + Console run/crediti | `IN CORSO` — metering/billing (P0.1/P0.2, `24c1d1f`), pipeline multi-stadio + orchestratore HITL + segreti (P0.3, `94f65a9`), **libreria asset con versioning e approvazione in Console** (P0.4), **Console run/crediti** (P0.5), **lead webhook + canale Slack + export pacchettizzato + UI lead** (P0.6). Test 38/38; web build OK |
+| 12 | Piattaforma a consumo (P0) — pipeline + libreria asset + Console run/crediti | `IN CORSO` — metering/billing (P0.1/P0.2, `24c1d1f`), pipeline multi-stadio + orchestratore HITL + segreti (P0.3, `94f65a9`), **libreria asset con versioning e approvazione in Console** (P0.4), **Console run/crediti** (P0.5), **lead webhook + canale Slack + export pacchettizzato + UI lead** (P0.6), **QA E2E + backup off-site** (P0.7), **layer Anteprima `/preview`** (P0.8), **deploy Console+Platform** (P0.9), **modulo piattaforma Business Pulse + `pipeline.schedule`** (P0.10, 29/10/2026). QA E2E **51/51 OK**; web build OK; deployato sul VPS |
 
 ## Verifica §11 — nomi variabili, versioni, route
 
@@ -381,4 +381,68 @@ smoke test **6/6 OK**; `console.aethersy.online/api/health` 200, `/preview` 200 
 `PreviewLayout-*.js` presente nell'immagine); `platform.aethersy.online/` 200 con title
 "Aethersy — AI Operating Officer", asset 200, fallback SPA su `/settings/profile` 200; TLS
 `ssl_verify_result=0` su entrambi; `app` 200 e `mcp` 405 invariati.
+
+### Fase 12 — P0.10: modulo piattaforma "Business Pulse" (adattamento pazi.ai) (29/10/2026)
+
+Adattamento del modello di prodotto **pazi.ai** (Business Pulse / Opportunities / Tasks &
+Calendar / Agent Roster / Inbox / Files / Account) sulle superfici **reali** già presenti in
+Aethersy, **senza riscrivere lo stack**: nessun Next.js/Clerk/Prisma/Stripe, nessuna seconda
+piattaforma. La piattaforma è una **vista** sui dati che la pipeline già produce
+(`pipeline_run`, `agent_task`, `asset`, `lead`) più **una sola** tabella nuova: `pipeline.schedule`.
+
+**Backend** — nuovo modulo `console/server/src/platform/`:
+- `catalog.ts` — fonte unica di verità (puro, senza dipendenze): roster dei **12 droid** con reparto,
+  tagline, skill e stadi; mappa di stato pazi (`open`/`in_progress`/`awaiting_input`/`ready`/`done`/`error`)
+  derivata da `RunStatus`; etichette stato/kind dell'agenda.
+- `cron.ts` — motore cron a 5 campi **senza dipendenze esterne**: `*`, liste, range, step, nomi
+  (`jan..dec`/`sun..sat`), semantica Vixie dom/dow, timezone IANA via `Intl.DateTimeFormat`
+  (assorbe l'ora legale con un secondo passaggio); `CronError`.
+- `guard.ts` — `requireMeteredTenant` (503 se metering off, 401 se identità assente): riusa la
+  guard di metering, nessuna nuova logica di auth.
+- `repo.ts` — CRUD agenda (`createSchedule`/`listSchedule`/`getSchedule`/`updateSchedule`/`deleteSchedule`
+  + `listScheduleWithNext`/`nextRunAt`/`validateScheduleInput`), `listOpportunities`,
+  `businessPulse` (aggregazione **in una sola transazione** + crediti + prossime voci + attention),
+  `droidRoster`/`droidDetail`/`runDroidSummary`, `accountSummary`.
+- `routes.ts` — `/api/platform/{catalog,overview,opportunities,roster,roster/:droidId,schedule,
+  schedule/:id,schedule/:id/pause,resume,cron/preview}`.
+- Wiring in `routes.ts` (`registerPlatformRoutes` importato + invocato) — +7 righe.
+
+**Schema** — `pipeline.schedule` (14 colonne: `id, tenant_id FK, run_id FK SET NULL, stage, title,
+kind, cron, run_at, timezone DEFAULT 'Europe/Rome', status, meta, last_run_at, created_at, updated_at`;
+CHECK su status/kind/presenza riferimento temporale; indici `schedule_tenant_status`/`schedule_time`).
+`pipeline/schema.sql` aggiornato e `pipeline/schema.ts` rigenerato con `gen:schema`.
+
+**Frontend (Console)** — pagine **on-brand** già cablate: `Pulse.tsx` (landing `/`), `Opportunities.tsx`
+(`/opportunities`, filtri + azioni approva/consegna/riprova), `Schedule.tsx` (`/schedule`, form nuova voce
++ anteprima cron + pause/resume/delete), `AgentRoster.tsx` (`/agents`, reparti + scheda droid). Rotte in
+`App.tsx` e voci di nav in `Layout.tsx`; tipi (+106) e hook (+127: `usePulse`, `useOpportunities`,
+`useRoster`, `useDroid`, `useSchedule`, `useCreateSchedule`, `useUpdateSchedule`, `useToggleSchedule`,
+`useDeleteSchedule`, `useCronPreview`).
+
+**Bug corretto (script typecheck):** `console/web/package.json` aveva
+`tsc -b --noEmit false --emitDeclarationOnly false`, che **emetteva 83 file `.js`** dentro `src/`
+(ombrando i `.tsx` reali: Vite risolve `.js` prima). Corretto in `tsc -p tsconfig.json --noEmit`;
+i 83 artefatti rimossi; riverificato **0**.
+
+**Deploy (VPS non-git, copia file):** backup sorgente console (`backups/console-src-*.tgz`) → tarball
+dei 17 file cambiati → `docker compose build console` → `up -d --force-recreate console` → container
+**healthy**; log `schema metering applicato` + `schema pipeline applicato`; `pipeline.schedule`
+**live con 14 colonne**; bundle `index-BukgNtn8.js` identico al locale.
+
+**Verifica (29/10/2026):**
+- `npm run typecheck` (web+server) **0**; `npm run build` **0** (web 7,5 s); modulo `platform/` presente
+  nel bundle.
+- Endpoint pubblici `https://console.aethersy.online/api/platform/{overview,roster,schedule,catalog}`
+  → **401** (`requireMeteredTenant`, auth richiesta — atteso); `POST .../cron/preview` con body JSON
+  valido → **401** (parsing corretto).
+- **QA E2E esteso** (`console/server/tools/test-e2e-pilot.mjs`): aggiunta la sezione "piattaforma
+  (Business Pulse)" + copertura isolamento multi-tenant per l'agenda. Eseguito sul VPS contro il DB
+  temporaneo `console_e2e`: **51 ok, 0 falliti** (era 41) — roster 12 droid con carico reale, scheda
+  droid, opportunità derivate dai run, contatori Business Pulse, cron valido/invalido, CRUD agenda
+  (create → next-run → pause/resume → delete), isolamento fra tenant.
+- Telegram relay live (`~/aethersy-tgrelay/relay.py`, PID 200333): `outbox.jsonl` rispecchia i messaggi
+  dell'assistente (work updates verso l'utente).
+
+**Debito residuo:** `accountSummary` non è esposto da nessuna rotta (dead code: la pagina Crediti copre
+già saldo/quota/consumo); snapshot listini ancora seed statico; stadi P1 (idea/strategia/ads/growth).
 

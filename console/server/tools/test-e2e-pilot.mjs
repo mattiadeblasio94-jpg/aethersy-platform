@@ -105,6 +105,9 @@ const { closePool, meteringActive } = await import(`${DIST}/metering/db.js`);
 const metering = await import(`${DIST}/metering/repo.js`);
 const catalog = await import(`${DIST}/pipeline/catalog.js`);
 const repo = await import(`${DIST}/pipeline/repo.js`);
+const platformCatalog = await import(`${DIST}/platform/catalog.js`);
+const platformCron = await import(`${DIST}/platform/cron.js`);
+const platformRepo = await import(`${DIST}/platform/repo.js`);
 const orchestrator = await import(`${DIST}/pipeline/orchestrator.js`);
 const notify = await import(`${DIST}/pipeline/notify.js`);
 const secrets = await import(`${DIST}/pipeline/secrets.js`);
@@ -450,6 +453,94 @@ try {
     eq((await repo.listLeads(tenant.tenantId, { status: "spam" })).length, 0, "nessuno spam");
   });
 
+  // ------------------------------------------------------- piattaforma/B. Pulse
+  console.log("\npiattaforma (Business Pulse)");
+
+  await recordAsync("il roster espone i 12 specialisti con carico reale", async () => {
+    const roster = await platformRepo.droidRoster(tenant.tenantId);
+    eq(roster.length, platformCatalog.DROIDS.length, "numero droid");
+    const brandDroid = roster.find((d) => d.id === spec.tasks[0].droid);
+    ok(brandDroid, "droid del run presente nel roster");
+    ok(brandDroid.tasks > 0, "task assegnati contati");
+    ok(brandDroid.done > 0, "task conclusi contati");
+  });
+
+  await recordAsync("la scheda di uno specialista riporta il carico", async () => {
+    const detail = await platformRepo.droidDetail(tenant.tenantId, spec.tasks[0].droid);
+    ok(detail, "scheda presente");
+    eq(detail.tasks, (await platformRepo.droidRoster(tenant.tenantId)).find((d) => d.id === detail.id).tasks, "carico coerente");
+    eq(await platformRepo.droidDetail(tenant.tenantId, "non-esiste"), null, "droid inesistente");
+  });
+
+  await recordAsync("le opportunita' derivano lo stato dai run", async () => {
+    const opps = await platformRepo.listOpportunities(tenant.tenantId);
+    const target = opps.find((o) => o.id === run.id);
+    ok(target, "run presente fra le opportunita'");
+    eq(target.opportunity.state, "done", "stato mappato (delivered -> done)");
+    ok(!target.opportunity.needsHuman, "consegnata non richiede input");
+  });
+
+  await recordAsync("Business Pulse aggrega i contatori reali", async () => {
+    const pulse = await platformRepo.businessPulse(tenant.tenantId);
+    ok(pulse.counters.runs.total >= 1, "run contati");
+    eq(pulse.counters.runs.byStatus.delivered, 1, "un run consegnato");
+    ok(pulse.counters.tasks.total >= spec.tasks.length, "task contati");
+    ok(pulse.counters.assets.total >= 1, "asset contati");
+    ok(pulse.counters.leads.total >= 1, "lead contati");
+    ok(pulse.credits.available >= 0, "saldo crediti presente");
+  });
+
+  await recordAsync("cron valido calcola la prossima esecuzione", async () => {
+    ok(platformCron.isValidCron("0 9 * * 1"), "lunedi' 09:00 valido");
+    const next = platformCron.nextRunFor("0 9 * * 1", "Europe/Rome", new Date("2026-01-01T00:00:00Z"));
+    ok(next, "prossima esecuzione calcolata");
+    eq(next.getUTCDay() === 1 || new Date(next.toLocaleString("en-US", { timeZone: "Europe/Rome" })).getDay() === 1, true, "cade di lunedi'");
+  });
+
+  await recordAsync("cron non valido viene rifiutato", async () => {
+    ok(!platformCron.isValidCron("0 9 * *"), "campi insufficienti");
+    ok(!platformCron.isValidCron("99 9 * * *"), "ora fuori range");
+    eq(platformRepo.validateScheduleInput({ cron: "bad", timezone: "Europe/Rome" }).ok, false, "validazione espressione");
+    eq(platformRepo.validateScheduleInput({ timezone: "Mars/Phobos", cron: "0 9 * * *" }).ok, false, "timezone non valida");
+    eq(platformRepo.validateScheduleInput({ cron: null, runAt: null }).ok, false, "nessun riferimento temporale");
+  });
+
+  const schedule = await recordAsync("creazione voce di agenda", async () => {
+    const row = await platformRepo.createSchedule({
+      tenantId: tenant.tenantId,
+      title: "E2E weekly report",
+      kind: "report",
+      cron: "0 9 * * 1",
+      timezone: "Europe/Rome",
+      meta: { e2e: true },
+    });
+    ok(row.id, "id voce");
+    eq(row.status, "scheduled", "stato iniziale");
+    eq(row.kind, "report", "kind");
+    return row;
+  });
+
+  await recordAsync("la voce compare con la prossima esecuzione", async () => {
+    const view = await platformRepo.listScheduleWithNext(tenant.tenantId, { status: "scheduled" });
+    const target = view.find((v) => v.id === schedule.id);
+    ok(target, "voce in elenco");
+    ok(target.nextRunAt, "prossima esecuzione calcolata");
+  });
+
+  await recordAsync("pause/resume cambiano lo stato", async () => {
+    const paused = await platformRepo.updateSchedule(tenant.tenantId, schedule.id, { status: "paused" });
+    eq(paused.status, "paused", "in pausa");
+    eq(platformRepo.nextRunAt(paused), null, "in pausa nessuna prossima esecuzione");
+    const resumed = await platformRepo.updateSchedule(tenant.tenantId, schedule.id, { status: "scheduled" });
+    eq(resumed.status, "scheduled", "riattivata");
+  });
+
+  await recordAsync("delete rimuove la voce", async () => {
+    ok(await platformRepo.deleteSchedule(tenant.tenantId, schedule.id), "eliminata");
+    eq(await platformRepo.getSchedule(tenant.tenantId, schedule.id), null, "non piu' presente");
+    eq(await platformRepo.deleteSchedule(tenant.tenantId, schedule.id), false, "seconda delete no-op");
+  });
+
   // ------------------------------------------------------------- isolamento ---
   console.log("\nisolamento fra tenant");
 
@@ -460,6 +551,9 @@ try {
     eq(await repo.getRun(other.tenantId, run.id), null, "run invisibile");
     eq(await repo.getLead(other.tenantId, lead.id), null, "lead invisibile");
     eq(await pkgMod.buildRunPackage(other.tenantId, run.id), null, "pacchetto invisibile");
+    const otherSchedule = await platformRepo.listSchedule(other.tenantId);
+    eq(otherSchedule.length, 0, "agenda altrui vuota");
+    eq(await platformRepo.droidDetail(other.tenantId, spec.tasks[0].droid).then((d) => d.tasks), 0, "carico droid altrui a zero");
   });
 
   await recordAsync("consumo registrato negli ultimi eventi", async () => {

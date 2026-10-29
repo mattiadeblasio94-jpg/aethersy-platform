@@ -148,3 +148,33 @@ CREATE INDEX IF NOT EXISTS lead_tenant_time
   ON pipeline.lead(tenant_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS lead_tenant_status
   ON pipeline.lead(tenant_id, status, created_at DESC);
+
+-- Task & Calendar (P0.7) ------------------------------------------------------
+-- Pianificazione nel tempo dei lavori della pipeline (modello pazi.ai
+-- "Tasks & Calendar"): una voce e' un promemoria o una run ricorrente/singola
+-- legata a uno stadio. Il scheduling NON esegue nulla da solo: e' l'agenda del
+-- tenant, che l'orchestrazione (o un cron) legge per aprire i run dovuti.
+CREATE TABLE IF NOT EXISTS pipeline.schedule (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id   uuid NOT NULL REFERENCES metering.tenant(id) ON DELETE CASCADE,
+  run_id      uuid REFERENCES pipeline.pipeline_run(id) ON DELETE SET NULL,
+  stage       text NOT NULL DEFAULT '',
+  title       text NOT NULL DEFAULT '',
+  kind        text NOT NULL DEFAULT 'pipeline',
+  cron        text,
+  run_at      timestamptz,
+  timezone    text NOT NULL DEFAULT 'Europe/Rome',
+  status      text NOT NULL DEFAULT 'scheduled',
+  meta        jsonb NOT NULL DEFAULT '{}'::jsonb,
+  last_run_at timestamptz,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT schedule_status CHECK (status IN ('scheduled', 'paused', 'done', 'canceled')),
+  CONSTRAINT schedule_kind CHECK (kind IN ('pipeline', 'social', 'report', 'reminder')),
+  -- Una voce deve avere almeno un riferimento temporale (cron o run_at).
+  CONSTRAINT schedule_has_time CHECK (cron IS NOT NULL OR run_at IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS schedule_tenant_status
+  ON pipeline.schedule(tenant_id, status, run_at);
+CREATE INDEX IF NOT EXISTS schedule_tenant_time
+  ON pipeline.schedule(tenant_id, created_at DESC);
