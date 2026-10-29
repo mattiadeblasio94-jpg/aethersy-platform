@@ -217,6 +217,43 @@ curl -s -o /dev/null -w '%{http_code}\n' https://console.aethersy.online/api/ai/
 | `/api/health` 200 ma login fallisce | Activepieces non raggiungibile dal BFF | il BFF usa `AP_INTERNAL_URL=http://app:80`; verifica `docker compose logs console` |
 
 
+## 6.5 Aethersy Platform (Fase 12)
+
+SPA React **mock-first** del technical brief, servita come **sito dedicato** su
+`https://platform.aethersy.online` da Caddy (`platform:80`, container nginx). La stessa
+app è **anche** dentro la Console come layer anteprima su `/preview` (porting P0.8):
+due esposizioni della stessa UI, un solo codice sorgente per entrambe
+(`platform/src` → `console/web/src/preview`).
+
+**Env necessarie** (nel `.env` del VPS):
+- `PLATFORM_DOMAIN` (default `platform.aethersy.online`)
+- `PLATFORM_VERSION` (tag immagine, default `0.1.0`)
+
+Il container non ha env di runtime né porte pubblicate: è una build statica
+(`platform/Dockerfile` → `nginx:1.27-alpine`, `platform/nginx.conf` con fallback SPA).
+
+**Rebuild/update:**
+
+```bash
+docker compose build platform
+docker compose up -d --force-recreate platform
+```
+
+**Verifica:**
+
+```bash
+curl -fsS https://platform.aethersy.online/            # 200, title "Aethersy — AI Operating Officer"
+curl -fsS https://platform.aethersy.online/dashboard   # 200 (fallback SPA)
+```
+
+**Troubleshooting:**
+
+| Sintomo | Diagnosi | Rimedio |
+|---|---|---|
+| TLS alert / cert assente su `platform` | emissione ACME non avvenuta | verifica che il record A `platform` risolva; una richiesta HTTPS innesca l'emissione; `docker compose logs caddy` |
+| 404 sulle route profonde (es. `/dashboard`) | fallback SPA assente | verifica `platform/nginx.conf` (`try_files $uri /index.html`) e ricrea il container |
+
+
 ## 7. Backup
 
 ```bash

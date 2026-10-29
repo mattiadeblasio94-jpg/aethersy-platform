@@ -21,6 +21,7 @@ services:
       - APP_DOMAIN=${APP_DOMAIN:-app.aethersy.online}
       - MCP_DOMAIN=${MCP_DOMAIN:-mcp.aethersy.online}
       - CONSOLE_DOMAIN=${CONSOLE_DOMAIN:-console.aethersy.online}
+      - PLATFORM_DOMAIN=${PLATFORM_DOMAIN:-platform.aethersy.online}
       - APEX_DOMAIN=${APEX_DOMAIN:-aethersy.online}
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
@@ -29,6 +30,7 @@ services:
     depends_on:
       - app
       - console
+      - platform
     networks:
       - aethersy
     logging:
@@ -142,6 +144,25 @@ services:
       - app
       - postgres
       - redis
+    networks:
+      - aethersy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # Piattaforma Aethersy (technical brief): SPA React mock-first servita da nginx.
+  # Nessuna porta pubblica e nessun env: entra solo da Caddy su PLATFORM_DOMAIN.
+  # Il layer anteprima e' anche dentro la Console su /preview (Fase 12 P0.8);
+  # questo servizio espone la stessa app come sito autonomo dedicato.
+  platform:
+    build:
+      context: ./platform
+      dockerfile: Dockerfile
+    image: aethersy-platform:${PLATFORM_VERSION:-0.1.0}
+    container_name: aethersy-platform
+    restart: unless-stopped
     networks:
       - aethersy
     logging:

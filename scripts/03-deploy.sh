@@ -37,9 +37,9 @@ echo "==> [3/5] Validazione compose"
 docker compose config --quiet
 
 echo "==> [4/5] Avvio stack"
-# Pull solo dei servizi basati su immagine: `console` e' un build locale.
+# Pull solo dei servizi basati su immagine: `console` e `platform` sono build locali.
 docker compose pull caddy app worker postgres redis
-docker compose build console
+docker compose build console platform
 docker compose up -d
 
 echo

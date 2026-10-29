@@ -352,3 +352,33 @@ Limiti confermati (default upstream, ora espliciti in `.env.example`): `AP_WEBHO
 - **Residuo:** sostituire i mock pagina per pagina con gli endpoint reali, partendo da quelle che hanno
   già copertura (dashboard/lead/asset/crediti → `/api/pipeline/*`, `/api/ai/*`); download/preview dei
   binari; rimozione del vecchio `platform/` quando tutte le pagine saranno migrate.
+
+### Fase 12 — P0.9 Deploy (29/10/2026)
+
+Due esposizioni della stessa piattaforma, un solo codice sorgente:
+
+1. **Console aggiornata** (`https://console.aethersy.online`): rebuild+deploy che porta in produzione i
+   commit P0.1–P0.8 (metering/billing, pipeline, asset library, lead+Slack, **layer anteprima
+   `/preview`**). L'immagine live era ancora `0.1.0` di 15 h fa, senza `/preview`.
+2. **Platform dedicata** (`https://platform.aethersy.online`): la SPA mock-first come **sito autonomo**,
+   servita da nginx (`platform/Dockerfile` multi-stage → `nginx:1.27-alpine` + `platform/nginx.conf` con
+   fallback SPA e cache immutabile per `/assets/*`).
+
+**Infra:** servizio `platform` in `docker-compose.yml` (nessuna porta pubblicata, nessun env di
+runtime), blocco `{$PLATFORM_DOMAIN}` in `caddy/Caddyfile` → `platform:80`, env `PLATFORM_DOMAIN` /
+`PLATFORM_VERSION` in `.env.example` e nel `.env` del VPS. `03-deploy.sh` builda `console platform`;
+`04-smoke-test.sh` copre 6 step (container, health locale console+platform, app pubblica, MCP, Console,
+Platform).
+
+**Procedura eseguita (deploy per copia file, VPS non-git):** backup pre-modifica timestampato
+(`.env`, `docker-compose.yml`, `caddy/Caddyfile` → `.bak.20261029-095001`); sync artefatti via tarball
+(`console/`, `platform/`, compose, Caddyfile, `scripts/`, `docs/`, `.env.example`; esclusi
+`node_modules`/`dist`/`.env`); `docker compose build console platform`; `up -d console platform` +
+`up -d --force-recreate caddy` (obbligatorio dopo modifiche a Caddyfile/env).
+
+**Verifica (29/10/2026):** `docker compose ps` → 7 servizi `running` (console/platform `healthy`);
+smoke test **6/6 OK**; `console.aethersy.online/api/health` 200, `/preview` 200 (chunk
+`PreviewLayout-*.js` presente nell'immagine); `platform.aethersy.online/` 200 con title
+"Aethersy — AI Operating Officer", asset 200, fallback SPA su `/settings/profile` 200; TLS
+`ssl_verify_result=0` su entrambi; `app` 200 e `mcp` 405 invariati.
+

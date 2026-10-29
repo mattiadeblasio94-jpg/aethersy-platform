@@ -4,10 +4,11 @@
 #   {$APP_DOMAIN}          -> app Activepieces (UI + API + webhook)
 #   {$MCP_DOMAIN}          -> solo le route MCP / OAuth
 #   {$CONSOLE_DOMAIN}      -> Aethersy Console (frontend proprietario + BFF)
+#   {$PLATFORM_DOMAIN}     -> Aethersy Platform (SPA mock-first, sito dedicato)
 #   {$APEX_DOMAIN}         -> redirect 301 verso APP_DOMAIN
 #   www.{$APEX_DOMAIN}     -> redirect 301 verso APP_DOMAIN
 #
-# App e Console sono container distinti (app:80 / console:3000).
+# App, Console e Platform sono container distinti (app:80 / console:3000 / platform:80).
 # Activepieces riconosce le richieste MCP dall'hostname, quindi l'header
 # Host pubblico viene preservato (vedi header_up Host {host}).
 {
@@ -131,6 +132,17 @@
 # -----------------------------------------------------------------------------
 {$MCP_DOMAIN} {
 	import mcp_proxy
+}
+
+# -----------------------------------------------------------------------------
+# Platform: piattaforma Aethersy (SPA mock-first) su container `platform:80`.
+# -----------------------------------------------------------------------------
+{$PLATFORM_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy platform:80 {
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
 }
 
 # -----------------------------------------------------------------------------
