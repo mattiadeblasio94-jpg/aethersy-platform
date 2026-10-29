@@ -879,6 +879,7 @@ testing automatico sui creative, attribution avanzata, SLA e supporto enterprise
 | QA E2E (P0.10) | **fatto** — `test-e2e-pilot.mjs` esteso con la sezione "piattaforma (Business Pulse)" + isolamento multi-tenant dell'agenda: **51/51 OK** sul VPS contro il DB temporaneo `console_e2e` | esecuzione in CI con DB effimero |
 | Substrato aziendale (P1.1) | **fatto** (29/10/2026) — nuovo schema Postgres **`business`**: `goal` (obiettivi con priorità/stato/`achieved_at`), `memory` (kind/tags/pinned), `product` (catalogo offerta, SKU unico, prezzo/valuta). Modulo `console/server/src/business/` (`catalog.ts`, `migrate.ts` idempotente, `repo.ts` CRUD tenant-scoped + `businessSummary`, `routes.ts` `GET /api/platform/business/{catalog,summary}` + CRUD `/api/platform/{goals,memory,products}` dietro `requireMeteredTenant`). Wiring `index.ts`/`routes.ts`; `gen-schema.mjs` + `test-metering.mjs` estesi a `business`. Console: `Goals` (`/goals`), `Memory` (`/memory`), `Products` (`/products`) on-brand + tipi/hook; deployato sul VPS | filtri/ordinamenti avanzati, collegamento obiettivi↔run |
 | Script typecheck (fix) | **fatto** — `console/web/package.json`: `tsc -b --noEmit false --emitDeclarationOnly false` → `tsc -p tsconfig.json --noEmit` (il precedente emetteva 83 `.js` in `src/`, ombrando i `.tsx`); 83 artefatti rimossi | — |
+| Motore agenti + piattaforma reale (P2.1/P2.2) | **fatto** (29/10/2026) — motore agenti (`console/server/src/agent/*`, `pipeline/executor.ts`, `business/chat.ts`) e SPA utente reale `platform/` (auth cookie-based condiviso via `CONSOLE_COOKIE_DOMAIN=.aethersy.online`, `Protected`, Studio) deployati su **`platform.aethersy.online`** (la Console resta backoffice). Caddy: `/api/*` → `console:3000` sull'hostname platform. Fix runtime: (1) `routes.ts` sign-up invia `trackEvents`/`newsLetter` (evita 400 `FST_ERR_VALIDATION`); (2) `metering/repo.ts` `toRequestUuid()` normalizza gli id testuali (`chat:`/`task:`/`stage:`) a uuid per `usage_event.request_id` (evita 502 `invalid input syntax for type uuid`), idempotenza preservata. Verificato live: register/login/session/overview/chat 200; richiesta di lavoro → run Brand con task prism/quill/scout/vault eseguiti e asset reali generati, run `in_review` 0 errori | preview mock→reale; hardening BFF su `firstName`/`lastName` |
 | Snapshot listini | **solo seed** statico (price book v1) | cron di aggiornamento `price_book` + `fx_usd_eur` |
 
 ---
@@ -890,5 +891,7 @@ display crediti/consumo) sono implementati e verificati. P0.6 (lead: webhook + m
 canale Slack + export pacchettizzato + UI Console) è implementato e verificato. P0.7 (QA end-to-end
 del percorso pilota su DB reale + backup off-site automatico) è implementato e verificato sul VPS.
 P0.8 (porting del frontend `platform/` dentro la Console come layer di anteprima a dati demo) è
-implementato e verificato in build. Le voci `[DA VERIFICARE]` restanti vanno risolte prima della
+implementato e verificato in build. P0.9–P0.10, P1.1, P2.1 e P2.2 (motore agenti + piattaforma
+utente reale su `platform.aethersy.online`) sono implementati, deployati e verificati live sul VPS
+(QA E2E `test-e2e-pilot.mjs` 65/65). Le voci `[DA VERIFICARE]` restanti vanno risolte prima della
 fase di build.*
