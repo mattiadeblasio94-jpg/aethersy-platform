@@ -263,6 +263,15 @@ export function formatTime(now: Date): string {
   return timeFormatter.format(now);
 }
 
+/** Formatta bytes in unità leggibili ("1,2 MB", "450 KB", "2 GB"). */
+export function formatFileSize(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  const size = bytes / Math.pow(1024, i);
+  return `${size.toFixed(1).replace(".", ",")} ${units[i]}`;
+}
+
 /** Percentuale di avanzamento, clampata 0..100. */
 export function clampProgress(value: number): number {
   return Math.max(0, Math.min(100, Math.round(value)));

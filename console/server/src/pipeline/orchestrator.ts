@@ -9,6 +9,7 @@ import {
   registerAsset,
   startTask,
   syncRunStatus,
+  transitionAsset,
   transitionRun,
   type AgentTaskRow,
   type PipelineRunRow,
@@ -42,6 +43,12 @@ export interface TaskExecutionResult {
   output?: unknown;
   error?: string | null;
   assets?: TaskAsset[];
+  /**
+   * `true` se l'esecutore "propone" i deliverable: gli asset vengono sottoposti
+   * a revisione umana (`in_review`) subito dopo la registrazione. Default `false`
+   * (l'asset resta `draft`, in attesa di sottomissione esplicita).
+   */
+  submit?: boolean;
 }
 
 export interface TaskContext {
@@ -179,10 +186,14 @@ export async function orchestrateRun(
     });
 
     // Deliverable: registrati solo se il task e' andato a buon fine.
+    // L'esecutore puo' dichiarare il deliverable come "proposto" (`submit`): in
+    // tal caso nasce `draft` e passa subito a `in_review`, cosi' e' decidibile
+    // (approva/rifiuta) dal cliente. Gli esecutori che non lo dichiarano
+    // lasciano l'asset `draft`, in attesa di sottomissione esplicita.
     let assets = 0;
     if (finished && finished.status === "done" && result.assets?.length) {
       for (const a of result.assets) {
-        await registerAsset({
+        const asset = await registerAsset({
           tenantId,
           runId,
           taskId: task.id,
@@ -193,6 +204,9 @@ export async function orchestrateRun(
           sizeBytes: a.sizeBytes ?? null,
           meta: a.meta ?? {},
         });
+        if (result.submit) {
+          await transitionAsset(tenantId, asset.id, "in_review", { by: task.droid });
+        }
         assets += 1;
       }
     }

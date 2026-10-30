@@ -215,3 +215,130 @@ export function isScheduleStatus(value: string): value is ScheduleStatus {
 export function isScheduleKind(value: string): value is ScheduleKind {
   return (SCHEDULE_KINDS as string[]).includes(value);
 }
+
+// --- Kanban Opportunita (pazi.ai parity) ------------------------------------
+
+/** Bucket della board Kanban derivati da pipeline_run.status. */
+export type OpportunityBucket = "running" | "ahead" | "done";
+
+/** Mappa stato run -> bucket kanban. */
+const RUN_TO_BUCKET: Record<RunStatus, OpportunityBucket> = {
+  draft: "running",
+  in_progress: "running",
+  in_review: "ahead",
+  approved: "ahead",
+  delivered: "done",
+  failed: "running",
+};
+
+/** Ritorna il bucket kanban per uno stato di run. */
+export function opportunityBucket(status: RunStatus): OpportunityBucket {
+  return RUN_TO_BUCKET[status] ?? "running";
+}
+
+/** Etichette bucket per la UI. */
+export const OPPORTUNITY_BUCKET_LABELS: Record<OpportunityBucket, string> = {
+  running: "In esecuzione",
+  ahead: "Avanti",
+  done: "Completato",
+};
+
+/** Ordine colonne kanban. */
+export const OPPORTUNITY_BUCKETS: OpportunityBucket[] = ["running", "ahead", "done"];
+
+// --- Libreria (Library) ------------------------------------------------------
+
+/** Sezione della libreria (pazi.ai "Libreria"). */
+export type LibrarySection = "risorse" | "agenti" | "messaggi" | "inviti";
+
+export const LIBRARY_SECTIONS: LibrarySection[] = ["risorse", "agenti", "messaggi", "inviti"];
+
+export const LIBRARY_SECTION_LABELS: Record<LibrarySection, string> = {
+  risorse: "Risorse",
+  agenti: "Agenti AI su misura",
+  messaggi: "Messaggi",
+  inviti: "Inviti",
+};
+
+// --- Abbonamento / FAQ (Account) ---------------------------------------------
+
+/** Voce FAQ per la sezione Abbonamento. */
+export interface FaqItem {
+  id: string;
+  question: string;
+  answer: string;
+  category: "billing" | "subscription" | "usage" | "general";
+}
+
+export const FAQ_CATALOG: FaqItem[] = [
+  {
+    id: "faq-1",
+    question: "Come funziona il piano gratuito?",
+    answer:
+      "Il piano Free include 100 crediti al mese, accesso a tutti gli specialisti e la chat centrale. Non richiede carta di credito.",
+    category: "subscription",
+  },
+  {
+    id: "faq-2",
+    question: "Cosa sono i crediti e come si consumano?",
+    answer:
+      "I crediti sono l'unità di consumo della piattaforma (1 credito = 0,0001 EUR). Si consumano per ogni chiamata AI (token, immagini, video, audio) e per le esecuzioni di flusso. Il costo varia per modello e provider.",
+    category: "usage",
+  },
+  {
+    id: "faq-3",
+    question: "Posso cambiare piano in qualsiasi momento?",
+    answer:
+      "Sì, puoi passare dal piano Free a Pro (o viceversa) dalle impostazioni di fatturazione. Il cambio è immediato e il nuovo piano si applica al ciclo di fatturazione corrente.",
+    category: "subscription",
+  },
+  {
+    id: "faq-4",
+    question: "Come ricarico i crediti?",
+    answer:
+      "Dalla sezione Abbonamento puoi acquistare pacchetti di crediti (top-up) o abilitare la ricarica automatica sotto soglia. I pagamenti sono gestiti via Stripe.",
+    category: "billing",
+  },
+  {
+    id: "faq-5",
+    question: "Cosa succede se finisco i crediti?",
+    answer:
+      "Con hard-stop attivo (default), le nuove esecuzioni AI vengono bloccate finché non ricarichi. Le esecuzioni in corso completano. Puoi disattivare l'hard-stop dalle impostazioni (si applica solo al piano Pro).",
+    category: "usage",
+  },
+  {
+    id: "faq-6",
+    question: "Come viene calcolato il costo di un'immagine/video?",
+    answer:
+      "Il costo dipende dal modello usato (es. Flux 2 Pro, Veo 3.1). Vedi il listino prezzi aggiornato nella documentazione. Il markup del tuo piano (default 150%) viene applicato al costo provider.",
+    category: "billing",
+  },
+  {
+    id: "faq-7",
+    question: "Posso usare le mie chiavi API (OpenRouter, Venice, ecc.)?",
+    answer:
+      "Sì, nelle Impostazioni → Integrazioni puoi aggiungere le tue chiavi. La piattaforma le userà al posto dei provider di default e il consumo verrà comunque metrato nei tuoi crediti.",
+    category: "general",
+  },
+  {
+    id: "faq-8",
+    question: "Come funziona la fatturazione?",
+    answer:
+      "Fatturazione mensile post-pagata per i piani Pro. Ricevi la fattura via email all'inizio del mese per il consumo del mese precedente. I top-up sono fatturati immediatamente.",
+    category: "billing",
+  },
+  {
+    id: "faq-9",
+    question: "Posso cancellare l'abbonamento?",
+    answer:
+      "Sì, in qualsiasi momento dalla sezione Abbonamento. Il piano Pro resta attivo fino alla fine del periodo pagato, poi torna al piano Free. I crediti residui non sono rimborsabili.",
+    category: "subscription",
+  },
+  {
+    id: "faq-10",
+    question: "Dove trovo lo storico dei consumi?",
+    answer:
+      "Nella sezione Abbonamento → Storico consumi vedi il dettaglio per giorno, capability e modello. Puoi anche esportare i dati in CSV.",
+    category: "usage",
+  },
+];

@@ -1,4 +1,5 @@
 // Configurazione del BFF. Tutti i valori arrivano da env (nessun segreto nel codice).
+import "dotenv/config";
 
 function req(name: string, fallback?: string): string {
   const v = process.env[name] ?? fallback;

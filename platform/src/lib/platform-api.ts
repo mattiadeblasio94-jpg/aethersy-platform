@@ -66,6 +66,18 @@ export interface Opportunity {
   opportunity: OpportunityStateMeta;
 }
 
+export interface KanbanColumn {
+  bucket: string;
+  label: string;
+  count: number;
+  runs: Opportunity[];
+}
+
+export interface KanbanBoard {
+  columns: KanbanColumn[];
+  total: number;
+}
+
 export interface ScheduleView {
   id: string;
   title: string;
@@ -86,12 +98,23 @@ export interface PulseCounters {
   schedule: { active: number; next: string | null };
 }
 
+export interface AreaTile {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+  count: number;
+  route: string;
+  state: "active" | "empty" | "attention";
+}
+
 export interface BusinessPulse {
   tenantId: string;
   counters: PulseCounters;
   credits: Balance;
   upcoming: ScheduleView[];
   attention: Opportunity[];
+  areaTiles: AreaTile[];
 }
 
 export interface ConversationRow {
@@ -170,6 +193,86 @@ export interface StageSpec {
   droids: string[];
 }
 
+// --- Library types ----------------------------------------------------------
+
+export interface LibraryResource {
+  id: string;
+  kind: string;
+  name: string;
+  status: string;
+  storage_key: string;
+  mime: string | null;
+  version: number;
+  created_at: string;
+  run_id: string | null;
+}
+
+export interface LibraryAgent {
+  id: string;
+  name: string;
+  role: string;
+  department: string;
+  tagline: string;
+  skills: string[];
+  stages: string[];
+  tasks: number;
+  running: number;
+  done: number;
+  failed: number;
+}
+
+export interface LibraryMessage {
+  id: string;
+  conversation_id: string;
+  role: string;
+  droid: string;
+  content: string;
+  credits: number;
+  created_at: string;
+}
+
+export interface LibraryInvite {
+  id: string;
+  email: string;
+  role: string;
+  status: string;
+  created_at: string;
+}
+
+export interface LibraryData {
+  risorse: LibraryResource[];
+  agenti: LibraryAgent[];
+  messaggi: LibraryMessage[];
+  inviti: LibraryInvite[];
+}
+
+// --- Account types ----------------------------------------------------------
+
+export interface AccountSummary {
+  tenantId: string;
+  tenantName: string;
+  plan: string;
+  balance: number;
+  reserved: number;
+  available: number;
+  quota: unknown;
+  markupBps: number;
+  creditUnit: number;
+  hardStopOnEmpty: boolean;
+  billingCustomerRef: string | null;
+}
+
+export interface FaqItem {
+  id: string;
+  question: string;
+  answer: string;
+  category: "billing" | "subscription" | "usage" | "general";
+}
+
+export interface FaqResponse {
+  faqs: FaqItem[];
+}
+
 // --- API --------------------------------------------------------------------
 
 export const platformApi = {
@@ -190,6 +293,9 @@ export const platformApi = {
   // --- Opportunita' (run) ---------------------------------------------------
   getOpportunities: (stage?: string) =>
     http.get<Opportunity[]>("/api/platform/opportunities", stage ? { stage } : undefined),
+
+  getKanbanBoard: (stage?: string) =>
+    http.get<KanbanBoard>("/api/platform/opportunities/kanban", stage ? { stage } : undefined),
 
   // --- Roster ---------------------------------------------------------------
   getRoster: () => http.get<RosterEntry[]>("/api/platform/roster"),
@@ -222,4 +328,12 @@ export const platformApi = {
   submitAsset: (assetId: string) => http.post<PipelineAsset>(`/api/pipeline/assets/${assetId}/submit`),
   decideAsset: (assetId: string, decision: "approved" | "rejected") =>
     http.post<PipelineAsset>(`/api/pipeline/assets/${assetId}/decide`, { decision }),
+
+  // --- Libreria -------------------------------------------------------------
+  getLibrary: () => http.get<LibraryData>("/api/platform/library"),
+
+  // --- Account / Abbonamento ------------------------------------------------
+  getAccount: () => http.get<AccountSummary>("/api/platform/account"),
+  getFaq: (category?: string) =>
+    http.get<FaqResponse>("/api/platform/faq", category ? { category } : undefined),
 };

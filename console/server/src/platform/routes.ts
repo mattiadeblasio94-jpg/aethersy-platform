@@ -1,13 +1,24 @@
 import type { FastifyInstance } from "fastify";
 import { requireMeteredTenant } from "./guard.js";
-import { DROIDS, SCHEDULE_KINDS, SCHEDULE_STATUSES, SCHEDULE_KIND_LABELS } from "./catalog.js";
+import {
+  DROIDS,
+  SCHEDULE_KINDS,
+  SCHEDULE_STATUSES,
+  SCHEDULE_KIND_LABELS,
+  OPPORTUNITY_BUCKETS,
+  OPPORTUNITY_BUCKET_LABELS,
+  LIBRARY_SECTIONS,
+  LIBRARY_SECTION_LABELS,
+  FAQ_CATALOG,
+} from "./catalog.js";
 import { CronError, isValidCron, nextRunFor } from "./cron.js";
 
 // Rotte della piattaforma "Business Pulse" (modello pazi.ai adattato a
 // Aethersy). Montate sotto /api/platform/*, registrate da `registerRoutes`.
 //
-//   GET    /api/platform/overview            -> Business Pulse (contatori + attenzione)
+//   GET    /api/platform/overview            -> Business Pulse (contatori + attenzione + tiles)
 //   GET    /api/platform/opportunities       -> roadmap = run con stato pazi
+//   GET    /api/platform/opportunities/kanban -> board kanban (running/ahead/done)
 //   GET    /api/platform/roster              -> roster specialisti + carico reale
 //   GET    /api/platform/roster/:droidId     -> scheda singolo specialista
 //   GET    /api/platform/schedule            -> agenda (con prossima esecuzione)
@@ -16,6 +27,9 @@ import { CronError, isValidCron, nextRunFor } from "./cron.js";
 //   POST   /api/platform/schedule/:id/pause  -> mette in pausa
 //   POST   /api/platform/schedule/:id/resume -> riattiva
 //   DELETE /api/platform/schedule/:id        -> elimina voce
+//   GET    /api/platform/library             -> Libreria (risorse/agenti/messaggi/inviti)
+//   GET    /api/platform/account             -> Abbonamento / Account summary
+//   GET    /api/platform/faq                 -> Catalogo FAQ (billing/subscription/usage/general)
 //   POST   /api/platform/cron/preview        -> prossime N esecuzioni di un cron
 //
 // Tutte richiedono il metering attivo (gli schemi vivono li').
@@ -29,6 +43,8 @@ export async function registerPlatformRoutes(app: FastifyInstance): Promise<void
       droids: DROIDS,
       scheduleKinds: SCHEDULE_KINDS.map((k) => ({ id: k, label: SCHEDULE_KIND_LABELS[k] })),
       scheduleStatuses: SCHEDULE_STATUSES,
+      opportunityBuckets: OPPORTUNITY_BUCKETS.map((b) => ({ id: b, label: OPPORTUNITY_BUCKET_LABELS[b] })),
+      librarySections: LIBRARY_SECTIONS.map((s) => ({ id: s, label: LIBRARY_SECTION_LABELS[s] })),
     };
   });
 
@@ -36,8 +52,9 @@ export async function registerPlatformRoutes(app: FastifyInstance): Promise<void
   app.get("/api/platform/overview", async (request, reply) => {
     const tenant = await requireMeteredTenant(request, reply);
     if (!tenant) return;
-    const { businessPulse } = await import("./repo.js");
-    return businessPulse(tenant.tenantId);
+    const { businessPulse, areaTiles } = await import("./repo.js");
+    const pulse = await businessPulse(tenant.tenantId);
+    return { ...pulse, areaTiles: areaTiles(pulse.counters) };
   });
 
   // ------------------------------------------------ roadmap/opportunity ----
@@ -47,6 +64,17 @@ export async function registerPlatformRoutes(app: FastifyInstance): Promise<void
     const { stage, limit } = request.query as { stage?: string; limit?: string };
     const { listOpportunities } = await import("./repo.js");
     return listOpportunities(tenant.tenantId, {
+      stage,
+      limit: limit ? Number(limit) : undefined,
+    });
+  });
+
+  app.get("/api/platform/opportunities/kanban", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+    const { stage, limit } = request.query as { stage?: string; limit?: string };
+    const { kanbanBoard } = await import("./repo.js");
+    return kanbanBoard(tenant.tenantId, {
       stage,
       limit: limit ? Number(limit) : undefined,
     });
@@ -186,6 +214,33 @@ export async function registerPlatformRoutes(app: FastifyInstance): Promise<void
     const ok = await deleteSchedule(tenant.tenantId, id);
     if (!ok) return reply.code(404).send({ code: "NOT_FOUND", message: "Voce inesistente" });
     return { ok: true };
+  });
+
+  // --------------------------------------------------------- libreria ----
+  app.get("/api/platform/library", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+    const { libraryData } = await import("./repo.js");
+    return libraryData(tenant.tenantId);
+  });
+
+  // ------------------------------------------------------- account/FAQ ----
+  app.get("/api/platform/account", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+    const { accountSummary } = await import("./repo.js");
+    return accountSummary(tenant.tenantId);
+  });
+
+  app.get("/api/platform/faq", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+    const { category } = request.query as { category?: string };
+    let faqs = FAQ_CATALOG;
+    if (category) {
+      faqs = faqs.filter((f) => f.category === category);
+    }
+    return { faqs };
   });
 
   // ---------------------------------------------------- cron preview ----

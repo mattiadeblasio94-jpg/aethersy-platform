@@ -11,10 +11,12 @@ import {
   Send,
   Settings,
   Share2,
-  Sparkles,
   Users,
   Globe,
   X,
+  Zap,
+  Target,
+  FolderOpen,
 } from "lucide-react";
 import { useUiStore } from "@/store/ui";
 import { useAuthStore } from "@/store/auth";
@@ -79,9 +81,12 @@ export const Drawer = memo(function Drawer({ variant }: DrawerProps) {
       {
         title: "Operazioni",
         items: [
-          { to: "/studio", label: "Studio", icon: Bot },
-          { to: "/dashboard", label: "Dashboard", icon: Home, badge: 3 },
-          { to: "/agents", label: "Agenti", icon: Sparkles, badge: activeAgents },
+          { to: "/dashboard", label: "Home", icon: Home, badge: 3 },
+          { to: "/studio", label: "Studio", icon: Zap },
+          { to: "/agents", label: "Agenti", icon: Bot, badge: activeAgents },
+          { to: "/opportunities", label: "Opportunità", icon: Target },
+          { to: "/library", label: "Libreria", icon: FolderOpen },
+          { to: "/outreach", label: "Outreach", icon: Send },
           {
             to: "/social-media",
             label: "Social Media",
@@ -89,7 +94,6 @@ export const Drawer = memo(function Drawer({ variant }: DrawerProps) {
             badge: connectedPlatforms,
           },
           { to: "/tasks", label: "Task", icon: Users, badge: activeTasks },
-          { to: "/outreach", label: "Outreach", icon: Send },
         ],
       },
       {

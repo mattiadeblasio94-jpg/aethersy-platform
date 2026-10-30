@@ -11,6 +11,7 @@ export const realKeys = {
   balance: ["real", "balance"] as const,
   overview: ["real", "overview"] as const,
   opportunities: ["real", "opportunities"] as const,
+  kanban: ["real", "opportunities", "kanban"] as const,
   roster: ["real", "roster"] as const,
   droid: (id: string) => ["real", "roster", id] as const,
   schedule: ["real", "schedule"] as const,
@@ -19,6 +20,9 @@ export const realKeys = {
   runs: ["real", "runs"] as const,
   run: (id: string) => ["real", "run", id] as const,
   assets: (runId?: string) => ["real", "assets", runId ?? "all"] as const,
+  library: ["real", "library"] as const,
+  account: ["real", "account"] as const,
+  faq: ["real", "faq"] as const,
 };
 
 export function useBalance() {
@@ -37,6 +41,13 @@ export function useOpportunities(stage?: string) {
   return useQuery({
     queryKey: [...realKeys.opportunities, stage ?? "all"] as const,
     queryFn: () => platformApi.getOpportunities(stage),
+  });
+}
+
+export function useKanbanBoard(stage?: string) {
+  return useQuery({
+    queryKey: [...realKeys.kanban, stage ?? "all"] as const,
+    queryFn: () => platformApi.getKanbanBoard(stage),
   });
 }
 
@@ -125,6 +136,27 @@ export function useExecuteRun() {
       qc.invalidateQueries({ queryKey: realKeys.roster });
       qc.invalidateQueries({ queryKey: realKeys.overview });
     },
+  });
+}
+
+export function useLibrary() {
+  return useQuery({
+    queryKey: realKeys.library,
+    queryFn: () => platformApi.getLibrary(),
+  });
+}
+
+export function useAccount() {
+  return useQuery({
+    queryKey: realKeys.account,
+    queryFn: () => platformApi.getAccount(),
+  });
+}
+
+export function useFaq(category?: string) {
+  return useQuery({
+    queryKey: [...realKeys.faq, category ?? "all"] as const,
+    queryFn: () => platformApi.getFaq(category),
   });
 }
 

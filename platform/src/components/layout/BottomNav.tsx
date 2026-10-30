@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { NavLink } from "react-router-dom";
-import { BarChart3, Home, Sparkles, User } from "lucide-react";
+import { BarChart3, Home, User, Bot, FolderOpen, Target, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface BottomNavItem {
@@ -9,15 +9,13 @@ interface BottomNavItem {
   icon: typeof Home;
 }
 
-const LEFT_ITEMS: BottomNavItem[] = [
+const BOTTOM_NAV_ITEMS: BottomNavItem[] = [
   { to: "/dashboard", label: "Home", icon: Home },
-  { to: "/agents", label: "Agenti", icon: Sparkles },
-];
-
-const RIGHT_ITEMS: BottomNavItem[] = [
-  { to: "/analytics", label: "Analisi", icon: BarChart3 },
-  { to: "/settings/profile", label: "Profilo", icon: User },
-];
+  { to: "/studio", label: "Studio", icon: Zap },
+  { to: "/agents", label: "Agenti", icon: Bot },
+  { to: "/opportunities", label: "Opportunità", icon: Target },
+  { to: "/library", label: "Libreria", icon: FolderOpen },
+] as const;
 
 /**
  * Bottom navigation mobile (brief §2.1). Altezza 64px + safe-area bottom,
@@ -39,22 +37,28 @@ export const BottomNav = memo(function BottomNav() {
       }}
       aria-label="Navigazione principale mobile"
     >
-      {LEFT_ITEMS.map((item) => (
-        <NavLink key={item.to} to={item.to} className={itemClass}>
-          <item.icon className="h-5 w-5" aria-hidden="true" />
-          {item.label}
-        </NavLink>
-      ))}
+      <div className="flex-1 flex">
+        {BOTTOM_NAV_ITEMS.map((item) => (
+          <NavLink key={item.to} to={item.to} className={itemClass}>
+            <item.icon className="h-5 w-5" aria-hidden="true" />
+            {item.label}
+          </NavLink>
+        ))}
+      </div>
 
       {/* Spazio riservato al Fab centrale (56x56). */}
       <div className="w-16 shrink-0" aria-hidden="true" />
 
-      {RIGHT_ITEMS.map((item) => (
-        <NavLink key={item.to} to={item.to} className={itemClass}>
-          <item.icon className="h-5 w-5" aria-hidden="true" />
-          {item.label}
+      <div className="flex-1 flex justify-end">
+        <NavLink to="/analytics" className={itemClass}>
+          <BarChart3 className="h-5 w-5" aria-hidden="true" />
+          Analisi
         </NavLink>
-      ))}
+        <NavLink to="/settings/profile" className={itemClass}>
+          <User className="h-5 w-5" aria-hidden="true" />
+          Profilo
+        </NavLink>
+      </div>
     </nav>
   );
 });

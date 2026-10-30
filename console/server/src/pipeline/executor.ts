@@ -110,6 +110,8 @@ export function buildAiExecutor(): TaskExecutor {
           content: answer,
         },
         assets: [asset],
+        // L'agente "propone" il deliverable: entra subito in revisione umana.
+        submit: true,
       };
     } catch (err) {
       return { status: "failed", error: (err as Error).message };

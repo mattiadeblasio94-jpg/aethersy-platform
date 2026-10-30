@@ -10,8 +10,9 @@ import type { ComponentType } from "react";
 
 // Caricamento differito: un chunk per pagina (vedi anche manualChunks in
 // vite.config.ts per i vendor condivisi).
-const Agents = lazy(() => import("./Agents"));
+const Pulse = lazy(() => import("./Pulse"));
 const Studio = lazy(() => import("./Studio"));
+const Agents = lazy(() => import("./Agents"));
 const AgentCreate = lazy(() => import("./AgentCreate"));
 const AgentDetail = lazy(() => import("./AgentDetail"));
 const AgentLogs = lazy(() => import("./AgentLogs"));
@@ -28,6 +29,9 @@ const SettingsBilling = lazy(() => import("./SettingsBilling"));
 const SettingsIntegrations = lazy(() => import("./SettingsIntegrations"));
 const SettingsNotifications = lazy(() => import("./SettingsNotifications"));
 const Help = lazy(() => import("./Help"));
+const Opportunities = lazy(() => import("./Opportunities"));
+const Library = lazy(() => import("./Library"));
+const Subscription = lazy(() => import("./Subscription"));
 
 export interface RouteSpec {
   path: string;
@@ -38,6 +42,12 @@ export interface RouteSpec {
 }
 
 export const APP_ROUTES: RouteSpec[] = [
+  {
+    path: "dashboard",
+    title: "Home",
+    description: "Polso dell'attività: balance, aree dell'attività e feed recente.",
+    component: Pulse,
+  },
   {
     path: "studio",
     title: "Studio",
@@ -166,6 +176,24 @@ export const APP_ROUTES: RouteSpec[] = [
     title: "Aiuto",
     description: "Guide, domande frequenti e canali di supporto.",
     component: Help,
+  },
+  {
+    path: "opportunities",
+    title: "Opportunità",
+    description: "Kanban board delle opportunità: running, ahead, done.",
+    component: Opportunities,
+  },
+  {
+    path: "library",
+    title: "Libreria",
+    description: "Risorse, agenti, messaggi e inviti del workspace.",
+    component: Library,
+  },
+  {
+    path: "subscription",
+    title: "Abbonamento",
+    description: "Piano, crediti, fatturazione e domande frequenti.",
+    component: Subscription,
   },
 ];
 
