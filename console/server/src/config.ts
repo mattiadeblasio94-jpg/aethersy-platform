@@ -28,6 +28,12 @@ export const config = {
   veniceKey: process.env.VENICE_API_KEY ?? "",
   veniceBase: (process.env.VENICE_BASE_URL ?? "https://api.venice.ai/api/v1").replace(/\/$/, ""),
 
+  // NVIDIA (integrate.api.nvidia.com): provider di modelli gratuiti
+  // (Nemotron 3 Ultra, Nemotron 3.5 Lightning, Qwen 3.5 122B, Nemotron Omni/VL).
+  // Se la chiave manca, NVIDIA viene saltato silenziosamente nel router.
+  nvidiaApiKey: process.env.NVIDIA_API_KEY ?? "",
+  nvidiaBaseUrl: (process.env.NVIDIA_BASE_URL ?? "https://integrate.api.nvidia.com/v1").replace(/\/$/, ""),
+
   // --- Metering / billing (schema Postgres `metering`, vedi docs) -------------
   // Kill-switch: se `false` il metering e' disattivato (nessuna scrittura DB).
   meteringEnabled: (process.env.METERING_ENABLED ?? "false") === "true",

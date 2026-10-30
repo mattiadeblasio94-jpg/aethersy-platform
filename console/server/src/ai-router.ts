@@ -1,13 +1,15 @@
 import { config } from "./config.js";
 import { recordUsage, type TenantContext } from "./metering/repo.js";
+import { getNvidiaModels, nvidiaChat } from "./ai-gen/nvidia.js";
 
 // =============================================================================
 // AI Router — sceglie automaticamente il modello LLM in base alla capacita'
 // richiesta (testo / immagine->testo / audio->testo / video->testo), preferendo
-// i modelli GRATUITI disponibili su OpenRouter.
+// i modelli GRATUITI disponibili su OpenRouter e NVIDIA (integrate.api.nvidia.com).
 //
-// Il catalogo viene letto live da GET /models (nessuna lista hard-coded: se
-// OpenRouter aggiunge/rimuove modelli, il router si adegua da solo).
+// Il catalogo viene letto live da OpenRouter /models e combinato con i modelli
+// NVIDIA curati. I provider restano NASCOSTI agli utenti della piattaforma: il
+// router seleziona automaticamente il miglior modello gratuito disponibile.
 // =============================================================================
 
 export type AiCapability = "text" | "image" | "audio" | "video";
@@ -19,6 +21,8 @@ export interface AiModel {
   free: boolean;
   capabilities: AiCapability[];
   pricing: { prompt: number; completion: number };
+  /** Provider interno (non esposto all'utente). */
+  provider: "openrouter" | "nvidia";
 }
 
 interface OpenRouterModel {
@@ -32,41 +36,59 @@ interface OpenRouterModel {
 const CACHE_TTL_MS = 5 * 60_000;
 let cache: { at: number; models: AiModel[] } | null = null;
 
-// Preferenze curate per capacita' (verificate live il 28/10/2026).
-// Sono intersecate col catalogo live: se un modello sparisce da OpenRouter,
-// viene semplicemente ignorato. L'ordine e' quello di preferenza.
+// Preferenze curate per capacita' (aggiornate 30/10/2026).
+// Modelli NVIDIA diretti (senza :free) + modelli OpenRouter gratuiti.
+// L'ordine e' quello di preferenza: NVIDIA diretta prima, poi OpenRouter.
 const PREFERRED: Record<AiCapability, string[]> = {
   text: [
-    "nvidia/nemotron-3.5-lightning:free",
+    // NVIDIA diretta (gratis, alta qualità)
+    "nvidia/nemotron-3-ultra-550b",
+    "qwen/qwen3.5-122b-a10b",
+    "nvidia/nemotron-3-ultra-253b",
+    "nvidia/nemotron-4-340b",
+    "nvidia/nemotron-3.5-lightning",
+    // OpenRouter gratuiti (fallback)
     "google/gemma-4-26b-a4b-it:free",
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
     "dots-studio/dots-3-note-preview:free",
     "nvidia/nemotron-3-ultra-550b-a55b:free",
   ],
   image: [
-    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+    // NVIDIA diretta (vision)
+    "nvidia/nemotron-3.5-super-vl",
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+    // OpenRouter gratuiti (fallback)
     "google/gemma-4-26b-a4b-it:free",
     "dots-studio/dots-3-note-preview:free",
-    "nvidia/nemotron-3.5-super-vl:free",
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
   ],
   audio: [
-    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+    // NVIDIA diretta (omni audio input)
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+    // OpenRouter gratuiti (fallback)
     "google/gemma-4-26b-a4b-it:free",
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
   ],
   video: [
-    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+    // NVIDIA diretta (omni video input)
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+    "nvidia/nemotron-3.5-super-vl",
+    // OpenRouter gratuiti (fallback)
     "google/gemma-4-26b-a4b-it:free",
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
     "nvidia/nemotron-3.5-super-vl:free",
   ],
 };
 
 // Modelli che non sono assistenti generali: esclusi dalla selezione automatica
-// anche se il catalogo li annuncia come multimodali.
 const EXCLUDE_PATTERNS = [
   /lyria/i, // generazione musicale
   /content-safety/i,
   /^thinkingmachines\/inkling/i, // riservati agli "agentic harnesses"
   /whisper/i,
+  /^nvidia\/nv-embed/i,
+  /^nvidia\/nv-rerank/i,
+  /^nvidia\/nv-ingest/i,
 ];
 
 function isUsable(m: AiModel): boolean {
@@ -86,7 +108,7 @@ function toCapabilities(mods: string[] | undefined): AiCapability[] {
   return [...set];
 }
 
-async function fetchCatalog(): Promise<AiModel[]> {
+async function fetchOpenRouterCatalog(): Promise<AiModel[]> {
   if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.models;
 
   const res = await fetch(`${config.openRouterBase}/models`, {
@@ -105,6 +127,7 @@ async function fetchCatalog(): Promise<AiModel[]> {
       free: prompt === 0 && completion === 0,
       capabilities: toCapabilities(m.architecture?.input_modalities),
       pricing: { prompt, completion },
+      provider: "openrouter" as const,
     };
   });
 
@@ -112,26 +135,45 @@ async function fetchCatalog(): Promise<AiModel[]> {
   return models;
 }
 
+async function fetchMergedCatalog(): Promise<AiModel[]> {
+  const [openRouterModels, nvidiaModels] = await Promise.all([
+    fetchOpenRouterCatalog(),
+    getNvidiaModels(),
+  ]);
+
+  // Merge: NVIDIA models take precedence for same id (direct API vs OpenRouter proxy)
+  const merged = new Map<string, AiModel>();
+  for (const m of openRouterModels) {
+    merged.set(m.id, m);
+  }
+  for (const m of nvidiaModels) {
+    // NVIDIA direct models override OpenRouter proxied versions
+    merged.set(m.id, { ...m, provider: "nvidia" });
+  }
+
+  return [...merged.values()];
+}
+
 /**
  * Ordina i modelli per la capacita' richiesta. Ordine di preferenza:
  *   1. modello esplicitamente richiesto (in testa, se presente)
- *   2. gratuito, poi context piu' ampio
+ *   2. gratuito (NVIDIA diretta > OpenRouter gratuito), poi context piu' ampio
  *   3. a pagamento piu' economico
  * Restituisce la lista completa: `chat()` la percorre finche' una chiamata
- * non riesce (fallback), perche' alcuni modelli gratuiti sono riservati a
- * specifici client ("agentic harnesses") o temporaneamente non disponibili.
+ * non riesce (fallback).
  */
 export async function rankModels(
   capability: AiCapability,
   opts: { requested?: string; preferFree?: boolean } = {},
 ): Promise<AiModel[]> {
   const preferFree = opts.preferFree !== false;
-  const all = await fetchCatalog();
+  const all = await fetchMergedCatalog();
   const capable = all.filter((m) => m.capabilities.includes(capability) && isUsable(m));
   const pool = capable.length ? capable : all.filter(isUsable);
 
   const score = (m: AiModel): number => {
-    const freeRank = m.free ? 0 : preferFree ? 2 : 1;
+    const isNvidiaDirect = m.provider === "nvidia" && m.free;
+    const freeRank = m.free ? (isNvidiaDirect ? 0 : 1) : (preferFree ? 2 : 1);
     const ctxRank = -(m.contextLength ?? 0);
     const costRank = m.pricing.prompt + m.pricing.completion;
     return freeRank * 1e9 + ctxRank + costRank;
@@ -164,10 +206,14 @@ export async function catalogFor(capability: AiCapability): Promise<{
   selected: string;
   models: AiModel[];
 }> {
-  const all = await fetchCatalog();
+  const all = await fetchMergedCatalog();
   const models = all
     .filter((m) => m.capabilities.includes(capability) && isUsable(m))
     .sort((a, b) => {
+      // NVIDIA direct free first, then other free, then paid by context
+      const aDirect = a.provider === "nvidia" && a.free;
+      const bDirect = b.provider === "nvidia" && b.free;
+      if (aDirect !== bDirect) return aDirect ? -1 : 1;
       if (a.free !== b.free) return a.free ? -1 : 1;
       return (b.contextLength ?? 0) - (a.contextLength ?? 0);
     });
@@ -232,7 +278,7 @@ export async function chat(params: {
   });
 
   // Limita il fallback: il modello richiesto (se presente) + i primi N gratuiti.
-  const candidates = ranked.slice(0, params.model ? 4 : 5);
+  const candidates = ranked.slice(0, params.model ? 4 : 6);
 
   const parts: ContentPart[] = [{ type: "text", text: params.prompt }];
 
@@ -242,7 +288,6 @@ export async function chat(params: {
         parts.push({ type: "image_url", image_url: { url: params.fileUrl } });
         break;
       case "audio":
-        // OpenRouter accetta URL pubblici o data-URL base64 per l'audio.
         parts.push({ type: "input_audio", input_audio: { data: params.fileUrl, format: "wav" } });
         break;
       case "video":
@@ -260,52 +305,78 @@ export async function chat(params: {
     const started = Date.now();
     let body: any;
     let res: Response;
+    let answer: string;
+    let usage: OpenRouterUsage | null = null;
+    let modelId: string;
+    let latencyMs: number;
+
     try {
-      res = await fetch(`${config.openRouterBase}/chat/completions`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${config.openRouterKey}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer": config.apPublicUrl,
-          "X-Title": "Aethersy Console",
-        },
-        body: JSON.stringify({
+      if (chosen.provider === "nvidia" && config.nvidiaApiKey) {
+        // NVIDIA direct API
+        const result = await nvidiaChat({
+          capability: params.capability,
+          prompt: params.prompt,
           model: chosen.id,
-          messages: [
-            { role: "user", content: params.capability === "text" ? params.prompt : parts },
-          ],
-        }),
-      });
-      body = await res.json();
+          fileUrl: params.fileUrl,
+        });
+        modelId = result.model;
+        answer = result.answer;
+        usage = {
+          prompt_tokens: result.usage.prompt_tokens,
+          completion_tokens: result.usage.completion_tokens,
+          total_tokens: result.usage.total_tokens,
+        };
+        latencyMs = result.latencyMs;
+      } else {
+        // OpenRouter
+        res = await fetch(`${config.openRouterBase}/chat/completions`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${config.openRouterKey}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": config.apPublicUrl,
+            "X-Title": "Aethersy Console",
+          },
+          body: JSON.stringify({
+            model: chosen.id,
+            messages: [
+              { role: "user", content: params.capability === "text" ? params.prompt : parts },
+            ],
+          }),
+        });
+        body = await res.json();
+
+        latencyMs = Date.now() - started;
+
+        if (!res.ok) {
+          const msg = body?.error?.message ?? body?.message ?? `OpenRouter ${res.status}`;
+          attempts.push({ model: chosen.id, error: String(msg) });
+          lastError = String(msg);
+          continue;
+        }
+
+        modelId = body?.model ?? chosen.id;
+        answer = body?.choices?.[0]?.message?.content ?? "";
+        if (!answer) {
+          attempts.push({ model: chosen.id, error: "risposta vuota" });
+          lastError = "risposta vuota";
+          continue;
+        }
+        usage = (body?.usage ?? null) as OpenRouterUsage | null;
+        latencyMs = Date.now() - started;
+      }
     } catch (err) {
       attempts.push({ model: chosen.id, error: (err as Error).message });
       lastError = (err as Error).message;
       continue;
     }
 
-    const latencyMs = Date.now() - started;
-
-    if (!res.ok) {
-      const msg = body?.error?.message ?? body?.message ?? `OpenRouter ${res.status}`;
-      attempts.push({ model: chosen.id, error: String(msg) });
-      lastError = String(msg);
-      continue;
-    }
-
-    const answer: string = body?.choices?.[0]?.message?.content ?? "";
-    if (!answer) {
-      attempts.push({ model: chosen.id, error: "risposta vuota" });
-      lastError = "risposta vuota";
-      continue;
-    }
-
-    const usage = (body?.usage ?? null) as OpenRouterUsage | null;
     const billing = params.meter
-      ? await billChat(params.meter, body?.model ?? chosen.id, usage, latencyMs)
+      ? await billChat(params.meter, modelId, usage, latencyMs, chosen.provider)
       : undefined;
 
     return {
-      model: body?.model ?? chosen.id,
+      model: modelId,
       capability: params.capability,
       answer,
       usage,
@@ -319,15 +390,14 @@ export async function chat(params: {
 }
 
 /**
- * Addebita una chat completata. Il consumo e' token-based: le chiamate
- * multimodali (vision/audio/video input) sono comunque completions a token,
- * quindi vengono prezzate come `text` (token_in/token_out).
+ * Addebita una chat completata.
  */
 async function billChat(
   meter: MeterInfo,
   model: string,
   usage: OpenRouterUsage | null,
   latencyMs: number,
+  provider: "openrouter" | "nvidia",
 ): Promise<ChatBilling> {
   const inputTokens = usage?.prompt_tokens ?? 0;
   const outputTokens = usage?.completion_tokens ?? 0;
@@ -337,7 +407,7 @@ async function billChat(
     reservation: meter.reservation,
     flowRunId: meter.flowRunId ?? null,
     capability: "text",
-    provider: "openrouter",
+    provider,
     model,
     units: { token_in: inputTokens, token_out: outputTokens },
     inputTokens,
