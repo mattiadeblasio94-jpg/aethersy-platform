@@ -4,11 +4,12 @@ import cookie from "@fastify/cookie";
 import fastifyStatic from "@fastify/static";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToType } from "node:url";
 import { config } from "./config.js";
 import { registerRoutes } from "./routes.js";
+import { createEdgeServer } from "./edge/index.js";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
+const here = path.dirname(fileURLToType(import.meta.url));
 // In produzione `dist/index.js` -> public/ sta in ../public (COPY nel Dockerfile).
 const publicDir = path.resolve(here, "..", "public");
 
@@ -49,7 +50,24 @@ try {
   app.log.error({ err }, "migrazione business fallita: business inerte");
 }
 
-await registerRoutes(app);
+// Avvia lo scheduler per lo snapshot automatico dei listini (price_book + fx_usd_eur).
+// Cron: "0 */6 * * *" (ogni 6h, minuto 0) in timezone Europe/Rome.
+try {
+  const { schedulePriceSnapshot } = await import("./metering/price-snapshot.js");
+  await schedulePriceSnapshot();
+  app.log.info("price-snapshot scheduler avviato");
+} catch (err) {
+  app.log.error({ err }, "impossibile avviare price-snapshot scheduler");
+}
+
+// Avvia il modulo Universal Builder Platform
+try {
+  const { builderRoutes } = await import("./builder/routes.js");
+  await builderRoutes(app);
+  app.log.info("universal-builder-platform routes registrati");
+} catch (err) {
+  app.log.error({ err }, "impossibile registrare builder routes");
+}
 
 // Chiusura ordinata dei pool (Postgres/Redis) su SIGTERM/SIGINT.
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
@@ -64,6 +82,16 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
       process.exit(0);
     }
   });
+}
+
+// Integra il server edge per autenticazione, routing e static serving (ADR 0002, fase 1b).
+// Se AETHERSY_EDGE=on, il traffico pubblico passa attraverso l'edge con auth obbligatoria.
+// Se AETHERSY_AUTH=off, l'account di servizio viene iniettato ma l'auth pubblica è disabilitata.
+try {
+  const edgeApp = await createEdgeServer({ app, publicDir, config });
+  app.log.info("server edge integrato");
+} catch (err) {
+  app.log.error({ err }, "errore durante l'integrazione del server edge");
 }
 
 // SPA statica + fallback su index.html per il client router.

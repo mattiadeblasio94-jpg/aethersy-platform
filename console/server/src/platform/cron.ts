@@ -167,7 +167,7 @@ export function isValidTimeZone(timeZone: string): boolean {
   }
 }
 
-interface WallClock {
+export interface WallClock {
   year: number;
   month: number;
   day: number;
@@ -176,7 +176,8 @@ interface WallClock {
   second: number;
 }
 
-function wallClockAt(ts: number, timeZone: string): WallClock {
+/** Restituisce l'ora "da parete" (componenti locali) di un istante `ts` in `timeZone`. */
+export function wallClockAt(ts: number, timeZone: string): WallClock {
   const parts = formatter(timeZone).formatToParts(new Date(ts));
   const get = (type: string): number => Number(parts.find((p) => p.type === type)?.value ?? "0");
   return {
@@ -198,7 +199,7 @@ function tzOffsetMs(ts: number, timeZone: string): number {
 }
 
 /** Converte un orario locale "da parete" in UTC, assorbendo l'ora legale. */
-function zonedTimeToUtc(
+export function zonedTimeToUtc(
   w: { year: number; month: number; day: number; hour: number; minute: number },
   timeZone: string,
 ): number {
