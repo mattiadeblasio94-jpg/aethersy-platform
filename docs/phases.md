@@ -743,3 +743,38 @@ snapshot automatico e l'altro (lo snapshot continua a copiare i provider che non
   (costo provider a carico della piattaforma). Da chiudere leggendo le metriche token della
   prediction Replicate.
 - **Nessuna pagina video** nel frontend platform: la rotta API funziona, la UI no.
+
+### Fase 18 — CI GitHub Actions (05/11/2026)
+
+**Contesto.** Il repo GitHub (`mattiadeblasio94-jpg/aethersy-platform`) era fermo a 8 commit di distanza
+dalla produzione: nessuna verifica automatica su push/PR, nessun controllo che i segreti restino
+fuori dal repo. Il deploy resta manuale (il VPS non ha git: si copia il codice e si lancia
+`scripts/deploy-console.sh`).
+
+**Modifiche.**
+- `.github/workflows/ci.yml` (nuovo): si attiva su push e PR verso `main` e su `workflow_dispatch`.
+  Quattro job, tutti read-only (`permissions: contents: read`), Node 22 come in produzione
+  (`node:22-alpine` nei Dockerfile) e cache npm:
+  1. `console-server`: `npm ci` → `typecheck` → `build` → `npm run test:metering` (44 test, nessun DB);
+  2. `console-web`: `npm ci` → `typecheck` → `build`;
+  3. `platform`: `npm ci` → `typecheck` → `build`;
+  4. `hygiene`: `scripts/secret-scan.sh` + `docker compose --env-file .env.example config --quiet`.
+  `concurrency` annulla i run precedenti sulla stessa ref.
+- `scripts/secret-scan.sh` (nuovo): scandisce i **file tracciati** (non il working tree) cercando i
+  formati delle chiavi in uso (OpenRouter, NVIDIA, Replicate, fal.ai, Stripe live/test e restricted,
+  GitHub, Google, Slack, AWS, chiavi private PEM) e segnala anche file `.env*` tracciati. In caso di
+  hit stampa **etichetta e percorso, mai il valore** del segreto, ed esce con codice 1.
+  I placeholder di `.env.example` (vuoti o `CHANGEME_...`) non corrispondono ai pattern, quindi il file
+  d'esempio viene scandito come tutti gli altri.
+
+**Verifica locale (05/11/2026).**
+- `bash scripts/secret-scan.sh` → `OK - 318 file tracciati`; controllo positivo con una chiave fal.ai
+  finta in `.env.example` → `TROVATO fal-ai .env.example`, exit 1, valore non stampato.
+- `console/server`: typecheck OK, build OK, `test:metering` → **44 test superati, 0 falliti**.
+- `console/web`: typecheck + build OK. `platform`: typecheck + build OK.
+- `docker compose --env-file .env.example config --quiet` → exit 0 (validato sul VPS, che ha Docker).
+- Workflow YAML validato: 4 job, trigger su `main`.
+
+**Stato GitHub.** I commit delle fasi 13-17 non erano mai stati pushati: sono stati portati su
+`main` con questa fase (PR `fase-18-ci-github` -> merge). La history è stata verificata: nessuna
+occorrenza dei pattern delle chiavi in `git log -p --all`.
