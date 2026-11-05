@@ -703,3 +703,43 @@ e provider); NVIDIA e OpenRouter erano già attivi.
    console (il BFF non la usa ancora): il sender `metering.billing_outbox → Stripe` resta da fare.
 3. **z.ai senza credito**: per usare i modelli a pagamento (GLM-5.x) serve una ricarica su z.ai;
    fino ad allora il free tier (GLM Flash) copre il fabbisogno.
+
+### Fase 17 — Video: provider, prezzo e retrieve (05/11/2026)
+
+**Contesto.** Le rotte generative testo/immagine erano verificate; il video no. Il primo test
+end-to-end ha fatto emergere due difetti.
+
+**Difetti trovati e corretti.**
+1. **Default video Replicate rotto**: `stability-ai/stable-video-diffusion` esiste a catalogo ma
+   `POST /v1/models/stability-ai/stable-video-diffusion/predictions` risponde **404**. Verificati
+   live: `minimax/video-01` → 201, `wavespeedai/wan-2.1-t2v-480p` → 201. Il default e' ora
+   `minimax/video-01` (6 s, 720p), con listino ufficiale **$0.50 per output video**
+   (metadati prezzo della pagina `replicate.com/minimax/video-01`).
+2. **Retrieve cablato solo su Venice**: `POST /api/ai/video/retrieve` interrogava sempre
+   `venice.retrieveVideo`, quindi un job accodato sul fallback Replicate non era mai recuperabile
+   (il queue id Replicate veniva cercato su Venice). Ora la route interroga il provider giusto:
+   `provider` esplicito nel body, altrimenti dedotto dal modello (gli id Replicate sono
+   `owner/name`, quelli Venice no).
+
+**Prezzi.** Aggiunta la riga `vid_out / minimax/video-01 / replicate / video = 0.50 USD`
+(= 11.500 crediti con markup 150% e fx 0.92). I prezzi statici (NVIDIA, z.ai, fal.ai,
+Replicate) sono ora applicati al **price book attivo** da un blocco DDL idempotente: a ogni avvio
+il book attivo riceve le righe verificate a mano, quindi nessuna riga puo' andare persa fra uno
+snapshot automatico e l'altro (lo snapshot continua a copiare i provider che non gestisce).
+
+**Verifica live (05/11/2026).**
+- Queue video: 200, `provider=replicate`, `model=minimax/video-01`, 11.500 crediti addebitati,
+  `fallbackFrom=venice` (Venice risponde "Insufficient balance").
+- Retrieve: `processing` → `succeeded` con URL del video dopo ~90 s (Replicate `predict_time` 141 s
+  misurato nella prediction precedente). Nessun nuovo addebito al retrieve.
+- Ledger: prenotazione -34.500 (stima Venice, prudente) e sgravio +23.000 al consuntivo =>
+  addebito effettivo **11.500 crediti**, pari a $0.50 + markup.
+- QA provider **5/5** e QA console **8/8** dopo il deploy.
+
+**Debito tecnico noto.**
+- **TTS non addebitato**: Replicate fattura `minimax/speech-02-turbo` a $0.06 per 1000 token di
+  input, mentre il metering misura la voce in caratteri: senza un rapporto token/carattere
+  verificato la riga di prezzo non e' applicabile, quindi oggi la voce costa 0 crediti al tenant
+  (costo provider a carico della piattaforma). Da chiudere leggendo le metriche token della
+  prediction Replicate.
+- **Nessuna pagina video** nel frontend platform: la rotta API funziona, la UI no.

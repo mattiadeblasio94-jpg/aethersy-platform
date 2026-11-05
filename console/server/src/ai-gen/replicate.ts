@@ -237,8 +237,10 @@ export async function queueVideo(p: {
   aspectRatio?: string;
 }): Promise<VideoQueueResult> {
   const started = Date.now();
-  // Default verificato live (05/11/2026): esiste stability-ai/stable-video-diffusion.
-  const model = p.model ?? "stability-ai/stable-video-diffusion";
+  // Default verificato live (05/11/2026): POST /v1/models/minimax/video-01/
+  // predictions -> 201. 'stability-ai/stable-video-diffusion' esiste a
+  // catalogo ma la creazione della prediction risponde 404.
+  const model = p.model ?? "minimax/video-01";
 
   const data = await createPrediction(model, { prompt: p.prompt });
   const id = data?.id;

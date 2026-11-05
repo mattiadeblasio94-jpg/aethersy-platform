@@ -228,9 +228,24 @@ applicata all'acquisto crediti e non per richiesta.
 Il Console genera sempre a **1024×1024 = 1 megapixel esatto**, quindi l'unità di
 fatturazione (`image`) coincide con il megapixel del listino fal.ai.
 
+**Replicate — generazione video** (prezzo ufficiale dalla pagina modello
+`replicate.com/minimax/video-01`):
+
+| Modello | Prezzo provider (USD) |
+|---|---|
+| `minimax/video-01` (Hailuo, 6 s, 720p) | $0.50 / output video |
+
 **Catena di fallback della generazione** (router in `console/server/src/ai-gen/generate.ts`):
 Venice → Replicate → fal.ai. Ogni livello ha la propria riga nel price book
 (versione 2), così il consumo resta attribuito al provider che ha risposto.
+La generazione video usa Venice → Replicate (fal.ai non offre video).
+
+**Nota TTS (05/11/2026):** il fallback voce usa `minimax/speech-02-turbo` su Replicate,
+listato a **$0.06 per 1000 token di input**. Il metering misura il TTS in
+caratteri (`unit = char`), quindi la riga di prezzo non e' applicabile senza
+inventare un rapporto token/carattere: oggi la voce **non viene addebitata**
+(0 crediti, costo provider a carico della piattaforma) e va chiusa leggendo il
+conteggio token effettivo dalle metriche di Replicate.
 
 **Nota z.ai (05/11/2026):** l'account z.ai non ha credito → i modelli a pagamento
 (`glm-4.5`, `glm-5.x`) rispondono `429 Insufficient balance`. Restano usabili solo

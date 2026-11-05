@@ -799,11 +799,25 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   // Recupero del job video: nessun nuovo addebito (gia' avvenuto al queue).
   app.post("/api/ai/video/retrieve", async (request, reply) => {
     if (!(await requireIdentity(request, reply))) return;
-    const body = (request.body ?? {}) as { queueId?: string; model?: string };
+    const body = (request.body ?? {}) as { queueId?: string; model?: string; provider?: string };
     if (!body.queueId) {
       return reply.code(400).send({ code: "BAD_REQUEST", message: "queueId richiesto" });
     }
+    // Il job puo' essere stato accodato su Venice o sul fallback Replicate:
+    // si interroga il provider giusto, altrimenti il queue id di Replicate
+    // verrebbe cercato su Venice e il risultato non arriverebbe mai.
+    // Gli id modello Replicate sono sempre "owner/name"; quelli Venice no.
+    const provider =
+      body.provider === "replicate" || body.provider === "venice"
+        ? body.provider
+        : (body.model ?? "").includes("/")
+          ? "replicate"
+          : "venice";
     try {
+      if (provider === "replicate") {
+        const { retrieveVideo } = await import("./ai-gen/replicate.js");
+        return await retrieveVideo(body.queueId, body.model ?? "minimax/video-01");
+      }
       const { retrieveVideo } = await import("./ai-gen/venice.js");
       return await retrieveVideo(body.queueId, body.model ?? "veo3.1-fast-text-to-video");
     } catch (err) {

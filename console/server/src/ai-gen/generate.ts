@@ -197,7 +197,7 @@ export async function queueVideoMetered(input: QueueVideoInput) {
     // Fallback su Replicate se Venice non risponde
     const result = await replicateQueueVideo({
       prompt: params.prompt,
-      model: replicateModelId(meter.model) ?? "stability-ai/stable-video-diffusion",
+      model: replicateModelId(meter.model) ?? "minimax/video-01",
       duration: params.duration,
       aspectRatio: params.aspectRatio,
     });

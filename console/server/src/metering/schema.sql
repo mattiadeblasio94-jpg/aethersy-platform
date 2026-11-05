@@ -290,3 +290,60 @@ CROSS JOIN (VALUES
 WHERE pb.version = 2
   AND pb.effective_to IS NULL
 ON CONFLICT (price_book_id, capability, model_pattern, provider, unit) DO NOTHING;
+
+-- ---------------------------------------------------------------------------
+-- Prezzi statici verificati a mano -> applicati al price book ATTIVO.
+--
+-- Lo snapshot automatico (ogni 6h) ricostruisce il book dai listini OpenRouter
+-- e Venice e copia dal book precedente solo i provider che non gestisce
+-- ('zai', 'fal', 'replicate', 'nvidia'). Questo blocco rende quei prezzi
+-- auto-guarenti: a ogni avvio vengono ri-applicati al book attivo, quindi
+-- nessuna riga puo' andare persa fra uno snapshot e l'altro.
+--
+-- Fonti dei prezzi (nessun dato inventato):
+--   - z.ai    : docs.z.ai/guides/overview/pricing (GLM-4.5/4.7-Flash = Free)
+--   - fal.ai  : fal.ai/pricing (per megapixel: flux/schnell $0.003,
+--               flux/dev $0.025; output 1024x1024 = 1 megapixel esatto)
+--   - Replicate: replicate.com/pricing + pagina modello
+--               (flux-schnell $0.003, flux-dev $0.025, flux-1.1-pro $0.04
+--                per immagine; minimax/video-01 $0.50 per output video)
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE
+  active_pb uuid;
+BEGIN
+  SELECT id INTO active_pb
+    FROM metering.price_book
+   WHERE effective_from <= now() AND (effective_to IS NULL OR effective_to > now())
+   ORDER BY version DESC
+   LIMIT 1;
+
+  IF active_pb IS NULL THEN
+    RETURN;
+  END IF;
+
+  INSERT INTO metering.price_book_entry
+    (price_book_id, capability, model_pattern, provider, unit, unit_price, min_credits)
+  SELECT active_pb, v.capability, v.model_pattern, v.provider, v.unit, v.unit_price, v.min_credits
+  FROM (VALUES
+    -- NVIDIA NIM: free tier -> 1 credito minimo (costo provider 0)
+    ('text', 'nvidia/*', 'nvidia', 'token_in',  0.000000, 1),
+    ('text', 'nvidia/*', 'nvidia', 'token_out', 0.000000, 1),
+    -- z.ai - modelli gratuiti GLM Flash -> 1 credito minimo
+    ('text', 'glm-4.5-flash', 'zai', 'token_in',  0.000000, 1),
+    ('text', 'glm-4.5-flash', 'zai', 'token_out', 0.000000, 1),
+    ('text', 'glm-4.7-flash', 'zai', 'token_in',  0.000000, 1),
+    ('text', 'glm-4.7-flash', 'zai', 'token_out', 0.000000, 1),
+    -- fal.ai - generazione immagini (prezzo per megapixel)
+    ('img_out', 'fal-ai/flux/schnell', 'fal', 'image', 0.003000, 0),
+    ('img_out', 'fal-ai/flux/dev',     'fal', 'image', 0.025000, 0),
+    -- Replicate - generazione immagini (prezzi ufficiali)
+    ('img_out', 'black-forest-labs/flux-schnell', 'replicate', 'image', 0.003000, 0),
+    ('img_out', 'black-forest-labs/flux-dev',     'replicate', 'image', 0.025000, 0),
+    ('img_out', 'black-forest-labs/flux-1.1-pro',  'replicate', 'image', 0.040000, 0),
+    -- Replicate - generazione video (minimax/video-01: $0.50 per output video,
+    -- listino ufficiale della pagina modello replicate.com/minimax/video-01)
+    ('vid_out', 'minimax/video-01', 'replicate', 'video', 0.500000, 0)
+  ) AS v(capability, model_pattern, provider, unit, unit_price, min_credits)
+  ON CONFLICT (price_book_id, capability, model_pattern, provider, unit) DO NOTHING;
+END $$;
