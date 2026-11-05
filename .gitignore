@@ -24,6 +24,17 @@ platform/dist/
 
 # Scratch / work-in-progress
 .tmp/
+# Dump di debug e copie di backup lasciati in working tree
+*-original.js
+routes-original.js
+business-routes-original.js
+platform-routes-original.js
+test_*.mjs
+login-body.json
+*.zip
+# Documento di riepilogo deploy: contiene credenziali VPS in chiaro -> mai nel repo
+DEPLOYMENT_SUMMARY.md
+docker-compose-vps.yml
 
 # OS / editor
 .DS_Store

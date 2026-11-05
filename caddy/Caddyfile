@@ -3,7 +3,6 @@
 # Hostname pubblici (tutti parametrizzati via .env):
 #   {$APP_DOMAIN}          -> app Activepieces (UI + API + webhook)
 #   {$MCP_DOMAIN}          -> solo le route MCP / OAuth
-#   {$CONSOLE_DOMAIN}      -> Aethersy Console (frontend proprietario + BFF)
 #   {$PLATFORM_DOMAIN}     -> Aethersy Platform (SPA mock-first, sito dedicato)
 #   {$APEX_DOMAIN}         -> redirect 301 verso APP_DOMAIN
 #   www.{$APEX_DOMAIN}     -> redirect 301 verso APP_DOMAIN
@@ -117,17 +116,6 @@
 }
 
 # -----------------------------------------------------------------------------
-# Console: frontend proprietario Aethersy + BFF (container `console:3000`).
-# -----------------------------------------------------------------------------
-{$CONSOLE_DOMAIN} {
-	encode zstd gzip
-	reverse_proxy console:3000 {
-		header_up X-Real-IP {remote_host}
-		header_up X-Forwarded-Proto {scheme}
-	}
-}
-
-# -----------------------------------------------------------------------------
 # MCP: hostname dedicato.
 # -----------------------------------------------------------------------------
 {$MCP_DOMAIN} {
@@ -135,19 +123,18 @@
 }
 
 # -----------------------------------------------------------------------------
-# Platform: piattaforma Aethersy (SPA) su container `platform:80`.
+# Platform: piattaforma Aethersy (SPA mock-first) su container `platform:80`.
 #
-# La SPA vive sull'hostname PLATFORM_DOMAIN ma il suo backend (BFF Console su
-# console:3000) sta sull'hostname CONSOLE_DOMAIN. Per far funzionare l'app come
-# sito autonomo con una sola origine, inoltriamo /api/* direttamente alla
-# Console: il browser vede un'unica origine (platform.aethersy.online) e il
-# cookie di sessione viaggia con `credentials: include` senza CORS.
+# La SPA e' mock-first: legge dai dati mock in src/lib/api.ts.
+# Le chiamate /api/auth/* vanno al BFF Console (console:3000) per la sessione.
+# Tutto il resto -> SPA statica.
 # -----------------------------------------------------------------------------
 {$PLATFORM_DOMAIN} {
 	encode zstd gzip
 
-	# /api/* -> BFF Console (stesso container che serve CONSOLE_DOMAIN).
-	@api path /api/*
+	# /api* -> BFF Console (auth, session, cookie httpOnly). Matcha tutto
+	# sotto /api/ inclusi sottopercorsi (es. /api/auth/social/google).
+	@api path /api*
 	handle @api {
 		reverse_proxy console:3000 {
 			header_up Host {host}
