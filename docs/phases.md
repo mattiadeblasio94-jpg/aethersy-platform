@@ -544,3 +544,86 @@ La decisione del committente: la Console resta **backoffice interno**; `platform
 
 **Prossimo incremento:** P1.2 — scheduler reale.
 
+
+### Fase 13 — Console buildabile e deployabile (05/11/2026)
+
+**Contesto.** Il commit `0297951` ("Universal Builder Platform implementation complete") lasciava il
+BFF **non compilabile**: l'immagine `aethersy-console` non poteva essere ricostruita dal sorgente, quindi
+il container in esercizio era una build più vecchia (priva del modulo builder e delle correzioni AI).
+
+**Cause trovate e corrette (91 errori TypeScript → 0).**
+1. **Server edge mai esistente** — `src/index.ts` importava `./edge/index.js` (TS2307). Il "prototipo
+   edge/auth" esisteva solo come JS compilato (in `console/server/edge/`, fuori da `src/`), era
+   incompiuto (manca `adapter.verifyOwner`, router `v2` assente) ed è stato **superato** da
+   Caddy + sessione reale del console. Import statico rimosso, con nota in `src/index.ts`.
+2. **Barrel `tasks/index.ts` inesistente** — `builder/index.ts` importava `./tasks/index.js`: ora
+   riesporta `taskStore` / `taskEngine` / `agentRuntime` / `sandboxProvider` dai moduli reali.
+3. **Re-export di `builder/types.ts` verso se stesso** (TS1205/TS2484) e **interfacce duplicate**
+   (`PlannerInput`, `ProjectSpec`, `TaskGraph`, … dichiarate due volte): eliminati.
+4. **`request.tenant` inesistente** — le rotte `/api/builder/*` usavano `request.tenant.id`, mai
+   impostato (TypeError a runtime). Ora: augmentation Fastify (`src/types/fastify.d.ts`), tenant
+   risolto per richiesta nell'hook `onRequest` con `resolveTenant()`, fallback di servizio senza DB.
+   Fastify 5 non ammette `decorateRequest` con reference type → assegnazione diretta sulla request.
+5. **Moduli mai scritti** — `src/telegram.ts` (notifiche Slack del builder), specializzazione
+   `devops.ts`, generatori mancanti in `brand.ts` (`generateUiSkeleton`, `generateTailwindBase`) e
+   `frontend.ts` (`generateAuthContext`, `generateProtectedRoute`, `generateApiClient`,
+   `generateTailwindConfig`, `generateDataHook`, `generateToast`), tipi minimi per `dockerode`
+   (`src/types/dockerode.d.ts`).
+6. **Bug runtime invisibili al typecheck** — `import { Docker } from "dockerode"` falliva a runtime
+   (CommonJS): corretto in `import Docker from "dockerode"`. Rilevato dallo smoke test, non dal compilatore.
+7. **Schema `builder` mai creato** — il DDL non conteneva `CREATE SCHEMA IF NOT EXISTS builder`:
+   la migrazione falliva con `schema "builder" does not exist`.
+8. **Migrazione e motore non avviati** — `migrateBuilder()` non era chiamata da nessuna parte e
+   `taskEngine` (creato con `autoStart: false`) non veniva avviato: i task restavano in coda.
+9. **NVIDIA NIM** — provider riscritto su catalogo live (`GET {NVIDIA_BASE_URL}/models`), timeout,
+   `reasoning_content`, ID verificati; `ai-router.ts` con merge `Promise.allSettled` (un outage di
+   OpenRouter non uccide NVIDIA); fallback Replicate su Venice in `generate.ts` con i tipi corretti.
+10. **Compose** — aggiunte `NVIDIA_API_KEY/NVIDIA_BASE_URL/NVIDIA_TIMEOUT_MS/NVIDIA_MAX_TOKENS`;
+    **rimosso il bind-mount `./console/server/dist:/app/dist:ro`**: ignorava l'immagine appena
+    ricostruita e serviva solo per patchare il JS a mano.
+
+**Deploy (VPS non-git, copia file).**
+- `console/server/src` + `tsconfig.json` → `/home/deploy/aethersy/console/server/` → `docker compose
+  build console` → `up -d --no-deps console`.
+- Chiave NVIDIA inserita **solo nel `.env` del VPS** (mai nel repo): `NVIDIA_API_KEY`,
+  `NVIDIA_BASE_URL`, `NVIDIA_TIMEOUT_MS`, `NVIDIA_MAX_TOKENS`.
+- Log di avvio: `schema metering|pipeline|business|builder applicato` → `universal-builder-platform
+  routes registrati` → container `healthy`.
+
+**Verifica live (05/11/2026).**
+- `npm run typecheck` console: **0 errori**; `npm run build`: OK. `platform`: `tsc -b --noEmit` OK,
+  `vite build` OK.
+- Rotte dal container: `/api/health` 200 · `/api/auth/session` 401 (senza cookie) ·
+  `/api/builder/projects|credits/balance|agents/available` **200** · `/api/ai/catalog` 401 (corretto).
+- QA end-to-end su VPS (`console/server/tools/qa-console-live.mjs`): **8/8** — login, session, saldo,
+  **chat LLM reale 200**, 4 rotte builder.
+- NVIDIA dal container: catalogo **200 (84 modelli)**, `nvidia/nemotron-3.5-bolt-e4b` presente,
+  chat completion **200**.
+
+### Fase 14 — Platform su dati reali + guardia auth (05/11/2026)
+
+**Contesto.** Il frontend `platform/` era ancora in gran parte mock-first e la guardia di autenticazione
+rimbalzava a `/login` durante il bootstrap.
+
+**Modifiche.**
+- `platform/src/components/Protected.tsx`: durante `status = idle | loading` si mostra lo skeleton; il
+  redirect a `/login` avviene **solo** a sessione confermata assente. Prima, un reload su una rotta
+  protetta espungeva l'utente dal vivo.
+- `platform/src/lib/adapters.ts` (nuovo): converte le risposte reali del BFF nei tipi del frontend.
+- `platform/src/lib/{api,platform-api,platform-queries,types}.ts` e le pagine Agents, Dashboard, Login,
+  SettingsIntegrations, SocialMedia, Tasks allineate sulle rotte `/api/*` reali del console.
+
+**Deploy e verifica (05/11/2026).**
+- `platform/` → VPS → `docker compose build platform` → `up -d --no-deps platform` → `healthy`.
+- Browser (Chrome headless + CDP): `https://platform.aethersy.online/login` → login **200** →
+  reload su `/dashboard` **resta su `/dashboard`** (nessun rimbalzo a `/login`), contenuto renderizzato
+  ("Buon pomeriggio, QA", Task attivi, Agenti, Piattaforme), `/api/auth/session` **200**, **0 errori console**.
+- Account di QA creato sul VPS: `qa.builder+<timestamp>@aethersy.online` (registrazione pubblica
+  riattivata in Fase 12), con 50 crediti assegnati a mano per la verifica della chat.
+
+**Azioni utente (P0).**
+1. **Ruotare la chiave NVIDIA NIM**: è stata condivisa in chat ed è ora in `.env` su tre macchine.
+2. **Ruotare la password root del VPS**: condivisa in chat e ripresa in `DEPLOYMENT_SUMMARY.md`
+   (file ora escluso dal repo via `.gitignore` — contiene credenziali in chiaro).
+3. I modelli `meta/llama-3.3-70b-instruct` e `openai/gpt-oss-120b` su NVIDIA NIM sono **EOL 26/08/2026**:
+   il provider seleziona il modello dal catalogo live, quindi la lista si aggiorna da sola.
