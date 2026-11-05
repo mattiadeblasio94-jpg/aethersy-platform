@@ -88,4 +88,8 @@ jobs:
       - name: Secret scan
         run: bash scripts/secret-scan.sh
       - name: Docker compose config
-        run: docker compose --env-file .env.example config --quiet
+        run: |
+          # compose carica sempre anche il .env predefinito della cartella:
+          # nel runner non esiste (e non deve esistere), quindi si crea vuoto.
+          touch .env
+          docker compose --env-file .env.example config --quiet
