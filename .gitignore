@@ -41,3 +41,4 @@ docker-compose-vps.yml
 Thumbs.db
 .idea/
 .vscode/
+go.mod
