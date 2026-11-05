@@ -462,6 +462,36 @@ export interface DateRange {
 }
 
 // =============================================================================
+// Stadio C — Provider AI (generazione + completamento chat).
+// I provider restano nascosti all'utente: il router seleziona automaticamente
+// il migliore disponibile, con Replicate come fallback per Venice.
+// =============================================================================
+
+export type AIProviderId = "openrouter" | "nvidia" | "venice" | "replicate";
+
+export type AICapability = "chat" | "image" | "tts" | "video";
+
+export interface AIProvider {
+  id: AIProviderId;
+  name: string;
+  status: "configured" | "not_configured" | "error";
+  capabilities: AICapability[];
+  /** Chiave API parzialmente mostrata (prefisso mascherato). */
+  keyPrefix?: string;
+  /** URL di fallback attivo (es. Replicate quando Venice down). */
+  fallbackFor?: AIProviderId;
+  lastCheckedAt: string | null;
+}
+
+export interface AIProviderConfig {
+  provider: AIProviderId;
+  apiKey: string;
+  baseUrl?: string;
+  model?: string;
+  enabled: boolean;
+}
+
+// =============================================================================
 // Stadio C — Impostazioni (profilo, fatturazione, integrazioni, notifiche) e
 // Aiuto. Come gli stadi precedenti: tipi di contratto alimentati dal mock layer,
 // senza alcun dato sensibile (nessuna carta reale, nessun token reale).

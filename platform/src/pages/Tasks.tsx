@@ -24,7 +24,8 @@ import { Tabs } from "@/components/ui/Tabs";
 import { useToast } from "@/components/ui/Toast";
 import { StatusIndicator } from "@/components/domain/StatusIndicator";
 import { EmptyState, KpiCard, PageHeader } from "@/components/common/PageElements";
-import { useAgents, usePlatforms, useTasks } from "@/lib/queries";
+import { usePlatforms, useTasks, useRoster } from "@/lib/platform-queries";
+import { adaptPlatforms, adaptTasks, adaptRoster } from "@/lib/adapters";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
 import {
   cn,
@@ -83,10 +84,13 @@ export default function Tasks() {
   const [priorityFilter, setPriorityFilter] = useState("all");
 
   const tasks = useTasks();
-  const agents = useAgents();
-  const platforms = usePlatforms();
+  const rosterReal = useRoster();
+  const platformsReal = usePlatforms();
 
-  const allTasks = tasks.data ?? [];
+  const platforms = adaptPlatforms(platformsReal.data ?? []);
+  const agents = adaptRoster(rosterReal.data ?? []);
+
+  const allTasks = adaptTasks(tasks.data ?? []);
 
   const filtered = useMemo(
     () =>
@@ -166,7 +170,7 @@ export default function Tasks() {
             className="h-11 w-full rounded-lg border border-secondary/20 bg-primary/60 px-3 text-sm text-text-primary focus:border-secondary focus:outline-none focus:ring-1 focus:ring-secondary"
           >
             <option value="all">Tutti gli agenti</option>
-            {(agents.data ?? []).map((agent) => (
+            {agents.map((agent) => (
               <option key={agent.id} value={agent.id}>
                 {agent.name}
               </option>
@@ -180,7 +184,7 @@ export default function Tasks() {
             className="h-11 w-full rounded-lg border border-secondary/20 bg-primary/60 px-3 text-sm text-text-primary focus:border-secondary focus:outline-none focus:ring-1 focus:ring-secondary"
           >
             <option value="all">Tutte le piattaforme</option>
-            {(platforms.data ?? []).map((platform) => (
+            {platforms.map((platform) => (
               <option key={platform.id} value={platform.id}>
                 {platform.name}
               </option>

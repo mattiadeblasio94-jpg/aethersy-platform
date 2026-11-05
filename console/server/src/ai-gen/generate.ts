@@ -2,21 +2,25 @@ import { recordUsage, type TenantContext } from "../metering/repo.js";
 import type { Capability, Unit } from "../metering/price.js";
 import { selectGenModel, type GenCapability } from "./select.js";
 import {
-  generateImage,
-  queueVideo,
-  synthesizeSpeech,
+  generateImage as veniceGenerateImage,
+  queueVideo as veniceQueueVideo,
+  synthesizeSpeech as veniceSynthesizeSpeech,
   type ImageGenParams,
   type TtsParams,
   type VideoQueueParams,
 } from "./venice.js";
+import {
+  generateImage as replicateGenerateImage,
+  queueVideo as replicateQueueVideo,
+  synthesizeSpeech as replicateSynthesizeSpeech,
+} from "./replicate.js";
+import { falGenerateImage } from "./fal.js";
 
 // =============================================================================
 // Dispatch della GENERAZIONE (img_out / tts / vid_out) verso Venice, con
-// metering del consumo. L'AI Router di OpenRouter copre solo testo e
-// comprensione; qui vive l'altra meta' del catalogo multimodale.
-//
-// Ogni funzione ritorna il deliverable + il blocco `billing` (crediti
-// addebitati), cosi' la Console puo' mostrare il saldo residuo.
+// fallback automatico su Replicate quando Venice non risponde e, per le
+// immagini, su fal.ai come terzo livello.
+// Metering del consumo incluso.
 // =============================================================================
 
 export interface GenMeter {
@@ -45,6 +49,16 @@ const UNIT_BY_CAPABILITY: Record<GenCapability, Unit> = {
 };
 
 /**
+ * Gli ID modello del catalogo Venice (es. "venice-sd35", "tts-kokoro") non
+ * esistono su Replicate: passarli al fallback produce un 404 inutile. Si
+ * inoltra al provider esterno solo un ID in forma "owner/name" (Replicate).
+ */
+function replicateModelId(requested: string | undefined): string | undefined {
+  if (!requested) return undefined;
+  return /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(requested) ? requested : undefined;
+}
+
+/**
  * Addebita un consumo generativo. La stima di prenotazione viene fornita dal
  * guard; qui si registra il consuntivo reale.
  */
@@ -54,6 +68,7 @@ async function billGen(
   model: string,
   billableUnits: number,
   latencyMs: number,
+  provider: "venice" | "replicate" | "fal",
 ): Promise<GenBilling> {
   const unit = UNIT_BY_CAPABILITY[capability];
   const res = await recordUsage({
@@ -62,7 +77,7 @@ async function billGen(
     reservation: meter.reservation,
     flowRunId: meter.flowRunId ?? null,
     capability: capability as Capability,
-    provider: "venice",
+    provider,
     model,
     units: { [unit]: billableUnits } as Partial<Record<Unit, number>>,
     latencyMs,
@@ -86,9 +101,48 @@ export interface GenerateImageInput extends Omit<ImageGenParams, "model"> {
 export async function generateImageMetered(input: GenerateImageInput) {
   const { meter, ...params } = input;
   const chosen = await selectGenModel("img_out", { requested: meter.model });
-  const result = await generateImage({ ...params, model: chosen.id });
-  const billing = await billGen(meter, "img_out", result.model, result.billableUnits, result.latencyMs);
-  return { ...result, billing };
+
+  try {
+    const result = await veniceGenerateImage({ ...params, model: chosen.id });
+    const billing = await billGen(meter, "img_out", result.model, result.billableUnits, result.latencyMs, "venice");
+    return { ...result, billing };
+  } catch (veniceErr) {
+    // Fallback su Replicate se Venice non risponde
+    try {
+      const result = await replicateGenerateImage({
+        prompt: params.prompt,
+        model: replicateModelId(meter.model),
+        aspectRatio: params.aspectRatio,
+        format: params.format,
+      });
+      const billing = await billGen(
+        meter,
+        "img_out",
+        result.model,
+        result.billableUnits,
+        result.latencyMs,
+        "replicate",
+      );
+      return { ...result, billing, fallbackFrom: "venice" };
+    } catch (replicateErr) {
+      // Terzo livello: fal.ai (immagini, endpoint sincroni).
+      const result = await falGenerateImage({
+        prompt: params.prompt,
+        model: "fal-ai/flux/schnell",
+        negativePrompt: params.negativePrompt,
+        aspectRatio: params.aspectRatio,
+      });
+      const billing = await billGen(
+        meter,
+        "img_out",
+        result.model,
+        result.billableUnits,
+        result.latencyMs,
+        "fal",
+      );
+      return { ...result, billing, fallbackFrom: "replicate" };
+    }
+  }
 }
 
 export interface SynthesizeInput extends Omit<TtsParams, "model"> {
@@ -98,9 +152,29 @@ export interface SynthesizeInput extends Omit<TtsParams, "model"> {
 export async function synthesizeSpeechMetered(input: SynthesizeInput) {
   const { meter, ...params } = input;
   const chosen = await selectGenModel("tts", { requested: meter.model });
-  const result = await synthesizeSpeech({ ...params, model: chosen.id });
-  const billing = await billGen(meter, "tts", result.model, result.billableUnits, result.latencyMs);
-  return { ...result, billing };
+
+  try {
+    const result = await veniceSynthesizeSpeech({ ...params, model: chosen.id });
+    const billing = await billGen(meter, "tts", result.model, result.billableUnits, result.latencyMs, "venice");
+    return { ...result, billing };
+  } catch (veniceErr) {
+    // Fallback su Replicate se Venice non risponde
+    const result = await replicateSynthesizeSpeech({
+      input: params.input,
+      model: replicateModelId(meter.model),
+      voice: params.voice,
+      responseFormat: params.responseFormat,
+    });
+    const billing = await billGen(
+      meter,
+      "tts",
+      result.model,
+      result.billableUnits,
+      result.latencyMs,
+      "replicate",
+    );
+    return { ...result, billing, fallbackFrom: "venice" };
+  }
 }
 
 export interface QueueVideoInput extends Omit<VideoQueueParams, "model"> {
@@ -114,7 +188,20 @@ export interface QueueVideoInput extends Omit<VideoQueueParams, "model"> {
 export async function queueVideoMetered(input: QueueVideoInput) {
   const { meter, ...params } = input;
   const chosen = await selectGenModel("vid_out", { requested: meter.model });
-  const result = await queueVideo({ ...params, model: chosen.id });
-  const billing = await billGen(meter, "vid_out", result.model, 1, 0);
-  return { ...result, billing };
+
+  try {
+    const result = await veniceQueueVideo({ ...params, model: chosen.id });
+    const billing = await billGen(meter, "vid_out", result.model, 1, 0, "venice");
+    return { ...result, billing };
+  } catch (veniceErr) {
+    // Fallback su Replicate se Venice non risponde
+    const result = await replicateQueueVideo({
+      prompt: params.prompt,
+      model: replicateModelId(meter.model) ?? "minimax/video-01",
+      duration: params.duration,
+      aspectRatio: params.aspectRatio,
+    });
+    const billing = await billGen(meter, "vid_out", result.model, 1, 0, "replicate");
+    return { ...result, billing, fallbackFrom: "venice" };
+  }
 }

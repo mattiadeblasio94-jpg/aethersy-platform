@@ -11,19 +11,20 @@ import { PlatformGrid } from "@/components/domain/PlatformGrid";
 import { ConnectionModal } from "@/components/domain/ConnectionModal";
 import { StatusIndicator } from "@/components/domain/StatusIndicator";
 import {
-  useActivateAgent,
-  useAgents,
-  useConnectPlatform,
-  useDashboardStats,
-  useDisconnectPlatform,
-  usePauseAgent,
+  useOverview,
+  useRoster,
   usePlatforms,
   useTasks,
-} from "@/lib/queries";
+  useActivateAgent as useActivateAgentReal,
+  usePauseAgent as usePauseAgentReal,
+  useConnectPlatform as useConnectPlatformReal,
+  useDisconnectPlatform as useDisconnectPlatformReal,
+} from "@/lib/platform-queries";
+import { adaptPlatforms, adaptTasks, adaptRoster, adaptDashboardStats } from "@/lib/adapters";
 import { useAuthStore } from "@/store/auth";
 import { useUiStore } from "@/store/ui";
 import { useToast } from "@/components/ui/Toast";
-import type { Platform, PlatformId } from "@/lib/types";
+import type { Platform, PlatformId, Task } from "@/lib/types";
 import {
   cn,
   formatDateTime,
@@ -54,15 +55,34 @@ export default function Dashboard() {
   const customWorkspaces = useUiStore((state) => state.customWorkspaces);
   const { toast } = useToast();
 
-  const stats = useDashboardStats();
-  const agents = useAgents();
-  const platforms = usePlatforms();
-  const tasks = useTasks();
+  const overview = useOverview();
+  const rosterReal = useRoster();
+  const platformsReal = usePlatforms();
+  const tasksReal = useTasks();
 
-  const activateAgent = useActivateAgent();
-  const pauseAgent = usePauseAgent();
-  const connectPlatform = useConnectPlatform();
-  const disconnectPlatform = useDisconnectPlatform();
+  const agents = {
+    data: adaptRoster(rosterReal.data ?? []),
+    isLoading: rosterReal.isLoading,
+    isError: rosterReal.isError,
+  };
+  const stats = overview.isLoading ? [] : adaptDashboardStats(overview.data ?? undefined);
+
+  const platforms = {
+    data: adaptPlatforms(platformsReal.data ?? []) as Platform[],
+    isLoading: platformsReal.isLoading,
+    isError: platformsReal.isError,
+  } as { data: Platform[]; isLoading: boolean; isError: boolean };
+
+  const tasks = {
+    data: adaptTasks(tasksReal.data ?? []) as Task[],
+    isLoading: tasksReal.isLoading,
+    isError: tasksReal.isError,
+  } as { data: Task[]; isLoading: boolean; isError: boolean };
+
+  const activateAgent = useActivateAgentReal();
+  const pauseAgent = usePauseAgentReal();
+  const connectPlatform = useConnectPlatformReal();
+  const disconnectPlatform = useDisconnectPlatformReal();
 
   const workspaceName = useMemo(() => {
     const custom = customWorkspaces.find((item) => item.id === activeWorkspaceId);
@@ -129,7 +149,7 @@ export default function Dashboard() {
       {tab === "overview" && (
         <div className="flex flex-col gap-6">
           <section aria-label="Indicatori chiave">
-            {stats.isLoading ? (
+            {overview.isLoading ? (
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 {Array.from({ length: 4 }).map((_, index) => (
                   <Card key={index} className="flex flex-col gap-3">
@@ -139,13 +159,9 @@ export default function Dashboard() {
                   </Card>
                 ))}
               </div>
-            ) : stats.isError ? (
-              <Card>
-                <p className="text-sm text-error">Impossibile caricare le statistiche.</p>
-              </Card>
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                {(stats.data ?? []).map((stat) => (
+                {stats.map((stat) => (
                   <StatCard key={stat.id} stat={stat} />
                 ))}
               </div>
@@ -253,7 +269,9 @@ export default function Dashboard() {
           <PlatformGrid
             platforms={platforms.data ?? []}
             loading={platforms.isLoading}
-            connectingId={connectPlatform.isPending ? (connectPlatform.variables ?? null) : null}
+            connectingId={(connectPlatform.isPending
+              ? (connectPlatform.variables as PlatformId | null)
+              : null) ?? null}
             onConnect={(id) => {
               const platform = (platforms.data ?? []).find((item) => item.id === id) ?? null;
               setConnectionTarget(platform);

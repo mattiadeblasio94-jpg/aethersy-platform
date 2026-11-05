@@ -336,4 +336,85 @@ export const platformApi = {
   getAccount: () => http.get<AccountSummary>("/api/platform/account"),
   getFaq: (category?: string) =>
     http.get<FaqResponse>("/api/platform/faq", category ? { category } : undefined),
+
+  // --- Piattaforme / connessioni social -------------------------------------
+  getPlatforms: () => http.get<PlatformConnection[]>("/api/platform/platforms"),
+  connectPlatform: (id: string) =>
+    http.post<PlatformConnection>(`/api/platform/platforms/${encodeURIComponent(id)}/connect`, {}),
+  disconnectPlatform: (id: string) =>
+    http.delete<{ ok: boolean }>(`/api/platform/platforms/${encodeURIComponent(id)}`),
+
+  // --- Post social ----------------------------------------------------------
+  getSocialPosts: () => http.get<SocialPost[]>("/api/platform/social/posts"),
+  getSocialScheduledPosts: () =>
+    http.get<SocialScheduledPost[]>("/api/platform/social/scheduled"),
+  getSocialSummary: () => http.get<SocialSummaryResponse>("/api/platform/social/summary"),
+
+  // --- Task -----------------------------------------------------------------
+  getTasks: () => http.get<PlatformTask[]>("/api/platform/tasks"),
+
+  // --- Agenti attiva/pausa --------------------------------------------------
+  activateAgent: (id: string) =>
+    http.post<{ ok: boolean }>(`/api/platform/agents/${encodeURIComponent(id)}/activate`, {}),
+  pauseAgent: (id: string) =>
+    http.post<{ ok: boolean }>(`/api/platform/agents/${encodeURIComponent(id)}/pause`, {}),
+
 };
+
+// --- Tipi risposte BFF (Stadio A) ------------------------------------------
+
+export interface PlatformConnection {
+  id: string;
+  provider: string;
+  kind: string;
+  label: string;
+  status: string;
+  connected: boolean;
+}
+
+export interface SocialPost {
+  id: string;
+  kind: string;
+  name: string;
+  status: string;
+  storageKey: string;
+  mime: string | null;
+  createdAt: string;
+  meta: Record<string, unknown>;
+}
+
+export interface SocialScheduledPost {
+  id: string;
+  title: string;
+  kind: string;
+  stage: string | null;
+  cron: string | null;
+  runAt: string | null;
+  timezone: string;
+  status: string;
+  nextRunAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SocialSummaryResponse {
+  totalPosts: number;
+  postsByStatus: Record<string, number>;
+  totalScheduled: number;
+  scheduledByStatus: Record<string, number>;
+  lastPostAt: string | null;
+}
+
+export interface PlatformTask {
+  id: string;
+  runId: string;
+  runTitle: string;
+  runStage: string;
+  runStatus: string;
+  seq: number;
+  droid: string;
+  title: string;
+  status: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}

@@ -1,13 +1,19 @@
 // builder/routes.ts — API Routes for Universal Builder Platform
 
-import { FastifyInstance } from "fastify";
+import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import {
   taskStore,
   taskEngine,
   agentRuntime,
   sandboxProvider,
 } from "../builder/index.js";
-import type { Task, TaskStatus, Project, ArtifactKind } from "../builder/types.js";
+import type {
+  Task,
+  TaskStatus,
+  Project,
+  ArtifactKind,
+  ProjectType,
+} from "../builder/types.js";
 import {
   notifyTaskCreated,
   notifyTaskStarted,
@@ -18,8 +24,48 @@ import {
   notifyDailySummary,
 } from "../telegram.js";
 import { db } from "../metering/db.js";
+import type { TenantContext } from "../metering/repo.js";
+
+/** Generico per le rotte con `:id` / `:taskId` / `:projectId` nel path. */
+type IdParams = { id: string };
+type TaskIdParams = { taskId: string };
+type ProjectIdParams = { projectId: string };
 
 export async function builderRoutes(app: FastifyInstance) {
+  // ---------------------------------------------------------------------------
+  // Identita' tenant: risolta una volta per richiesta.
+  //
+  // Le rotte del builder operano sempre dentro un tenant: senza questo hook
+  // `request.tenant` era undefined e le query fallivano con TypeError a
+  // runtime (il tipo era dichiarato solo in un file mai esistente).
+  // Con il metering disattivato `resolveTenant` restituisce undefined: in quel
+  // caso si usa il tenant di fallback (service account), cosi' le rotte restano
+  // utilizzabili in sviluppo senza database.
+  // ---------------------------------------------------------------------------
+  // Fastify 5 non ammette `decorateRequest` con valori di reference type
+  // ("The decorator 'tenant' of type 'object' is a reference type"): il tenant
+  // viene quindi impostato direttamente sull'istanza della richiesta nell'hook.
+  app.addHook("onRequest", async (request: FastifyRequest, reply: FastifyReply) => {
+    const { resolveTenant } = await import("../metering/guard.js");
+    const tenant = await resolveTenant(request);
+    if (tenant) {
+      request.tenant = tenant;
+      return;
+    }
+    const serviceEmail = process.env.AETHERSY_SERVICE_USER || "service@local";
+    request.tenant = {
+      tenantId: "00000000-0000-0000-0000-000000000001",
+      tenantName: serviceEmail,
+      plan: "internal",
+      markupBps: 0,
+      creditUnit: 1,
+      hardStopOnEmpty: false,
+      apiKeyId: null,
+      sourceTag: "builder",
+      email: serviceEmail,
+    };
+  });
+
   // ============ PROJECTS ============
 
   // Create new project + initial task
@@ -37,7 +83,7 @@ export async function builderRoutes(app: FastifyInstance) {
 
     // Create project
     const project = await taskStore.createProject({
-      tenant_id: request.tenant.id, // Set by middleware
+      tenant_id: request.tenant.tenantId, // Set by middleware
       name,
       description,
       type,
@@ -53,17 +99,19 @@ export async function builderRoutes(app: FastifyInstance) {
     // Create initial task: brand identity
     const task = await taskEngine.createTask({
       project_id: project.id,
-      tenant_id: request.tenant.id,
+      tenant_id: request.tenant.tenantId,
       type: "brand",
       title: "Brand Identity & Design System",
       description: "Crea logo, palette colori, tipografia e system di design",
       status: "pending",
       spec: {
-        idea: spec?.idea ?? name,
+        idea: String(spec?.idea ?? name),
         project_type: type,
         constraints: spec?.constraints,
       },
       estimated_credits: 20,
+      cost_credits: 0,
+      priority: 0,
     });
 
     await notifyTaskCreated({
@@ -79,12 +127,12 @@ export async function builderRoutes(app: FastifyInstance) {
 
   // Get all projects for tenant
   app.get("/api/builder/projects", async (request, reply) => {
-    const projects = await taskStore.getProjectsByTenant(request.tenant.id);
+    const projects = await taskStore.getProjectsByTenant(request.tenant.tenantId);
     return { projects };
   });
 
   // Get single project with tasks
-  app.get("/api/builder/projects/:id", async (request, reply) => {
+  app.get<{ Params: IdParams }>("/api/builder/projects/:id", async (request, reply) => {
     const project = await taskStore.getProject(request.params.id);
     if (!project) return reply.code(404).send({ error: "Progetto non trovato" });
 
@@ -93,7 +141,7 @@ export async function builderRoutes(app: FastifyInstance) {
   });
 
   // Update project
-  app.patch("/api/builder/projects/:id", async (request, reply) => {
+  app.patch<{ Params: IdParams }>("/api/builder/projects/:id", async (request, reply) => {
     const project = await taskStore.updateProject(request.params.id, request.body as Partial<Project>);
     if (!project) return reply.code(404).send({ error: "Progetto non trovato" });
     return { project };
@@ -103,12 +151,12 @@ export async function builderRoutes(app: FastifyInstance) {
 
   // Get all tasks for tenant
   app.get("/api/builder/tasks", async (request, reply) => {
-    const tasks = await taskStore.getTasksByTenant(request.tenant.id);
+    const tasks = await taskStore.getTasksByTenant(request.tenant.tenantId);
     return { tasks };
   });
 
   // Get single task with details
-  app.get("/api/builder/tasks/:id", async (request, reply) => {
+  app.get<{ Params: IdParams }>("/api/builder/tasks/:id", async (request, reply) => {
     const task = await taskStore.getTask(request.params.id);
     if (!task) return reply.code(404).send({ error: "Task non trovato" });
 
@@ -127,28 +175,36 @@ export async function builderRoutes(app: FastifyInstance) {
   });
 
   // Start task execution
-  app.post("/api/builder/tasks/:id/start", async (request, reply) => {
-    const task = await taskEngine["startTask"](request.params.id);
-    // Note: the engine's internal start is driven by the tick loop
-    return { message: "Task queued for execution" };
+  app.post<{ Params: IdParams }>("/api/builder/tasks/:id/start", async (request, reply) => {
+    const task = await taskStore.getTask(request.params.id);
+    if (!task) return reply.code(404).send({ error: "Task non trovato" });
+    if (task.status !== "pending") {
+      return reply.code(409).send({ error: `Task non avviabile (stato: ${task.status})` });
+    }
+
+    // Il motore preleva i task in stato "pending" dal proprio tick loop:
+    // basta accertarsi che il loop sia attivo, senza duplicare la logica.
+    taskEngine.start();
+
+    return { message: "Task queued for execution", task };
   });
 
   // Cancel task
-  app.post("/api/builder/tasks/:id/cancel", async (request, reply) => {
+  app.post<{ Params: IdParams }>("/api/builder/tasks/:id/cancel", async (request, reply) => {
     const cancelled = await taskEngine.cancelTask(request.params.id);
     if (!cancelled) return reply.code(404).send({ error: "Task non trovato o in esecuzione" });
     return { cancelled };
   });
 
   // Pause task
-  app.post("/api/builder/tasks/:id/pause", async (request, reply) => {
+  app.post<{ Params: IdParams }>("/api/builder/tasks/:id/pause", async (request, reply) => {
     const paused = await taskEngine.pauseTask(request.params.id);
     if (!paused) return reply.code(404).send({ error: "Task non trovato" });
     return { paused };
   });
 
   // Resume task
-  app.post("/api/builder/tasks/:id/resume", async (request, reply) => {
+  app.post<{ Params: IdParams }>("/api/builder/tasks/:id/resume", async (request, reply) => {
     const resumed = await taskEngine.resumeTask(request.params.id);
     if (!resumed) return reply.code(404).send({ error: "Task non trovato o non in pausa" });
     return { resumed };
@@ -195,13 +251,13 @@ export async function builderRoutes(app: FastifyInstance) {
   });
 
   // Get artifacts by task
-  app.get("/api/builder/artifacts/task/:taskId", async (request, reply) => {
+  app.get<{ Params: TaskIdParams }>("/api/builder/artifacts/task/:taskId", async (request, reply) => {
     const artifacts = await taskStore.getArtifactsByTask(request.params.taskId);
     return { artifacts };
   });
 
   // Get artifacts by project
-  app.get("/api/builder/artifacts/project/:projectId", async (request, reply) => {
+  app.get<{ Params: ProjectIdParams }>("/api/builder/artifacts/project/:projectId", async (request, reply) => {
     const artifacts = await taskStore.getArtifactsByProject(request.params.projectId);
     return { artifacts };
   });
@@ -210,7 +266,7 @@ export async function builderRoutes(app: FastifyInstance) {
 
   // Get balance
   app.get("/api/builder/credits/balance", async (request, reply) => {
-    const balance = await taskStore.getBalance(request.tenant.id);
+    const balance = await taskStore.getBalance(request.tenant.tenantId);
     return { balance };
   });
 
@@ -237,7 +293,7 @@ export async function builderRoutes(app: FastifyInstance) {
     // Create deploy task
     const task = await taskEngine.createTask({
       project_id: projectId,
-      tenant_id: request.tenant.id,
+      tenant_id: request.tenant.tenantId,
       type: "deploy",
       title: `Deploy su ${targets?.join(', ') ?? 'tutti gli obiettivi'}`,
       status: "pending",
@@ -246,6 +302,8 @@ export async function builderRoutes(app: FastifyInstance) {
         targets: deployTargets,
       },
       estimated_credits: 10,
+      cost_credits: 0,
+      priority: 0,
     });
 
     await notifyProjectDeployed({
@@ -262,13 +320,13 @@ export async function builderRoutes(app: FastifyInstance) {
   // Get daily summary for tenant
   app.get("/api/builder/summary/daily", async (request, reply) => {
     // In production, this would aggregate from the last 24h
-    const tasks = await taskStore.getTenantTasks(request.tenant.id);
+    const tasks = await taskStore.getTasksByTenant(request.tenant.tenantId);
     const completed = tasks.filter((t: any) => t.status === "completed").length;
     const failed = tasks.filter((t: any) => t.status === "failed").length;
     const totalCredits = tasks.reduce((sum: number, t: any) => sum + (t.cost_credits ?? 0), 0);
 
     // Get balance
-    const balance = await taskStore.getBalance(request.tenant.id);
+    const balance = await taskStore.getBalance(request.tenant.tenantId);
 
     return {
       date: new Date().toISOString().split('T')[0],

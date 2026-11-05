@@ -32,8 +32,14 @@ import {
   useRevokeApiKey,
   useWebhooks,
 } from "@/lib/queries";
-import { webhookEventOptions } from "@/mocks";
-import type { ApiKey, Platform, PlatformId, Webhook, WebhookStatus } from "@/lib/types";
+import { webhookEventOptions } from "@/mocks/stageC";
+import type {
+  ApiKey,
+  Platform,
+  PlatformId,
+  Webhook,
+  WebhookStatus,
+} from "@/lib/types";
 import { formatDate, formatRelative, platformLabel } from "@/lib/utils";
 
 const WEBHOOK_STATUS: Record<WebhookStatus, { label: string; variant: "success" | "warning" | "error" }> = {
@@ -470,6 +476,7 @@ export default function SettingsIntegrations() {
       >
         <p className="break-all font-mono text-xs text-text-secondary">{removeWebhookTarget?.url}</p>
       </Modal>
+
     </PageTransition>
   );
 }

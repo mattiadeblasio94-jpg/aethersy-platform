@@ -8,8 +8,8 @@ import {
   notifyTaskStarted,
   notifyTaskCompleted,
   notifyTaskFailed,
-} from "../telegram.js";
-import type { Task, TaskStatus, TaskStep, AgentType, Project } from "./types.js";
+} from "../../telegram.js";
+import type { Task, TaskStatus, TaskStep, AgentType, Project, Artifact } from "./types.js";
 
 export interface EngineConfig {
   autoStart?: boolean;

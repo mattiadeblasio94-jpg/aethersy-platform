@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS pipeline.asset (
   approved_at timestamptz,
   created_at  timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT asset_kind CHECK (
-    kind IN ('document', 'image', 'video', 'audio', 'code', 'link', 'dataset', 'archive')
+    kind IN ('document', 'image', 'video', 'audio', 'code', 'link', 'dataset', 'archive', 'social')
   ),
   CONSTRAINT asset_status CHECK (
     status IN ('draft', 'in_review', 'approved', 'rejected', 'delivered')

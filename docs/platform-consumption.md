@@ -201,6 +201,58 @@ applicata all'acquisto crediti e non per richiesta.
 | `stt` | $0.00003148 – $0.000167 / secondo |
 | `embedding` | $0.0125 – $0.25 / 1M token |
 
+**Provider free (snapshot 05/11/2026)** — costo provider 0, si applica il minimo di
+1 credito per richiesta (copre l'infrastruttura):
+
+| Provider | Modelli | Prezzo provider | Fonte |
+|---|---|---|---|
+| NVIDIA NIM | `nvidia/*` (Nemotron 3.5 Bolt/Lightning, Super, Ultra, Omni/VL) | Free | catalogo live `integrate.api.nvidia.com/v1/models` |
+| z.ai (Zhipu) | `glm-4.5-flash`, `glm-4.7-flash` | Free | listino z.ai (GLM-4.7-Flash / GLM-4.5-Flash = Free) |
+| OpenRouter | modelli `*:free` | Free | `GET openrouter.ai/api/v1/models` (pricing 0) |
+
+**Replicate — generazione immagini** (prezzi ufficiali `replicate.com/pricing`):
+
+| Modello | Prezzo provider (USD) |
+|---|---|
+| `black-forest-labs/flux-schnell` | $0.003 / immagine ($3.00 / 1000) |
+| `black-forest-labs/flux-dev` | $0.025 / immagine |
+| `black-forest-labs/flux-1.1-pro` | $0.04 / immagine |
+
+**fal.ai — generazione immagini** (prezzi ufficiali `fal.ai/pricing`, per megapixel):
+
+| Modello | Prezzo provider (USD) |
+|---|---|
+| `fal-ai/flux/schnell` | $0.003 / megapixel |
+| `fal-ai/flux/dev` | $0.025 / megapixel |
+
+Il Console genera sempre a **1024×1024 = 1 megapixel esatto**, quindi l'unità di
+fatturazione (`image`) coincide con il megapixel del listino fal.ai.
+
+**Replicate — generazione video** (prezzo ufficiale dalla pagina modello
+`replicate.com/minimax/video-01`):
+
+| Modello | Prezzo provider (USD) |
+|---|---|
+| `minimax/video-01` (Hailuo, 6 s, 720p) | $0.50 / output video |
+
+**Catena di fallback della generazione** (router in `console/server/src/ai-gen/generate.ts`):
+Venice → Replicate → fal.ai. Ogni livello ha la propria riga nel price book
+(versione 2), così il consumo resta attribuito al provider che ha risposto.
+La generazione video usa Venice → Replicate (fal.ai non offre video).
+
+**Nota TTS (05/11/2026):** il fallback voce usa `minimax/speech-02-turbo` su Replicate,
+listato a **$0.06 per 1000 token di input**. Il metering misura il TTS in
+caratteri (`unit = char`), quindi la riga di prezzo non e' applicabile senza
+inventare un rapporto token/carattere: oggi la voce **non viene addebitata**
+(0 crediti, costo provider a carico della piattaforma) e va chiusa leggendo il
+conteggio token effettivo dalle metriche di Replicate.
+
+**Nota z.ai (05/11/2026):** l'account z.ai non ha credito → i modelli a pagamento
+(`glm-4.5`, `glm-5.x`) rispondono `429 Insufficient balance`. Restano usabili solo
+i modelli free `*Flash`. Serve `thinking: {type: "disabled"}` nelle chiamate:
+senza, i modelli Flash scaricano il budget di token in `reasoning_content` e
+lasciano `content` vuoto.
+
 **Riferimenti competitor (per posizionare il prezzo di vendita):**
 
 | Competitor | Modello | Prezzo di listino noto |

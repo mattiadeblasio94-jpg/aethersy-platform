@@ -544,3 +544,237 @@ La decisione del committente: la Console resta **backoffice interno**; `platform
 
 **Prossimo incremento:** P1.2 — scheduler reale.
 
+
+### Fase 13 — Console buildabile e deployabile (05/11/2026)
+
+**Contesto.** Il commit `0297951` ("Universal Builder Platform implementation complete") lasciava il
+BFF **non compilabile**: l'immagine `aethersy-console` non poteva essere ricostruita dal sorgente, quindi
+il container in esercizio era una build più vecchia (priva del modulo builder e delle correzioni AI).
+
+**Cause trovate e corrette (91 errori TypeScript → 0).**
+1. **Server edge mai esistente** — `src/index.ts` importava `./edge/index.js` (TS2307). Il "prototipo
+   edge/auth" esisteva solo come JS compilato (in `console/server/edge/`, fuori da `src/`), era
+   incompiuto (manca `adapter.verifyOwner`, router `v2` assente) ed è stato **superato** da
+   Caddy + sessione reale del console. Import statico rimosso, con nota in `src/index.ts`.
+2. **Barrel `tasks/index.ts` inesistente** — `builder/index.ts` importava `./tasks/index.js`: ora
+   riesporta `taskStore` / `taskEngine` / `agentRuntime` / `sandboxProvider` dai moduli reali.
+3. **Re-export di `builder/types.ts` verso se stesso** (TS1205/TS2484) e **interfacce duplicate**
+   (`PlannerInput`, `ProjectSpec`, `TaskGraph`, … dichiarate due volte): eliminati.
+4. **`request.tenant` inesistente** — le rotte `/api/builder/*` usavano `request.tenant.id`, mai
+   impostato (TypeError a runtime). Ora: augmentation Fastify (`src/types/fastify.d.ts`), tenant
+   risolto per richiesta nell'hook `onRequest` con `resolveTenant()`, fallback di servizio senza DB.
+   Fastify 5 non ammette `decorateRequest` con reference type → assegnazione diretta sulla request.
+5. **Moduli mai scritti** — `src/telegram.ts` (notifiche Slack del builder), specializzazione
+   `devops.ts`, generatori mancanti in `brand.ts` (`generateUiSkeleton`, `generateTailwindBase`) e
+   `frontend.ts` (`generateAuthContext`, `generateProtectedRoute`, `generateApiClient`,
+   `generateTailwindConfig`, `generateDataHook`, `generateToast`), tipi minimi per `dockerode`
+   (`src/types/dockerode.d.ts`).
+6. **Bug runtime invisibili al typecheck** — `import { Docker } from "dockerode"` falliva a runtime
+   (CommonJS): corretto in `import Docker from "dockerode"`. Rilevato dallo smoke test, non dal compilatore.
+7. **Schema `builder` mai creato** — il DDL non conteneva `CREATE SCHEMA IF NOT EXISTS builder`:
+   la migrazione falliva con `schema "builder" does not exist`.
+8. **Migrazione e motore non avviati** — `migrateBuilder()` non era chiamata da nessuna parte e
+   `taskEngine` (creato con `autoStart: false`) non veniva avviato: i task restavano in coda.
+9. **NVIDIA NIM** — provider riscritto su catalogo live (`GET {NVIDIA_BASE_URL}/models`), timeout,
+   `reasoning_content`, ID verificati; `ai-router.ts` con merge `Promise.allSettled` (un outage di
+   OpenRouter non uccide NVIDIA); fallback Replicate su Venice in `generate.ts` con i tipi corretti.
+10. **Compose** — aggiunte `NVIDIA_API_KEY/NVIDIA_BASE_URL/NVIDIA_TIMEOUT_MS/NVIDIA_MAX_TOKENS`;
+    **rimosso il bind-mount `./console/server/dist:/app/dist:ro`**: ignorava l'immagine appena
+    ricostruita e serviva solo per patchare il JS a mano.
+
+**Deploy (VPS non-git, copia file).**
+- `console/server/src` + `tsconfig.json` → `/home/deploy/aethersy/console/server/` → `docker compose
+  build console` → `up -d --no-deps console`.
+- Chiave NVIDIA inserita **solo nel `.env` del VPS** (mai nel repo): `NVIDIA_API_KEY`,
+  `NVIDIA_BASE_URL`, `NVIDIA_TIMEOUT_MS`, `NVIDIA_MAX_TOKENS`.
+- Log di avvio: `schema metering|pipeline|business|builder applicato` → `universal-builder-platform
+  routes registrati` → container `healthy`.
+
+**Verifica live (05/11/2026).**
+- `npm run typecheck` console: **0 errori**; `npm run build`: OK. `platform`: `tsc -b --noEmit` OK,
+  `vite build` OK.
+- Rotte dal container: `/api/health` 200 · `/api/auth/session` 401 (senza cookie) ·
+  `/api/builder/projects|credits/balance|agents/available` **200** · `/api/ai/catalog` 401 (corretto).
+- QA end-to-end su VPS (`console/server/tools/qa-console-live.mjs`): **8/8** — login, session, saldo,
+  **chat LLM reale 200**, 4 rotte builder.
+- NVIDIA dal container: catalogo **200 (84 modelli)**, `nvidia/nemotron-3.5-bolt-e4b` presente,
+  chat completion **200**.
+
+### Fase 14 — Platform su dati reali + guardia auth (05/11/2026)
+
+**Contesto.** Il frontend `platform/` era ancora in gran parte mock-first e la guardia di autenticazione
+rimbalzava a `/login` durante il bootstrap.
+
+**Modifiche.**
+- `platform/src/components/Protected.tsx`: durante `status = idle | loading` si mostra lo skeleton; il
+  redirect a `/login` avviene **solo** a sessione confermata assente. Prima, un reload su una rotta
+  protetta espungeva l'utente dal vivo.
+- `platform/src/lib/adapters.ts` (nuovo): converte le risposte reali del BFF nei tipi del frontend.
+- `platform/src/lib/{api,platform-api,platform-queries,types}.ts` e le pagine Agents, Dashboard, Login,
+  SettingsIntegrations, SocialMedia, Tasks allineate sulle rotte `/api/*` reali del console.
+
+**Deploy e verifica (05/11/2026).**
+- `platform/` → VPS → `docker compose build platform` → `up -d --no-deps platform` → `healthy`.
+- Browser (Chrome headless + CDP): `https://platform.aethersy.online/login` → login **200** →
+  reload su `/dashboard` **resta su `/dashboard`** (nessun rimbalzo a `/login`), contenuto renderizzato
+  ("Buon pomeriggio, QA", Task attivi, Agenti, Piattaforme), `/api/auth/session` **200**, **0 errori console**.
+- Account di QA creato sul VPS: `qa.builder+<timestamp>@aethersy.online` (registrazione pubblica
+  riattivata in Fase 12), con 50 crediti assegnati a mano per la verifica della chat.
+
+**Azioni utente (P0).**
+1. **Ruotare la chiave NVIDIA NIM**: è stata condivisa in chat ed è ora in `.env` su tre macchine.
+2. **Ruotare la password root del VPS**: condivisa in chat e ripresa in `DEPLOYMENT_SUMMARY.md`
+   (file ora escluso dal repo via `.gitignore` — contiene credenziali in chiaro).
+3. I modelli `meta/llama-3.3-70b-instruct` e `openai/gpt-oss-120b` su NVIDIA NIM sono **EOL 26/08/2026**:
+   il provider seleziona il modello dal catalogo live, quindi la lista si aggiorna da sola.
+
+### Fase 16 — Provider AI: z.ai, fal.ai, Replicate riparato, Stripe/GitHub/Google (05/11/2026)
+
+**Contesto.** Sono arrivate le chiavi dei provider rimasti senza credito (Venice, Replicate, NVIDIA,
+OpenRouter, Stripe live, GitHub OAuth, Google OAuth, fal.ai, z.ai). Verifica di ogni chiave con
+chiamate reali prima di cablarla, poi cablaggio dei provider ancora assenti.
+
+**Verifica live delle chiavi (05/11/2026).**
+
+| Provider | Esito | Nota |
+|---|---|---|
+| Venice | 200 su `/models` | chiave valida, **senza credito**: le inferenze rispondono "Insufficient balance" |
+| NVIDIA NIM | 200 su `/models` | free tier attivo |
+| OpenRouter | 200 su `/models` | già in uso |
+| Replicate | 200 su `/models` | da riparare (vedi sotto) |
+| Stripe | 200 su `/v1/balance` | chiave **live**, saldo disponibile **0,00 EUR** |
+| fal.ai | 200 su `fal.run/fal-ai/fast-sdxl` | immagine reale generata |
+| z.ai | 200 su `/models` | free tier: `glm-4.5-flash` / `glm-4.7-flash`; i modelli a pagamento rispondono 429 "Insufficient balance" |
+
+GitHub OAuth e Google OAuth erano **già configurati** sul VPS (stessi valori, confronto per lunghezza
+e provider); NVIDIA e OpenRouter erano già attivi.
+
+**Modifiche al codice.**
+- `console/server/src/ai-gen/zai.ts` (nuovo): provider z.ai (endpoint OpenAI-compatible). Catalogo
+  curato dei soli modelli **free** (`glm-4.5-flash`, `glm-4.7-flash`); i modelli a pagamento non
+  entrano a catalogo perché senza credito rispondono 429 e il loro prezzo non è noto. Le chiamate
+  usano `thinking: {type: "disabled"}`: senza, i modelli Flash scaricano il budget di token in
+  `reasoning_content` e lasciano `content` vuoto (verificato live).
+- `console/server/src/ai-gen/fal.ts` (nuovo): fal.ai come **terzo livello** di fallback per `img_out`
+  (Venice → Replicate → fal.ai), output 1024×1024 = 1 megapixel esatto, un retry su errore di rete.
+- `console/server/src/ai-router.ts`: z.ai diventa il **terzo provider LLM**; catena di preferenza
+  NVIDIA → z.ai free → OpenRouter `:free`; numero di candidati portato a 8 per coprire tutta la catena.
+- `console/server/src/ai-gen/replicate.ts` — **bug riparato**: l'API Replicate non accetta più
+  `POST /predictions` con `model` senza versione (risponde 422 "version is required"): ora si usa
+  `POST /v1/models/{owner}/{name}/predictions` (verificato 201). I default erano anche **morti**:
+  `stability-ai/sdxl` (404), `riffusion/riffusion` (non è un TTS), `stable-diffusion/video` (inesistente)
+  → sostituiti con `black-forest-labs/flux-schnell`, `minimax/speech-02-turbo`,
+  `stability-ai/stable-video-diffusion` (verificati live).
+- `console/server/src/ai-gen/generate.ts`: il fallback non passa più gli ID modello di Venice a
+  Replicate (non esistono lì → 404 inutile); il fallback fal usa `fal-ai/flux/schnell`.
+- `console/server/src/metering/schema.sql`: **price book v2** (v1 chiuso, righe copiate) con i prezzi
+  reali di NVIDIA/z.ai (free → 1 credito minimo), fal.ai ($0.003 / $0.025 per megapixel) e Replicate
+  ($0.003 / $0.025 / $0.04 per immagine, fonte `replicate.com/pricing`).
+- `console/server/src/metering/price-snapshot.ts`: lo snapshot automatico (ogni 6h) copia dal book
+  precedente le righe dei provider che **non** gestisce (z.ai, fal.ai, Replicate): senza, i prezzi
+  verrebbero persi a ogni snapshot.
+- `console/server/src/metering/repo.ts`: `min_credits` ora si applica anche quando il prezzo è 0
+  (prima i modelli free non addebitavano nulla: 1 credito previsto dal listino, 0 addebitato).
+- `console/server/src/builder/schema.sql`: le policy RLS venivano ricreate a ogni avvio senza
+  `DROP IF EXISTS` → **errore 42710 "policy already exists"** e migrazione builder fallita
+  ("builder inerte") a ogni riavvio. Ora il DDL è idempotente e `builder/schema.ts` è generato da
+  `tools/gen-schema.mjs` (prima era copiato a mano e poteva divergere).
+- `.env.example` / `docker-compose.yml`: `ZAI_API_KEY`, `ZAI_BASE_URL`, `ZAI_TIMEOUT_MS`,
+  `ZAI_MAX_TOKENS`, `FAL_API_KEY`; `STRIPE_SECRET_KEY` documentata (usata dai progetti generati dal
+  builder, non ancora dal BFF).
+
+**Deploy e verifica (05/11/2026).**
+- Segreti scritti **solo** nel `.env` del VPS (permessi 600): Venice, Replicate, fal.ai, z.ai, Stripe.
+- `bash scripts/deploy-console.sh` → immagine ricostruita → container `healthy`.
+- Log: `schema metering|pipeline|business|builder applicato` → il builder è vivo (prima: "builder inerte").
+- QA live (`console/server/tools/qa-ai-providers.mjs`, nuovo): **5/5** — catalogo 471 modelli con
+  NVIDIA e z.ai, chat NVIDIA (`nemotron-3.5-bolt-e4b` → "OK"), chat forzata z.ai (`glm-4.5-flash` →
+  "OK"), generazione immagine reale (Venice senza credito → **Replicate** `flux-schnell`, `fallbackFrom:
+  venice`), saldo. QA console (`qa-console-live.mjs`): **8/8**.
+- Metering verificato in DB: 1 credito per chat NVIDIA, 1 credito per chat z.ai, 69 crediti per
+  l'immagine Replicate ($0.003 → 0,0069 EUR con markup 150%), prenotazione 230 (stimata su Venice)
+  poi sgravio di 161 al saldo: la differenza prenotazione/consuntivo e' gestita.
+
+**Azioni utente (P0).**
+1. **Ruotare le chiavi condivise in chat**: Venice, Replicate, fal.ai, z.ai, OpenRouter, NVIDIA,
+   **Stripe live**, GitHub OAuth, Google OAuth. Sono state esposte in una chat di gruppo.
+2. **Stripe live**: il saldo disponibile e' 0,00 EUR → nessun addebito riuscirebbe finche' non si
+   ricarica l'account. La chiave resta nel `.env` del VPS ma **non** viene iniettata nel container
+   console (il BFF non la usa ancora): il sender `metering.billing_outbox → Stripe` resta da fare.
+3. **z.ai senza credito**: per usare i modelli a pagamento (GLM-5.x) serve una ricarica su z.ai;
+   fino ad allora il free tier (GLM Flash) copre il fabbisogno.
+
+### Fase 17 — Video: provider, prezzo e retrieve (05/11/2026)
+
+**Contesto.** Le rotte generative testo/immagine erano verificate; il video no. Il primo test
+end-to-end ha fatto emergere due difetti.
+
+**Difetti trovati e corretti.**
+1. **Default video Replicate rotto**: `stability-ai/stable-video-diffusion` esiste a catalogo ma
+   `POST /v1/models/stability-ai/stable-video-diffusion/predictions` risponde **404**. Verificati
+   live: `minimax/video-01` → 201, `wavespeedai/wan-2.1-t2v-480p` → 201. Il default e' ora
+   `minimax/video-01` (6 s, 720p), con listino ufficiale **$0.50 per output video**
+   (metadati prezzo della pagina `replicate.com/minimax/video-01`).
+2. **Retrieve cablato solo su Venice**: `POST /api/ai/video/retrieve` interrogava sempre
+   `venice.retrieveVideo`, quindi un job accodato sul fallback Replicate non era mai recuperabile
+   (il queue id Replicate veniva cercato su Venice). Ora la route interroga il provider giusto:
+   `provider` esplicito nel body, altrimenti dedotto dal modello (gli id Replicate sono
+   `owner/name`, quelli Venice no).
+
+**Prezzi.** Aggiunta la riga `vid_out / minimax/video-01 / replicate / video = 0.50 USD`
+(= 11.500 crediti con markup 150% e fx 0.92). I prezzi statici (NVIDIA, z.ai, fal.ai,
+Replicate) sono ora applicati al **price book attivo** da un blocco DDL idempotente: a ogni avvio
+il book attivo riceve le righe verificate a mano, quindi nessuna riga puo' andare persa fra uno
+snapshot automatico e l'altro (lo snapshot continua a copiare i provider che non gestisce).
+
+**Verifica live (05/11/2026).**
+- Queue video: 200, `provider=replicate`, `model=minimax/video-01`, 11.500 crediti addebitati,
+  `fallbackFrom=venice` (Venice risponde "Insufficient balance").
+- Retrieve: `processing` → `succeeded` con URL del video dopo ~90 s (Replicate `predict_time` 141 s
+  misurato nella prediction precedente). Nessun nuovo addebito al retrieve.
+- Ledger: prenotazione -34.500 (stima Venice, prudente) e sgravio +23.000 al consuntivo =>
+  addebito effettivo **11.500 crediti**, pari a $0.50 + markup.
+- QA provider **5/5** e QA console **8/8** dopo il deploy.
+
+**Debito tecnico noto.**
+- **TTS non addebitato**: Replicate fattura `minimax/speech-02-turbo` a $0.06 per 1000 token di
+  input, mentre il metering misura la voce in caratteri: senza un rapporto token/carattere
+  verificato la riga di prezzo non e' applicabile, quindi oggi la voce costa 0 crediti al tenant
+  (costo provider a carico della piattaforma). Da chiudere leggendo le metriche token della
+  prediction Replicate.
+- **Nessuna pagina video** nel frontend platform: la rotta API funziona, la UI no.
+
+### Fase 18 — CI GitHub Actions (05/11/2026)
+
+**Contesto.** Il repo GitHub (`mattiadeblasio94-jpg/aethersy-platform`) era fermo a 8 commit di distanza
+dalla produzione: nessuna verifica automatica su push/PR, nessun controllo che i segreti restino
+fuori dal repo. Il deploy resta manuale (il VPS non ha git: si copia il codice e si lancia
+`scripts/deploy-console.sh`).
+
+**Modifiche.**
+- `.github/workflows/ci.yml` (nuovo): si attiva su push e PR verso `main` e su `workflow_dispatch`.
+  Quattro job, tutti read-only (`permissions: contents: read`), Node 22 come in produzione
+  (`node:22-alpine` nei Dockerfile) e cache npm:
+  1. `console-server`: `npm ci` → `typecheck` → `build` → `npm run test:metering` (44 test, nessun DB);
+  2. `console-web`: `npm ci` → `typecheck` → `build`;
+  3. `platform`: `npm ci` → `typecheck` → `build`;
+  4. `hygiene`: `scripts/secret-scan.sh` + `docker compose --env-file .env.example config --quiet`.
+  `concurrency` annulla i run precedenti sulla stessa ref.
+- `scripts/secret-scan.sh` (nuovo): scandisce i **file tracciati** (non il working tree) cercando i
+  formati delle chiavi in uso (OpenRouter, NVIDIA, Replicate, fal.ai, Stripe live/test e restricted,
+  GitHub, Google, Slack, AWS, chiavi private PEM) e segnala anche file `.env*` tracciati. In caso di
+  hit stampa **etichetta e percorso, mai il valore** del segreto, ed esce con codice 1.
+  I placeholder di `.env.example` (vuoti o `CHANGEME_...`) non corrispondono ai pattern, quindi il file
+  d'esempio viene scandito come tutti gli altri.
+
+**Verifica locale (05/11/2026).**
+- `bash scripts/secret-scan.sh` → `OK - 318 file tracciati`; controllo positivo con una chiave fal.ai
+  finta in `.env.example` → `TROVATO fal-ai .env.example`, exit 1, valore non stampato.
+- `console/server`: typecheck OK, build OK, `test:metering` → **44 test superati, 0 falliti**.
+- `console/web`: typecheck + build OK. `platform`: typecheck + build OK.
+- `docker compose --env-file .env.example config --quiet` → exit 0 (validato sul VPS, che ha Docker).
+- Workflow YAML validato: 4 job, trigger su `main`.
+
+**Stato GitHub.** I commit delle fasi 13-17 non erano mai stati pushati: sono stati portati su
+`main` con questa fase (PR `fase-18-ci-github` -> merge). La history è stata verificata: nessuna
+occorrenza dei pattern delle chiavi in `git log -p --all`.

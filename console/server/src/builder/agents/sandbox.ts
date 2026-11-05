@@ -1,6 +1,8 @@
 // builder/agents/sandbox.ts — Sandbox provider interface and Docker implementation
 
-import { Docker } from 'dockerode';
+// dockerode e' CommonJS: in ESM si importa il default export, non il nome
+// `Docker` (a runtime: "does not provide an export named 'Docker'").
+import Docker from 'dockerode';
 import type { SandboxProvider, SandboxExecRequest, SandboxExecResult, SandboxContainer } from "./types.js";
 
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
@@ -115,7 +117,7 @@ export class DockerSandboxProvider implements SandboxProvider {
     try {
       const container = docker.getContainer(containerId);
       const inspect = await container.inspect();
-      if (inspect.State.Running) return;
+      if (inspect.State?.Running) return;
 
       // Restart if stopped
       await container.start();

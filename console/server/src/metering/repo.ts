@@ -357,7 +357,12 @@ export function priceRequest(
   }
   const priceEur = parts.reduce((s, p) => s + p.priceEur, 0);
   const providerCostUsd = parts.reduce((s, p) => s + p.providerCostUsd, 0);
-  if (credits > 0) credits = Math.max(credits, minCredits, 1);
+  // Il minimo di crediti (es. 1 credito per i modelli gratuiti) si applica
+  // quando il provider E' prezzato: un modello free costa 0 USD ma deve
+  // comunque coprire l'infrastruttura. Senza righe di prezzo (provider non
+  // prezzato) non si addebita nulla: il costo resta al fornitore.
+  if (resolution.lines.length > 0) credits = Math.max(credits, minCredits);
+  if (credits > 0) credits = Math.max(credits, 1);
   return { credits, priceEur, providerCostUsd, parts };
 }
 

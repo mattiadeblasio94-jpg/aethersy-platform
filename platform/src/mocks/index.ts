@@ -44,6 +44,7 @@ export {
 // Dati dello Stadio C (Impostazioni e Aiuto).
 export {
   apiKeys,
+  aiProviders,
   creditUsage,
   faqItems,
   helpCategories,

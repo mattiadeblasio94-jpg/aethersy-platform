@@ -1,15 +1,18 @@
 import { config } from "./config.js";
 import { recordUsage, type TenantContext } from "./metering/repo.js";
 import { getNvidiaModels, nvidiaChat } from "./ai-gen/nvidia.js";
+import { getZaiModels, zaiChat } from "./ai-gen/zai.js";
 
 // =============================================================================
 // AI Router — sceglie automaticamente il modello LLM in base alla capacita'
 // richiesta (testo / immagine->testo / audio->testo / video->testo), preferendo
-// i modelli GRATUITI disponibili su OpenRouter e NVIDIA (integrate.api.nvidia.com).
+// i modelli GRATUITI disponibili su NVIDIA (integrate.api.nvidia.com), z.ai
+// (GLM Flash free) e OpenRouter (modelli :free).
 //
 // Il catalogo viene letto live da OpenRouter /models e combinato con i modelli
-// NVIDIA curati. I provider restano NASCOSTI agli utenti della piattaforma: il
-// router seleziona automaticamente il miglior modello gratuito disponibile.
+// NVIDIA e z.ai curati. I provider restano NASCOSTI agli utenti della
+// piattaforma: il router seleziona automaticamente il miglior modello gratuito
+// disponibile.
 // =============================================================================
 
 export type AiCapability = "text" | "image" | "audio" | "video";
@@ -22,7 +25,7 @@ export interface AiModel {
   capabilities: AiCapability[];
   pricing: { prompt: number; completion: number };
   /** Provider interno (non esposto all'utente). */
-  provider: "openrouter" | "nvidia";
+  provider: "openrouter" | "nvidia" | "zai";
 }
 
 interface OpenRouterModel {
@@ -36,17 +39,24 @@ interface OpenRouterModel {
 const CACHE_TTL_MS = 5 * 60_000;
 let cache: { at: number; models: AiModel[] } | null = null;
 
-// Preferenze curate per capacita' (aggiornate 30/10/2026).
-// Modelli NVIDIA diretti (senza :free) + modelli OpenRouter gratuiti.
+// Preferenze curate per capacita' (aggiornate 05/11/2026 dopo la verifica
+// live sul catalogo NVIDIA: gli ID precedenti non esistono piu' e rispondevano
+// 404, es. `nvidia/nemotron-3-ultra-550b` -> `...-550b-a55b`).
 // L'ordine e' quello di preferenza: NVIDIA diretta prima, poi OpenRouter.
 const PREFERRED: Record<AiCapability, string[]> = {
   text: [
-    // NVIDIA diretta (gratis, alta qualità)
-    "nvidia/nemotron-3-ultra-550b",
-    "qwen/qwen3.5-122b-a10b",
-    "nvidia/nemotron-3-ultra-253b",
-    "nvidia/nemotron-4-340b",
-    "nvidia/nemotron-3.5-lightning",
+    // NVIDIA diretta (gratis, verifica live: ~2s di risposta)
+    "nvidia/nemotron-3.5-bolt-e4b",
+    "nvidia/nemotron-3.5-lightning-30b-a3b",
+    // z.ai free (GLM Flash): verificati live il 05/11/2026, ~12s di risposta.
+    // Intercalati ai primi NVIDIA: se il blocco NVIDIA e' irraggiungibile, il
+    // router ha subito un secondo provider gratuito invece di aspettare i
+    // modelli OpenRouter :free in coda.
+    "glm-4.5-flash",
+    "glm-4.7-flash",
+    "nvidia/nemotron-3-super-120b-a12b",
+    "nvidia/nemotron-3-ultra-550b-a55b",
+    "nvidia/nemotron-4-340b-instruct",
     // OpenRouter gratuiti (fallback)
     "google/gemma-4-26b-a4b-it:free",
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
@@ -55,7 +65,7 @@ const PREFERRED: Record<AiCapability, string[]> = {
   ],
   image: [
     // NVIDIA diretta (vision)
-    "nvidia/nemotron-3.5-super-vl",
+    "nvidia/nemotron-3.5-super-vl-120b-a12b",
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
     // OpenRouter gratuiti (fallback)
     "google/gemma-4-26b-a4b-it:free",
@@ -72,11 +82,11 @@ const PREFERRED: Record<AiCapability, string[]> = {
   video: [
     // NVIDIA diretta (omni video input)
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
-    "nvidia/nemotron-3.5-super-vl",
+    "nvidia/nemotron-3.5-super-vl-120b-a12b",
     // OpenRouter gratuiti (fallback)
     "google/gemma-4-26b-a4b-it:free",
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
-    "nvidia/nemotron-3.5-super-vl:free",
+    "nvidia/nemotron-3.5-super-vl-120b-a12b:free",
   ],
 };
 
@@ -136,10 +146,25 @@ async function fetchOpenRouterCatalog(): Promise<AiModel[]> {
 }
 
 async function fetchMergedCatalog(): Promise<AiModel[]> {
-  const [openRouterModels, nvidiaModels] = await Promise.all([
+  // I due cataloghi sono indipendenti: un outage di OpenRouter non deve
+  // disattivare NVIDIA (e viceversa). Promise.allSettled + merge dei soli
+  // provider disponibili.
+  const [openRouter, nvidia, zai] = await Promise.allSettled([
     fetchOpenRouterCatalog(),
     getNvidiaModels(),
+    getZaiModels(),
   ]);
+
+  const openRouterModels = openRouter.status === "fulfilled" ? openRouter.value : [];
+  const nvidiaModels = nvidia.status === "fulfilled" ? nvidia.value : [];
+  const zaiModels = zai.status === "fulfilled" ? zai.value : [];
+
+  if (!openRouterModels.length && !nvidiaModels.length && !zaiModels.length) {
+    const reasons = [openRouter, nvidia, zai]
+      .map((r) => (r.status === "rejected" ? String(r.reason?.message ?? r.reason) : "vuoto"))
+      .join(" | ");
+    throw new Error(`Catalogo AI non disponibile: ${reasons}`);
+  }
 
   // Merge: NVIDIA models take precedence for same id (direct API vs OpenRouter proxy)
   const merged = new Map<string, AiModel>();
@@ -149,6 +174,10 @@ async function fetchMergedCatalog(): Promise<AiModel[]> {
   for (const m of nvidiaModels) {
     // NVIDIA direct models override OpenRouter proxied versions
     merged.set(m.id, { ...m, provider: "nvidia" });
+  }
+  for (const m of zaiModels) {
+    // z.ai (GLM Flash free) ha ID propri: non confligge con gli altri cataloghi.
+    merged.set(m.id, { ...m, provider: "zai" });
   }
 
   return [...merged.values()];
@@ -278,7 +307,8 @@ export async function chat(params: {
   });
 
   // Limita il fallback: il modello richiesto (se presente) + i primi N gratuiti.
-  const candidates = ranked.slice(0, params.model ? 4 : 6);
+  // 8 candidati: copre la catena NVIDIA -> z.ai free -> OpenRouter :free.
+  const candidates = ranked.slice(0, params.model ? 4 : 8);
 
   const parts: ContentPart[] = [{ type: "text", text: params.prompt }];
 
@@ -314,6 +344,22 @@ export async function chat(params: {
       if (chosen.provider === "nvidia" && config.nvidiaApiKey) {
         // NVIDIA direct API
         const result = await nvidiaChat({
+          capability: params.capability,
+          prompt: params.prompt,
+          model: chosen.id,
+          fileUrl: params.fileUrl,
+        });
+        modelId = result.model;
+        answer = result.answer;
+        usage = {
+          prompt_tokens: result.usage.prompt_tokens,
+          completion_tokens: result.usage.completion_tokens,
+          total_tokens: result.usage.total_tokens,
+        };
+        latencyMs = result.latencyMs;
+      } else if (chosen.provider === "zai" && config.zaiKey) {
+        // z.ai (GLM Flash free), endpoint OpenAI-compatible
+        const result = await zaiChat({
           capability: params.capability,
           prompt: params.prompt,
           model: chosen.id,
@@ -397,7 +443,7 @@ async function billChat(
   model: string,
   usage: OpenRouterUsage | null,
   latencyMs: number,
-  provider: "openrouter" | "nvidia",
+  provider: "openrouter" | "nvidia" | "zai",
 ): Promise<ChatBilling> {
   const inputTokens = usage?.prompt_tokens ?? 0;
   const outputTokens = usage?.completion_tokens ?? 0;

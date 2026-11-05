@@ -39,7 +39,12 @@ export const copyAgent: AgentExecutor = {
 
         // Generate headline variants
         const headlines = generateHeadlines(pageName);
-        await writeFile(workspacePath, `packages/shared/marketing/${pageName}-headlines.ts`, headlines, artifacts);
+        const headlinesModule = [
+          `// Generato dall'agente copy — varianti di headline per "${pageName}"`,
+          `export const ${pageName}Headlines = ${JSON.stringify(headlines, null, 2)} as const;`,
+          '',
+        ].join('\n');
+        await writeFile(workspacePath, `packages/shared/marketing/${pageName}-headlines.ts`, headlinesModule, artifacts);
 
         costCredits = 5;
         break;
@@ -209,7 +214,7 @@ export const linkedinAds: AdCopy[] = [
 `;
 }
 
-function generateHeadlines(page: string): string {
+function generateHeadlines(page: string): string[] {
   const headlines: Record<string, string[]> = {
     landing: [
       'Aethersy: Il tuo AI Operating Officer',

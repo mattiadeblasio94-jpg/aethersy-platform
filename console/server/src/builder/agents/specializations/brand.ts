@@ -136,3 +136,57 @@ function generatePlaceholderLogo(): string {
     SY
   </text>
 </svg>`};
+
+function generateUiSkeleton(): string {
+  return `// packages/shared/ui/components/index.ts
+// Skeleton dei componenti UI: i file definitivi sono generati in un secondo
+// passaggio (shadcn/ui) partendo dalla palette del brand.
+export { Button } from './button';
+export { Card } from './card';
+export { Input } from './input';
+export { Badge } from './badge';
+export { Dialog } from './dialog';
+export { Toast } from './toast';
+`;
+}
+
+function generateTailwindBase(paletteJson: string): string {
+  const palette = JSON.parse(paletteJson) as {
+    primary: { main: string; light: string; dark: string };
+    secondary: { main: string; light: string; dark: string };
+    neutral: { main: string; light: string; dark: string };
+  };
+
+  return `import type { Config } from 'tailwindcss';
+
+const config: Config = {
+  theme: {
+    extend: {
+      colors: {
+        brand: {
+          main: '${palette.primary.main}',
+          light: '${palette.primary.light}',
+          dark: '${palette.primary.dark}',
+        },
+        accent: {
+          main: '${palette.secondary.main}',
+          light: '${palette.secondary.light}',
+          dark: '${palette.secondary.dark}',
+        },
+        neutral: {
+          main: '${palette.neutral.main}',
+          light: '${palette.neutral.light}',
+          dark: '${palette.neutral.dark}',
+        },
+      },
+      fontFamily: {
+        sans: ['Inter', 'system-ui', 'sans-serif'],
+      },
+    },
+  },
+  plugins: [],
+};
+
+export default config;
+`;
+}

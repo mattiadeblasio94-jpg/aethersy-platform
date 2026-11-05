@@ -13,6 +13,7 @@ const TARGETS = [
   { dir: "metering", constName: "METERING_SCHEMA_SQL", sql: "schema.sql" },
   { dir: "pipeline", constName: "PIPELINE_SCHEMA_SQL", sql: "schema.sql" },
   { dir: "business", constName: "BUSINESS_SCHEMA_SQL", sql: "schema.sql" },
+  { dir: "builder", constName: "BUILDER_SCHEMA_SQL", sql: "schema.sql" },
 ];
 
 for (const target of TARGETS) {
