@@ -72,6 +72,25 @@ function safeJson(text: string): any {
   }
 }
 
+/**
+ * Crea una prediction.
+ *
+ * Replicate ha due forme di API (verificate live il 05/11/2026):
+ *   - `POST /v1/models/{owner}/{name}/predictions` -> forma CORRETTA attuale:
+ *     non serve la versione, l'endpoint la risolve sulla latest.
+ *   - `POST /v1/predictions` con `{model, input}` -> forma legacy: richiede
+ *     `model` nel formato "owner/name:version" (senza versione risponde 422
+ *     "version is required").
+ * Quindi: se il modello ha gia' una versione esplicita (":hash") si usa la
+ * forma legacy, altrimenti la forma /models/.
+ */
+async function createPrediction(model: string, input: Record<string, unknown>): Promise<any> {
+  if (model.includes(":")) {
+    return postJson<any>("/predictions", { model, input });
+  }
+  return postJson<any>(`/models/${model}/predictions`, { input });
+}
+
 // --- Immagini ----------------------------------------------------------------
 
 export interface ImageGenResult {
@@ -91,16 +110,11 @@ export async function generateImage(p: {
   format?: "png" | "jpeg" | "webp";
 }): Promise<ImageGenResult> {
   const started = Date.now();
-  const model = p.model ?? "stability-ai/sdxl:82be395cba9e83b7c8c3b5f5c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6";
+  // Default verificato live (05/11/2026): `stability-ai/sdxl` non esiste piu'
+  // (404 sul catalogo Replicate), `black-forest-labs/flux-schnell` risponde 201.
+  const model = p.model ?? "black-forest-labs/flux-schnell";
 
-  const body: Record<string, unknown> = {
-    model,
-    input: {
-      prompt: p.prompt,
-    },
-  };
-
-  const data = await postJson<any>("/predictions", body);
+  const data = await createPrediction(model, { prompt: p.prompt });
   const id = data?.id;
   if (!id) throw replicateError(502, "Replicate non ha restituito un prediction id");
 
@@ -159,14 +173,10 @@ export async function synthesizeSpeech(p: {
 }): Promise<TtsResult> {
   if (p.input.length > 4096) throw replicateError(400, "input TTS > 4096 caratteri");
   const started = Date.now();
-  const model = p.model ?? "riffusion/riffusion";
+  // Default verificato live (05/11/2026): TTS Replicate via minimax/speech-02-turbo.
+  const model = p.model ?? "minimax/speech-02-turbo";
 
-  const body: Record<string, unknown> = {
-    model,
-    input: { text: p.input },
-  };
-
-  const data = await postJson<any>("/predictions", body);
+  const data = await createPrediction(model, { text: p.input });
   const id = data?.id;
   if (!id) throw replicateError(502, "Replicate non ha restituito un prediction id");
 
@@ -227,16 +237,10 @@ export async function queueVideo(p: {
   aspectRatio?: string;
 }): Promise<VideoQueueResult> {
   const started = Date.now();
-  const model = p.model ?? "stable-diffusion/video";
+  // Default verificato live (05/11/2026): esiste stability-ai/stable-video-diffusion.
+  const model = p.model ?? "stability-ai/stable-video-diffusion";
 
-  const body: Record<string, unknown> = {
-    model,
-    input: {
-      prompt: p.prompt,
-    },
-  };
-
-  const data = await postJson<any>("/predictions", body);
+  const data = await createPrediction(model, { prompt: p.prompt });
   const id = data?.id;
   if (!id) throw replicateError(502, "Replicate non ha restituito un prediction id");
 

@@ -295,6 +295,21 @@ async function runPriceSnapshot(): Promise<void> {
       );
     }
 
+    // Riporta dal book precedente le righe dei provider che questo snapshot NON
+    // gestisce (es. 'zai', 'fal'): i prezzi z.ai/fal.ai non arrivano da
+    // OpenRouter/Venice e verrebbero persi a ogni snapshot.
+    await client.query(
+      `INSERT INTO metering.price_book_entry
+         (price_book_id, capability, model_pattern, provider, unit, unit_price, markup_bps, min_credits)
+       SELECT $1, pbe.capability, pbe.model_pattern, pbe.provider, pbe.unit,
+              pbe.unit_price, pbe.markup_bps, pbe.min_credits
+         FROM metering.price_book_entry pbe
+        WHERE pbe.price_book_id = $2
+          AND pbe.provider NOT IN ('openrouter', 'venice', '*')
+       ON CONFLICT (price_book_id, capability, model_pattern, provider, unit) DO NOTHING`,
+      [newPbId, activePb.rows[0].id]
+    );
+
     await client.query('COMMIT');
     console.log(`[price-snapshot] Price book v${newVersion} created with ${entries.length} entries, FX=${fxRate}`);
   } catch (e) {

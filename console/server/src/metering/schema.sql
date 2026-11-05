@@ -234,3 +234,59 @@ CROSS JOIN (VALUES
 WHERE pb.version = 1
   AND pb.effective_to IS NULL
 ON CONFLICT (price_book_id, capability, model_pattern, provider, unit) DO NOTHING;
+
+-- ---------------------------------------------------------------------------
+-- Price book v2 (05/11/2026): aggiunge z.ai (modelli free GLM Flash) e fal.ai
+-- (generazione immagini). v1 viene chiuso (effective_to) e le sue righe sono
+-- copiate in v2: la risoluzione dei prezzi usa solo il book attivo.
+-- Fonti: docs.z.ai/guides/overview/pricing (GLM-4.5-Flash / GLM-4.7-Flash
+-- = Free) e fal.ai/pricing (prezzo per megapixel: flux/schnell $0.003,
+-- flux/dev $0.025; output 1024x1024 = 1 megapixel esatto).
+-- ---------------------------------------------------------------------------
+INSERT INTO metering.price_book (version, default_markup_bps, fx_usd_eur)
+VALUES (2, 15000, 0.92)
+ON CONFLICT (version) DO NOTHING;
+
+UPDATE metering.price_book
+   SET effective_to = now()
+ WHERE version = 1
+   AND effective_to IS NULL
+   AND EXISTS (SELECT 1 FROM metering.price_book WHERE version = 2);
+
+-- Copia delle righe di v1 in v2 (stessi prezzi, stesso markup di default).
+INSERT INTO metering.price_book_entry
+  (price_book_id, capability, model_pattern, provider, unit, unit_price, markup_bps, min_credits)
+SELECT pb2.id, pbe.capability, pbe.model_pattern, pbe.provider, pbe.unit,
+       pbe.unit_price, pbe.markup_bps, pbe.min_credits
+  FROM metering.price_book pb2
+  JOIN metering.price_book pb1 ON pb1.version = 1
+  JOIN metering.price_book_entry pbe ON pbe.price_book_id = pb1.id
+ WHERE pb2.version = 2
+ON CONFLICT (price_book_id, capability, model_pattern, provider, unit) DO NOTHING;
+
+-- Nuove righe v2.
+INSERT INTO metering.price_book_entry
+  (price_book_id, capability, model_pattern, provider, unit, unit_price, min_credits)
+SELECT pb.id, v.capability, v.model_pattern, v.provider, v.unit, v.unit_price, v.min_credits
+FROM metering.price_book pb
+CROSS JOIN (VALUES
+  -- NVIDIA NIM: free tier (costo provider 0) -> 1 credito minimo che copre
+  -- l'infrastruttura, come previsto dalla regola free del listino.
+  ('text', 'nvidia/*', 'nvidia', 'token_in',  0.000000, 1),
+  ('text', 'nvidia/*', 'nvidia', 'token_out', 0.000000, 1),
+  -- z.ai - testo (modelli gratuiti: costo provider 0 -> 1 credito minimo)
+  ('text', 'glm-4.5-flash', 'zai', 'token_in',  0.000000, 1),
+  ('text', 'glm-4.5-flash', 'zai', 'token_out', 0.000000, 1),
+  ('text', 'glm-4.7-flash', 'zai', 'token_in',  0.000000, 1),
+  ('text', 'glm-4.7-flash', 'zai', 'token_out', 0.000000, 1),
+  -- fal.ai - generazione (prezzo per megapixel; output 1024x1024 = 1 MP)
+  ('img_out', 'fal-ai/flux/schnell', 'fal', 'image', 0.003000, 0),
+  ('img_out', 'fal-ai/flux/dev',     'fal', 'image', 0.025000, 0),
+  -- Replicate - generazione (prezzi ufficiali replicate.com/pricing)
+  ('img_out', 'black-forest-labs/flux-schnell', 'replicate', 'image', 0.003000, 0),
+  ('img_out', 'black-forest-labs/flux-dev',     'replicate', 'image', 0.025000, 0),
+  ('img_out', 'black-forest-labs/flux-1.1-pro',  'replicate', 'image', 0.040000, 0)
+) AS v(capability, model_pattern, provider, unit, unit_price, min_credits)
+WHERE pb.version = 2
+  AND pb.effective_to IS NULL
+ON CONFLICT (price_book_id, capability, model_pattern, provider, unit) DO NOTHING;

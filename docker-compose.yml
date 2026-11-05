@@ -142,6 +142,9 @@ services:
       - VENICE_BASE_URL=${VENICE_BASE_URL:-https://api.venice.ai/api/v1}
       - REPLICATE_API_KEY=${REPLICATE_API_KEY:-}
       - REPLICATE_BASE_URL=${REPLICATE_BASE_URL:-https://api.replicate.com/v1}
+      - FAL_API_KEY=${FAL_API_KEY:-}
+      - ZAI_API_KEY=${ZAI_API_KEY:-}
+      - ZAI_BASE_URL=${ZAI_BASE_URL:-https://api.z.ai/api/paas/v4}
       - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
       - NVIDIA_BASE_URL=${NVIDIA_BASE_URL:-https://integrate.api.nvidia.com/v1}
       - NVIDIA_TIMEOUT_MS=${NVIDIA_TIMEOUT_MS:-90000}

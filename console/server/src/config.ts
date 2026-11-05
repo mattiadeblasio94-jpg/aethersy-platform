@@ -32,6 +32,19 @@ export const config = {
   replicateApiKey: process.env.REPLICATE_API_KEY ?? "",
   replicateBase: (process.env.REPLICATE_BASE_URL ?? "https://api.replicate.com/v1").replace(/\/$/, ""),
 
+  // fal.ai: terzo livello di fallback per la generazione immagini (img_out).
+  // Endpoint sincroni su fal.run: la risposta porta gia' l'URL dell'immagine.
+  falKey: process.env.FAL_API_KEY ?? "",
+  falBase: (process.env.FAL_BASE_URL ?? "https://fal.run").replace(/\/$/, ""),
+
+  // z.ai (Zhipu): terzo provider LLM, endpoint OpenAI-compatible.
+  // Il free tier e' limitato ai modelli "*Flash" (GLM-4.5-Flash / GLM-4.7-Flash):
+  // i modelli a pagamento rispondono 429 "Insufficient balance" senza credito.
+  zaiKey: process.env.ZAI_API_KEY ?? "",
+  zaiBase: (process.env.ZAI_BASE_URL ?? "https://api.z.ai/api/paas/v4").replace(/\/$/, ""),
+  zaiTimeoutMs: Number(process.env.ZAI_TIMEOUT_MS ?? 30_000),
+  zaiMaxTokens: Number(process.env.ZAI_MAX_TOKENS ?? 4096),
+
   // NVIDIA (integrate.api.nvidia.com): provider di modelli gratuiti
   // (Nemotron 3.5 Bolt/Lightning, Nemotron 3 Super/Ultra, Omni/VL).
   // Se la chiave manca, NVIDIA viene saltato silenziosamente nel router.

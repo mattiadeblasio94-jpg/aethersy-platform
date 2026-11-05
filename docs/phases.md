@@ -627,3 +627,79 @@ rimbalzava a `/login` durante il bootstrap.
    (file ora escluso dal repo via `.gitignore` — contiene credenziali in chiaro).
 3. I modelli `meta/llama-3.3-70b-instruct` e `openai/gpt-oss-120b` su NVIDIA NIM sono **EOL 26/08/2026**:
    il provider seleziona il modello dal catalogo live, quindi la lista si aggiorna da sola.
+
+### Fase 16 — Provider AI: z.ai, fal.ai, Replicate riparato, Stripe/GitHub/Google (05/11/2026)
+
+**Contesto.** Sono arrivate le chiavi dei provider rimasti senza credito (Venice, Replicate, NVIDIA,
+OpenRouter, Stripe live, GitHub OAuth, Google OAuth, fal.ai, z.ai). Verifica di ogni chiave con
+chiamate reali prima di cablarla, poi cablaggio dei provider ancora assenti.
+
+**Verifica live delle chiavi (05/11/2026).**
+
+| Provider | Esito | Nota |
+|---|---|---|
+| Venice | 200 su `/models` | chiave valida, **senza credito**: le inferenze rispondono "Insufficient balance" |
+| NVIDIA NIM | 200 su `/models` | free tier attivo |
+| OpenRouter | 200 su `/models` | già in uso |
+| Replicate | 200 su `/models` | da riparare (vedi sotto) |
+| Stripe | 200 su `/v1/balance` | chiave **live**, saldo disponibile **0,00 EUR** |
+| fal.ai | 200 su `fal.run/fal-ai/fast-sdxl` | immagine reale generata |
+| z.ai | 200 su `/models` | free tier: `glm-4.5-flash` / `glm-4.7-flash`; i modelli a pagamento rispondono 429 "Insufficient balance" |
+
+GitHub OAuth e Google OAuth erano **già configurati** sul VPS (stessi valori, confronto per lunghezza
+e provider); NVIDIA e OpenRouter erano già attivi.
+
+**Modifiche al codice.**
+- `console/server/src/ai-gen/zai.ts` (nuovo): provider z.ai (endpoint OpenAI-compatible). Catalogo
+  curato dei soli modelli **free** (`glm-4.5-flash`, `glm-4.7-flash`); i modelli a pagamento non
+  entrano a catalogo perché senza credito rispondono 429 e il loro prezzo non è noto. Le chiamate
+  usano `thinking: {type: "disabled"}`: senza, i modelli Flash scaricano il budget di token in
+  `reasoning_content` e lasciano `content` vuoto (verificato live).
+- `console/server/src/ai-gen/fal.ts` (nuovo): fal.ai come **terzo livello** di fallback per `img_out`
+  (Venice → Replicate → fal.ai), output 1024×1024 = 1 megapixel esatto, un retry su errore di rete.
+- `console/server/src/ai-router.ts`: z.ai diventa il **terzo provider LLM**; catena di preferenza
+  NVIDIA → z.ai free → OpenRouter `:free`; numero di candidati portato a 8 per coprire tutta la catena.
+- `console/server/src/ai-gen/replicate.ts` — **bug riparato**: l'API Replicate non accetta più
+  `POST /predictions` con `model` senza versione (risponde 422 "version is required"): ora si usa
+  `POST /v1/models/{owner}/{name}/predictions` (verificato 201). I default erano anche **morti**:
+  `stability-ai/sdxl` (404), `riffusion/riffusion` (non è un TTS), `stable-diffusion/video` (inesistente)
+  → sostituiti con `black-forest-labs/flux-schnell`, `minimax/speech-02-turbo`,
+  `stability-ai/stable-video-diffusion` (verificati live).
+- `console/server/src/ai-gen/generate.ts`: il fallback non passa più gli ID modello di Venice a
+  Replicate (non esistono lì → 404 inutile); il fallback fal usa `fal-ai/flux/schnell`.
+- `console/server/src/metering/schema.sql`: **price book v2** (v1 chiuso, righe copiate) con i prezzi
+  reali di NVIDIA/z.ai (free → 1 credito minimo), fal.ai ($0.003 / $0.025 per megapixel) e Replicate
+  ($0.003 / $0.025 / $0.04 per immagine, fonte `replicate.com/pricing`).
+- `console/server/src/metering/price-snapshot.ts`: lo snapshot automatico (ogni 6h) copia dal book
+  precedente le righe dei provider che **non** gestisce (z.ai, fal.ai, Replicate): senza, i prezzi
+  verrebbero persi a ogni snapshot.
+- `console/server/src/metering/repo.ts`: `min_credits` ora si applica anche quando il prezzo è 0
+  (prima i modelli free non addebitavano nulla: 1 credito previsto dal listino, 0 addebitato).
+- `console/server/src/builder/schema.sql`: le policy RLS venivano ricreate a ogni avvio senza
+  `DROP IF EXISTS` → **errore 42710 "policy already exists"** e migrazione builder fallita
+  ("builder inerte") a ogni riavvio. Ora il DDL è idempotente e `builder/schema.ts` è generato da
+  `tools/gen-schema.mjs` (prima era copiato a mano e poteva divergere).
+- `.env.example` / `docker-compose.yml`: `ZAI_API_KEY`, `ZAI_BASE_URL`, `ZAI_TIMEOUT_MS`,
+  `ZAI_MAX_TOKENS`, `FAL_API_KEY`; `STRIPE_SECRET_KEY` documentata (usata dai progetti generati dal
+  builder, non ancora dal BFF).
+
+**Deploy e verifica (05/11/2026).**
+- Segreti scritti **solo** nel `.env` del VPS (permessi 600): Venice, Replicate, fal.ai, z.ai, Stripe.
+- `bash scripts/deploy-console.sh` → immagine ricostruita → container `healthy`.
+- Log: `schema metering|pipeline|business|builder applicato` → il builder è vivo (prima: "builder inerte").
+- QA live (`console/server/tools/qa-ai-providers.mjs`, nuovo): **5/5** — catalogo 471 modelli con
+  NVIDIA e z.ai, chat NVIDIA (`nemotron-3.5-bolt-e4b` → "OK"), chat forzata z.ai (`glm-4.5-flash` →
+  "OK"), generazione immagine reale (Venice senza credito → **Replicate** `flux-schnell`, `fallbackFrom:
+  venice`), saldo. QA console (`qa-console-live.mjs`): **8/8**.
+- Metering verificato in DB: 1 credito per chat NVIDIA, 1 credito per chat z.ai, 69 crediti per
+  l'immagine Replicate ($0.003 → 0,0069 EUR con markup 150%), prenotazione 230 (stimata su Venice)
+  poi sgravio di 161 al saldo: la differenza prenotazione/consuntivo e' gestita.
+
+**Azioni utente (P0).**
+1. **Ruotare le chiavi condivise in chat**: Venice, Replicate, fal.ai, z.ai, OpenRouter, NVIDIA,
+   **Stripe live**, GitHub OAuth, Google OAuth. Sono state esposte in una chat di gruppo.
+2. **Stripe live**: il saldo disponibile e' 0,00 EUR → nessun addebito riuscirebbe finche' non si
+   ricarica l'account. La chiave resta nel `.env` del VPS ma **non** viene iniettata nel container
+   console (il BFF non la usa ancora): il sender `metering.billing_outbox → Stripe` resta da fare.
+3. **z.ai senza credito**: per usare i modelli a pagamento (GLM-5.x) serve una ricarica su z.ai;
+   fino ad allora il free tier (GLM Flash) copre il fabbisogno.

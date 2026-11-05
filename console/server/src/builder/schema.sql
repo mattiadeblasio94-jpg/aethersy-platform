@@ -161,17 +161,22 @@ ALTER TABLE builder.artifact ENABLE ROW LEVEL SECURITY;
 ALTER TABLE builder.credit_ledger ENABLE ROW LEVEL SECURITY;
 
 -- Policies assume current_setting('app.current_tenant_id') is set by middleware
+DROP POLICY IF EXISTS builder_project_tenant_isolation ON builder.project;
 CREATE POLICY builder_project_tenant_isolation ON builder.project
     USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
 
+DROP POLICY IF EXISTS builder_task_tenant_isolation ON builder.task;
 CREATE POLICY builder_task_tenant_isolation ON builder.task
     USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
 
+DROP POLICY IF EXISTS builder_task_step_tenant_isolation ON builder.task_step;
 CREATE POLICY builder_task_step_tenant_isolation ON builder.task_step
     USING (task_id IN (SELECT id FROM builder.task WHERE tenant_id = current_setting('app.current_tenant_id')::uuid));
 
+DROP POLICY IF EXISTS builder_artifact_tenant_isolation ON builder.artifact;
 CREATE POLICY builder_artifact_tenant_isolation ON builder.artifact
     USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
 
+DROP POLICY IF EXISTS builder_credit_ledger_tenant_isolation ON builder.credit_ledger;
 CREATE POLICY builder_credit_ledger_tenant_isolation ON builder.credit_ledger
     USING (tenant_id = current_setting('app.current_tenant_id')::uuid);

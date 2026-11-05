@@ -14,10 +14,12 @@ import {
   queueVideo as replicateQueueVideo,
   synthesizeSpeech as replicateSynthesizeSpeech,
 } from "./replicate.js";
+import { falGenerateImage } from "./fal.js";
 
 // =============================================================================
 // Dispatch della GENERAZIONE (img_out / tts / vid_out) verso Venice, con
-// fallback automatico su Replicate quando Venice non risponde.
+// fallback automatico su Replicate quando Venice non risponde e, per le
+// immagini, su fal.ai come terzo livello.
 // Metering del consumo incluso.
 // =============================================================================
 
@@ -47,6 +49,16 @@ const UNIT_BY_CAPABILITY: Record<GenCapability, Unit> = {
 };
 
 /**
+ * Gli ID modello del catalogo Venice (es. "venice-sd35", "tts-kokoro") non
+ * esistono su Replicate: passarli al fallback produce un 404 inutile. Si
+ * inoltra al provider esterno solo un ID in forma "owner/name" (Replicate).
+ */
+function replicateModelId(requested: string | undefined): string | undefined {
+  if (!requested) return undefined;
+  return /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(requested) ? requested : undefined;
+}
+
+/**
  * Addebita un consumo generativo. La stima di prenotazione viene fornita dal
  * guard; qui si registra il consuntivo reale.
  */
@@ -56,7 +68,7 @@ async function billGen(
   model: string,
   billableUnits: number,
   latencyMs: number,
-  provider: "venice" | "replicate",
+  provider: "venice" | "replicate" | "fal",
 ): Promise<GenBilling> {
   const unit = UNIT_BY_CAPABILITY[capability];
   const res = await recordUsage({
@@ -96,21 +108,40 @@ export async function generateImageMetered(input: GenerateImageInput) {
     return { ...result, billing };
   } catch (veniceErr) {
     // Fallback su Replicate se Venice non risponde
-    const result = await replicateGenerateImage({
-      prompt: params.prompt,
-      model: meter.model ?? chosen.id,
-      aspectRatio: params.aspectRatio,
-      format: params.format,
-    });
-    const billing = await billGen(
-      meter,
-      "img_out",
-      result.model,
-      result.billableUnits,
-      result.latencyMs,
-      "replicate",
-    );
-    return { ...result, billing, fallbackFrom: "venice" };
+    try {
+      const result = await replicateGenerateImage({
+        prompt: params.prompt,
+        model: replicateModelId(meter.model),
+        aspectRatio: params.aspectRatio,
+        format: params.format,
+      });
+      const billing = await billGen(
+        meter,
+        "img_out",
+        result.model,
+        result.billableUnits,
+        result.latencyMs,
+        "replicate",
+      );
+      return { ...result, billing, fallbackFrom: "venice" };
+    } catch (replicateErr) {
+      // Terzo livello: fal.ai (immagini, endpoint sincroni).
+      const result = await falGenerateImage({
+        prompt: params.prompt,
+        model: "fal-ai/flux/schnell",
+        negativePrompt: params.negativePrompt,
+        aspectRatio: params.aspectRatio,
+      });
+      const billing = await billGen(
+        meter,
+        "img_out",
+        result.model,
+        result.billableUnits,
+        result.latencyMs,
+        "fal",
+      );
+      return { ...result, billing, fallbackFrom: "replicate" };
+    }
   }
 }
 
@@ -130,7 +161,7 @@ export async function synthesizeSpeechMetered(input: SynthesizeInput) {
     // Fallback su Replicate se Venice non risponde
     const result = await replicateSynthesizeSpeech({
       input: params.input,
-      model: meter.model ?? chosen.id,
+      model: replicateModelId(meter.model),
       voice: params.voice,
       responseFormat: params.responseFormat,
     });
@@ -166,7 +197,7 @@ export async function queueVideoMetered(input: QueueVideoInput) {
     // Fallback su Replicate se Venice non risponde
     const result = await replicateQueueVideo({
       prompt: params.prompt,
-      model: meter.model ?? chosen.id,
+      model: replicateModelId(meter.model) ?? "stability-ai/stable-video-diffusion",
       duration: params.duration,
       aspectRatio: params.aspectRatio,
     });
