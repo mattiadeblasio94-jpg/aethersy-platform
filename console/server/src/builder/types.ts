@@ -192,9 +192,11 @@ export type AgentType =
   | 'devops'
   | 'qa';
 
-export { PlannerInput, PlannerOutput, ProjectSpec, TaskGraph, TaskNode, TaskEdge, TechStack, Feature, PageSpec, ApiEndpoint, AuthConfig } from "./types.js";
+// Nota: la precedente riga di re-export `from "./types.js"` puntava a questo
+// stesso file (auto-import) e faceva fallire la build con TS1205/TS2484
+// ("Re-exporting a type when 'isolatedModules' is enabled" + conflitto con la
+// dichiarazione esportata). I tipi sono gia' dichiarati ed esportati qui.
 
-// Already exported above, re-exporting for convenience
 export interface Artifact {
   id: string;
   task_id: string;
@@ -257,101 +259,6 @@ export interface SandboxContainer {
   status: 'creating' | 'ready' | 'busy' | 'terminated';
   created_at: string;
   last_used_at?: string;
-}
-
-// Planner types
-export interface PlannerInput {
-  idea: string;
-  project_type?: ProjectType;
-  constraints?: Record<string, unknown>;
-  context?: Record<string, unknown>; // existing project state, library assets, etc.
-}
-
-export interface PlannerOutput {
-  spec: ProjectSpec;
-  task_graph: TaskGraph;
-  estimated_credits: number;
-  estimated_duration_minutes: number;
-}
-
-export interface ProjectSpec {
-  name: string;
-  description: string;
-  type: ProjectType;
-  tech_stack: TechStack;
-  features: Feature[];
-  pages: PageSpec[];
-  api_endpoints: ApiEndpoint[];
-  auth_config: AuthConfig;
-  deploy_config: DeployTargets;
-}
-
-export interface TechStack {
-  frontend: 'nextjs' | 'react' | 'vue' | 'svelte';
-  backend: 'fastify' | 'hono' | 'express' | 'nestjs';
-  database: 'postgresql' | 'mysql' | 'sqlite' | 'mongodb';
-  orm: 'prisma' | 'drizzle' | 'typeorm' | 'knex';
-  auth: 'better-auth' | 'nextauth' | 'clerk' | 'supabase' | 'custom';
-  styling: 'tailwind' | 'css-modules' | 'styled-components' | 'emotion';
-  ui_library: 'shadcn' | 'radix' | 'headlessui' | 'chakra' | 'mui';
-  testing: 'vitest' | 'jest' | 'playwright' | 'cypress';
-  ci_cd: 'github-actions' | 'gitlab-ci' | 'vercel' | 'railway';
-}
-
-export interface Feature {
-  id: string;
-  name: string;
-  description: string;
-  priority: 'high' | 'medium' | 'low';
-  dependencies?: string[];
-  tasks: string[]; // task types needed
-}
-
-export interface PageSpec {
-  route: string;
-  name: string;
-  description: string;
-  components: string[];
-  data_requirements?: string[];
-}
-
-export interface ApiEndpoint {
-  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
-  path: string;
-  description: string;
-  auth_required: boolean;
-  request_schema?: Record<string, unknown>;
-  response_schema?: Record<string, unknown>;
-}
-
-export interface AuthConfig {
-  provider: 'email' | 'oauth' | 'magic_link' | 'phone';
-  oauth_providers?: ('google' | 'github' | 'github' | 'microsoft' | 'discord')[];
-  mfa?: boolean;
-  roles?: string[];
-}
-
-export interface TaskGraph {
-  nodes: TaskNode[];
-  edges: TaskEdge[];
-}
-
-export interface TaskNode {
-  id: string;
-  type: string;
-  title: string;
-  description?: string;
-  agent: AgentType;
-  estimated_credits: number;
-  estimated_duration_minutes: number;
-  depends_on?: string[];
-  spec_template: Record<string, unknown>;
-}
-
-export interface TaskEdge {
-  from: string;
-  to: string;
-  condition?: string; // optional condition for execution
 }
 
 // Knowledge base types

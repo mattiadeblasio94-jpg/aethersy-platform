@@ -20,7 +20,6 @@ services:
       - ACME_EMAIL=${ACME_EMAIL}
       - APP_DOMAIN=${APP_DOMAIN:-app.aethersy.online}
       - MCP_DOMAIN=${MCP_DOMAIN:-mcp.aethersy.online}
-      - CONSOLE_DOMAIN=${CONSOLE_DOMAIN:-console.aethersy.online}
       - PLATFORM_DOMAIN=${PLATFORM_DOMAIN:-platform.aethersy.online}
       - APEX_DOMAIN=${APEX_DOMAIN:-aethersy.online}
     volumes:
@@ -29,7 +28,6 @@ services:
       - ./caddy/config:/config
     depends_on:
       - app
-      - console
       - platform
     networks:
       - aethersy
@@ -46,6 +44,7 @@ services:
     env_file: .env
     environment:
       - AP_CONTAINER_TYPE=APP
+      - AP_POSTGRES_PASSWORD=${AP_POSTGRES_PASSWORD}
     ports:
       # Esposto solo su localhost: serve per gli health check locali e il debug.
       # Il traffico pubblico passa esclusivamente da Caddy.
@@ -99,60 +98,6 @@ services:
         max-size: "10m"
         max-file: "5"
 
-  # Console proprietaria Aethersy (fusion A+B+C): frontend React + BFF Fastify.
-  # Parla con l'app Activepieces sulla rete interna; l'AI Router usa OpenRouter.
-  # Nessuna porta pubblicata: entra solo da Caddy su CONSOLE_DOMAIN.
-  console:
-    build:
-      context: ./console
-      dockerfile: Dockerfile
-    image: aethersy-console:${CONSOLE_VERSION:-0.1.0}
-    container_name: aethersy-console
-    restart: unless-stopped
-    environment:
-      - NODE_ENV=production
-      - PORT=3000
-      - AP_INTERNAL_URL=http://app:80
-      - AP_PUBLIC_URL=https://${APP_DOMAIN:-app.aethersy.online}
-      - CONSOLE_SESSION_SECRET=${CONSOLE_SESSION_SECRET}
-      - CONSOLE_COOKIE_DOMAIN=${CONSOLE_COOKIE_DOMAIN:-}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      # Venice: generazione img/tts/video (OpenRouter copre solo testo+comprensione).
-      - VENICE_API_KEY=${VENICE_API_KEY:-}
-      - VENICE_BASE_URL=${VENICE_BASE_URL:-https://api.venice.ai/api/v1}
-      # Metering/billing: schema Postgres `metering` (stesso DB dell'app, creato
-      # dallo schema applicativo all'avvio). Parametri discreti: niente
-      # credenziali dentro una URL, quindi nessun carattere da percent-encodare.
-      - CONSOLE_PGHOST=postgres
-      - CONSOLE_PGPORT=5432
-      - CONSOLE_PGUSER=${AP_POSTGRES_USERNAME}
-      - CONSOLE_PGPASSWORD=${AP_POSTGRES_PASSWORD}
-      - CONSOLE_PGDATABASE=${AP_POSTGRES_DATABASE}
-      - CONSOLE_REDIS_HOST=redis
-      - CONSOLE_REDIS_PORT=6379
-      - CONSOLE_REDIS_PASSWORD=${AP_REDIS_PASSWORD}
-      - METERING_ENABLED=${METERING_ENABLED:-false}
-      - METERING_RATE_PER_MINUTE=${METERING_RATE_PER_MINUTE:-120}
-      - METERING_SIGNUP_CREDITS=${METERING_SIGNUP_CREDITS:-0}
-      # Cifratura a riposo dei segreti di integrazione (AES-256-GCM). Se
-      # CONSOLE_SECRETS_KEY non e' impostata, il BFF ricade su AP_ENCRYPTION_KEY.
-      - CONSOLE_SECRETS_KEY=${CONSOLE_SECRETS_KEY:-}
-      - AP_ENCRYPTION_KEY=${AP_ENCRYPTION_KEY}
-      # Canale outbound (P0.6): fallback di stack per le notifiche lead/consegna
-      # quando il tenant non ha una credenziale `slack` dedicata. Vuoto = no-op.
-      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
-    depends_on:
-      - app
-      - postgres
-      - redis
-    networks:
-      - aethersy
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "5"
-
   # Piattaforma Aethersy (technical brief): SPA React mock-first servita da nginx.
   # Nessuna porta pubblica e nessun env: entra solo da Caddy su PLATFORM_DOMAIN.
   # Il layer anteprima e' anche dentro la Console su /preview (Fase 12 P0.8);
@@ -164,6 +109,66 @@ services:
     image: aethersy-platform:${PLATFORM_VERSION:-0.1.0}
     container_name: aethersy-platform
     restart: unless-stopped
+    networks:
+      - aethersy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # Console proprietaria Aethersy (BFF auth + AI router): serve /api/auth/* per la piattaforma.
+  # Nessun dominio pubblico dedicato: entra solo da Caddy su PLATFORM_DOMAIN via /api/*.
+  console:
+    build:
+      context: ./console
+      dockerfile: Dockerfile
+    image: aethersy-console:${CONSOLE_VERSION:-0.1.0}
+    container_name: aethersy-console
+    restart: unless-stopped
+    # Nessun bind-mount di dist: il codice eseguito e' quello compilato
+    # nell'immagine. Il mount precedente serviva per patchare il JS a mano e
+    # lasciava invecchiare il dist sul disco (il container ignorava l'immagine
+    # appena ricostruita).
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - AP_INTERNAL_URL=http://app:80
+      - AP_PUBLIC_URL=https://${APP_DOMAIN:-app.aethersy.online}
+      - CONSOLE_SESSION_SECRET=${CONSOLE_SESSION_SECRET}
+      - CONSOLE_COOKIE_DOMAIN=.aethersy.online
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - VENICE_API_KEY=${VENICE_API_KEY:-}
+      - VENICE_BASE_URL=${VENICE_BASE_URL:-https://api.venice.ai/api/v1}
+      - REPLICATE_API_KEY=${REPLICATE_API_KEY:-}
+      - REPLICATE_BASE_URL=${REPLICATE_BASE_URL:-https://api.replicate.com/v1}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
+      - NVIDIA_BASE_URL=${NVIDIA_BASE_URL:-https://integrate.api.nvidia.com/v1}
+      - NVIDIA_TIMEOUT_MS=${NVIDIA_TIMEOUT_MS:-90000}
+      - NVIDIA_MAX_TOKENS=${NVIDIA_MAX_TOKENS:-8192}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI:-}
+      - CONSOLE_PGHOST=postgres
+      - CONSOLE_PGPORT=5432
+      - CONSOLE_PGUSER=${AP_POSTGRES_USERNAME}
+      - CONSOLE_PGPASSWORD=${AP_POSTGRES_PASSWORD}
+      - CONSOLE_PGDATABASE=${AP_POSTGRES_DATABASE}
+      - CONSOLE_REDIS_HOST=redis
+      - CONSOLE_REDIS_PORT=6379
+      - CONSOLE_REDIS_PASSWORD=${AP_REDIS_PASSWORD}
+      - METERING_ENABLED=${METERING_ENABLED:-false}
+      - METERING_RATE_PER_MINUTE=${METERING_RATE_PER_MINUTE:-120}
+      - METERING_SIGNUP_CREDITS=${METERING_SIGNUP_CREDITS:-0}
+      - CONSOLE_SECRETS_KEY=${CONSOLE_SECRETS_KEY:-}
+      - AP_ENCRYPTION_KEY=${AP_ENCRYPTION_KEY}
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
+    depends_on:
+      - app
+      - postgres
+      - redis
     networks:
       - aethersy
     logging:

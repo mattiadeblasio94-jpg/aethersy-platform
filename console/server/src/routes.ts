@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { apFetch, ApError, toFlowView, toRunView } from "./ap.js";
 import { config } from "./config.js";
@@ -7,6 +8,7 @@ import { authorizeAi, flowRunId, estimateTokens } from "./metering/guard.js";
 import { balanceSnapshot, recentUsage } from "./metering/repo.js";
 import { selectGenModel } from "./ai-gen/select.js";
 import { registerPlatformRoutes } from "./platform/routes.js";
+import { requireMeteredTenant } from "./platform/guard.js";
 import { registerBusinessRoutes } from "./business/routes.js";
 import type { NotifyResult } from "./pipeline/notify.js";
 
@@ -129,6 +131,289 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       }
       throw err;
     }
+  });
+
+  // ------------------------------------------------ OAuth social login -----
+  app.get("/api/auth/social/google", async (_request, reply) => {
+    const { googleClientId, googleRedirectUri } = config;
+    if (!googleClientId) {
+      return reply.code(503).send({ code: "OAUTH_NOT_CONFIGURED", message: "Google OAuth non configurato" });
+    }
+
+    const params = new URLSearchParams({
+      client_id: googleClientId,
+      redirect_uri: googleRedirectUri,
+      response_type: "code",
+      scope: "openid email profile",
+      access_type: "offline",
+      prompt: "consent",
+    });
+
+    return reply.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
+  });
+
+  app.get("/api/auth/social/google/callback", async (request, reply) => {
+    const { googleClientId, googleClientSecret, googleRedirectUri } = config;
+    if (!googleClientId || !googleClientSecret) {
+      return reply.code(503).send({ code: "OAUTH_NOT_CONFIGURED", message: "Google OAuth non configurato" });
+    }
+
+    const { code, error } = (request.query ?? {}) as { code?: string; error?: string };
+    if (error) {
+      return reply.code(400).send({ code: "OAUTH_ERROR", message: `Google OAuth: ${error}` });
+    }
+    if (!code) {
+      return reply.code(400).send({ code: "BAD_REQUEST", message: "Codice autorizzazione mancante" });
+    }
+
+    // 1. Scambia il codice per i token
+    let tokenRes: any;
+    try {
+      const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: googleClientId,
+          client_secret: googleClientSecret,
+          code,
+          grant_type: "authorization_code",
+          redirect_uri: googleRedirectUri,
+        }),
+      });
+      tokenRes = await tokenResponse.json();
+      if (!tokenResponse.ok) {
+        return reply.code(400).send({ code: "TOKEN_EXCHANGE_FAILED", message: tokenRes.error_description ?? tokenRes.error });
+      }
+    } catch (err) {
+      return reply.code(502).send({ code: "TOKEN_EXCHANGE_FAILED", message: (err as Error).message });
+    }
+
+    const accessToken = tokenRes.access_token as string;
+
+    // 2. Recupera il profilo Google
+    let profile: any;
+    try {
+      const profileResponse = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      profile = await profileResponse.json();
+      if (!profileResponse.ok) {
+        return reply.code(400).send({ code: "PROFILE_FETCH_FAILED", message: profile.error ?? "Impossibile recuperare profilo Google" });
+      }
+    } catch (err) {
+      return reply.code(502).send({ code: "PROFILE_FETCH_FAILED", message: (err as Error).message });
+    }
+
+    const email = profile.email as string;
+    const firstName = profile.given_name ?? "";
+    const lastName = profile.family_name ?? "";
+    const picture = profile.picture as string | undefined;
+
+    if (!email) {
+      return reply.code(400).send({ code: "NO_EMAIL", message: "Nessuna email associata all'account Google" });
+    }
+
+    // 3. Prova il login su Activepieces con l'email (se l'utente esiste già)
+    let apResponse: any;
+    try {
+      apResponse = await apFetch<any>("/api/v1/authentication/sign-in", {
+        method: "POST",
+        body: JSON.stringify({ email, password: "" }),
+      });
+    } catch (err) {
+      // Se le credenziali non esistono, registra l'utente su Activepieces
+      if (err instanceof ApError && err.status === 401) {
+        try {
+          const created = await apFetch<any>("/api/v1/authentication/sign-up", {
+            method: "POST",
+            body: JSON.stringify({
+              email,
+              password: crypto.randomUUID(),
+              firstName,
+              lastName,
+              trackEvents: false,
+              newsLetter: false,
+            }),
+          });
+          apResponse = await apFetch<any>("/api/v1/authentication/sign-in", {
+            method: "POST",
+            body: JSON.stringify({ email, password: "" }),
+          });
+        } catch (err2) {
+          return reply.code(502).send({ code: "SIGN_UP_FAILED", message: (err2 as Error).message });
+        }
+      } else {
+        return reply.code(502).send({ code: "SIGN_IN_FAILED", message: (err as Error).message });
+      }
+    }
+
+    if (!apResponse?.token) {
+      return reply.code(502).send({ code: "BAD_GATEWAY", message: "Risposta di sign-in inattesa" });
+    }
+
+    const session: Session = {
+      token: apResponse.token,
+      user: {
+        id: apResponse.id,
+        email: apResponse.email,
+        firstName: apResponse.firstName ?? firstName,
+        lastName: apResponse.lastName ?? lastName,
+        platformRole: apResponse.platformRole,
+        verified: apResponse.verified,
+        projectId: apResponse.projectId ?? null,
+      },
+      exp: Math.floor(Date.now() / 1000) + config.cookieMaxAgeSec,
+    };
+    setSessionCookie(reply, session);
+
+    // Redirect al frontend (dashboard Platform o Console)
+    return reply.redirect("/");
+  });
+
+  // ------------------------------------------------ OAuth GitHub login -----
+  app.get("/api/auth/social/github", async (_request, reply) => {
+    const { githubClientId, githubRedirectUri } = config;
+    if (!githubClientId) {
+      return reply.code(503).send({ code: "OAUTH_NOT_CONFIGURED", message: "GitHub OAuth non configurato" });
+    }
+
+    const params = new URLSearchParams({
+      client_id: githubClientId,
+      redirect_uri: githubRedirectUri,
+      scope: "read:user user:email",
+      allow_signup: "true",
+    });
+
+    return reply.redirect(`https://github.com/login/oauth/authorize?${params.toString()}`);
+  });
+
+  app.get("/api/auth/social/github/callback", async (request, reply) => {
+    const { githubClientId, githubClientSecret, githubRedirectUri } = config;
+    if (!githubClientId || !githubClientSecret) {
+      return reply.code(503).send({ code: "OAUTH_NOT_CONFIGURED", message: "GitHub OAuth non configurato" });
+    }
+
+    const { code, error } = (request.query ?? {}) as { code?: string; error?: string };
+    if (error) {
+      return reply.code(400).send({ code: "OAUTH_ERROR", message: `GitHub OAuth: ${error}` });
+    }
+    if (!code) {
+      return reply.code(400).send({ code: "BAD_REQUEST", message: "Codice autorizzazione mancante" });
+    }
+
+    // 1. Scambia il codice per un access token
+    let tokenRes: any;
+    try {
+      const tokenResponse = await fetch("https://github.com/login/oauth/access_token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          client_id: githubClientId,
+          client_secret: githubClientSecret,
+          code,
+          redirect_uri: githubRedirectUri,
+        }),
+      });
+      tokenRes = await tokenResponse.json();
+      if (!tokenResponse.ok || tokenRes.error) {
+        return reply.code(400).send({ code: "TOKEN_EXCHANGE_FAILED", message: tokenRes.error_description ?? tokenRes.error ?? "Token exchange failed" });
+      }
+    } catch (err) {
+      return reply.code(502).send({ code: "TOKEN_EXCHANGE_FAILED", message: (err as Error).message });
+    }
+
+    const accessToken = tokenRes.access_token as string;
+
+    // 2. Recupera il profilo GitHub
+    let profile: any;
+    try {
+      const profileResponse = await fetch("https://api.github.com/user", {
+        headers: { Authorization: `Bearer ${accessToken}`, "User-Agent": "Aethersy-Console" },
+      });
+      profile = await profileResponse.json();
+      if (!profileResponse.ok) {
+        return reply.code(400).send({ code: "PROFILE_FETCH_FAILED", message: profile.message ?? "Impossibile recuperare profilo GitHub" });
+      }
+    } catch (err) {
+      return reply.code(502).send({ code: "PROFILE_FETCH_FAILED", message: (err as Error).message });
+    }
+
+    // 3. Recupera l'email primaria (GitHub può non esporla nel profilo pubblico)
+    let email = profile.email as string | undefined;
+    if (!email) {
+      try {
+        const emailsResponse = await fetch("https://api.github.com/user/emails", {
+          headers: { Authorization: `Bearer ${accessToken}`, "User-Agent": "Aethersy-Console" },
+        });
+        const emails = await emailsResponse.json();
+        const primary = Array.isArray(emails) ? emails.find((e: any) => e.primary && e.verified) : null;
+        email = primary?.email ?? emails[0]?.email;
+      } catch {
+        // Ignore, proveremo comunque con l'email dal profilo
+      }
+    }
+
+    if (!email) {
+      return reply.code(400).send({ code: "NO_EMAIL", message: "Nessuna email associata all'account GitHub" });
+    }
+
+    const firstName = profile.name ? profile.name.split(" ")[0] : "";
+    const lastName = profile.name ? profile.name.split(" ").slice(1).join(" ") : profile.login ?? "";
+    const picture = profile.avatar_url as string | undefined;
+
+    // 4. Prova il login su Activepieces con l'email
+    let apResponse: any;
+    try {
+      apResponse = await apFetch<any>("/api/v1/authentication/sign-in", {
+        method: "POST",
+        body: JSON.stringify({ email, password: "" }),
+      });
+    } catch (err) {
+      if (err instanceof ApError && err.status === 401) {
+        try {
+          const created = await apFetch<any>("/api/v1/authentication/sign-up", {
+            method: "POST",
+            body: JSON.stringify({
+              email,
+              password: crypto.randomUUID(),
+              firstName,
+              lastName,
+              trackEvents: false,
+              newsLetter: false,
+            }),
+          });
+          apResponse = await apFetch<any>("/api/v1/authentication/sign-in", {
+            method: "POST",
+            body: JSON.stringify({ email, password: "" }),
+          });
+        } catch (err2) {
+          return reply.code(502).send({ code: "SIGN_UP_FAILED", message: (err2 as Error).message });
+        }
+      } else {
+        return reply.code(502).send({ code: "SIGN_IN_FAILED", message: (err as Error).message });
+      }
+    }
+
+    if (!apResponse?.token) {
+      return reply.code(502).send({ code: "BAD_GATEWAY", message: "Risposta di sign-in inattesa" });
+    }
+
+    const session: Session = {
+      token: apResponse.token,
+      user: {
+        id: apResponse.id,
+        email: apResponse.email,
+        firstName: apResponse.firstName ?? firstName,
+        lastName: apResponse.lastName ?? lastName,
+        platformRole: apResponse.platformRole,
+        verified: apResponse.verified,
+        projectId: apResponse.projectId ?? null,
+      },
+      exp: Math.floor(Date.now() / 1000) + config.cookieMaxAgeSec,
+    };
+    setSessionCookie(reply, session);
+
+    return reply.redirect("/");
   });
 
   app.post("/api/auth/logout", async (_request, reply) => {
@@ -1007,6 +1292,211 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     const ok = await revokeIntegrationCredential(tenant.tenantId, id);
     if (!ok) return reply.code(404).send({ code: "NOT_FOUND", message: "Integrazione inesistente" });
     return { ok: true };
+  });
+
+  // ------------------------------------------ Piattaforme / Social (P1.2) ----
+  // Endpoint BFF per collegare piattaforme social e gestire post/agenda social.
+
+  // GET /api/platform/platforms -> elenco piattaforme collegate (integrazioni)
+  app.get("/api/platform/platforms", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+    const { listIntegrationCredentials } = await import("./pipeline/repo.js");
+    const creds = await listIntegrationCredentials(tenant.tenantId);
+    return creds.map((c) => ({
+      id: c.id,
+      provider: c.provider,
+      kind: c.kind,
+      label: c.label,
+      status: c.status,
+      connected: c.status === "active",
+    }));
+  });
+
+  // POST /api/platform/platforms/:id/connect -> attiva una piattaforma (crea o
+  // riattiva l'integrazione per il tenant).
+  app.post("/api/platform/platforms/:id/connect", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+    const { id } = request.params as { id: string };
+    const body = (request.body ?? {}) as {
+      provider?: string;
+      label?: string;
+      kind?: "oauth" | "webhook" | "api_key";
+    };
+    const provider = body.provider ?? id;
+    const label = body.label ?? provider;
+    const kind = body.kind ?? "oauth";
+    const { saveIntegrationCredential } = await import("./pipeline/repo.js");
+    const saved = await saveIntegrationCredential({
+      tenantId: tenant.tenantId,
+      provider,
+      kind,
+      label,
+      secretEnc: "", // nessun segreto fornito: connessione placeholder, attivabile in un secondo momento
+      scopes: [],
+      meta: { connectedAt: new Date().toISOString() },
+    });
+    return reply.code(201).send({
+      id: saved.id,
+      provider: saved.provider,
+      kind: saved.kind,
+      label: saved.label,
+      status: saved.status,
+      connected: saved.status === "active",
+    });
+  });
+
+  // DELETE /api/platform/platforms/:id -> disconnetti una piattaforma (revoca l'integrazione).
+  app.delete("/api/platform/platforms/:id", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+    const { id } = request.params as { id: string };
+    const { revokeIntegrationCredential } = await import("./pipeline/repo.js");
+    const ok = await revokeIntegrationCredential(tenant.tenantId, id);
+    if (!ok) return reply.code(404).send({ code: "NOT_FOUND", message: "Piattaforma non trovata" });
+    return { ok: true };
+  });
+
+  // GET /api/platform/social/posts -> lista post social (asset di kind 'social')
+  app.get("/api/platform/social/posts", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+    const { listAssets } = await import("./pipeline/repo.js");
+    const posts = await listAssets(tenant.tenantId, { kind: "social", limit: 100 });
+    return posts.map((p) => ({
+      id: p.id,
+      kind: p.kind,
+      name: p.name,
+      status: p.status,
+      storageKey: p.storage_key,
+      mime: p.mime,
+      createdAt: p.created_at,
+      meta: p.meta,
+    }));
+  });
+
+  // GET /api/platform/social/scheduled -> post social programmati (schedule di kind 'social')
+  app.get("/api/platform/social/scheduled", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+    const { listScheduleWithNext } = await import("./platform/repo.js");
+    const scheduled = await listScheduleWithNext(tenant.tenantId, { kind: "social" });
+    return scheduled.map((s) => ({
+      id: s.id,
+      title: s.title,
+      kind: s.kind,
+      stage: s.stage,
+      cron: s.cron,
+      runAt: s.run_at,
+      timezone: s.timezone,
+      status: s.status,
+      nextRunAt: s.nextRunAt ?? null,
+      createdAt: s.created_at,
+      updatedAt: s.updated_at,
+    }));
+  });
+
+  // GET /api/platform/social/summary -> KPI social aggregati
+  app.get("/api/platform/social/summary", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+    const { listAssets } = await import("./pipeline/repo.js");
+    const { listSchedule } = await import("./platform/repo.js");
+    const [posts, scheduled] = await Promise.all([
+      listAssets(tenant.tenantId, { kind: "social", limit: 500 }),
+      listSchedule(tenant.tenantId, { kind: "social" }),
+    ]);
+    const byStatus = posts.reduce<Record<string, number>>((acc, p) => {
+      acc[p.status] = (acc[p.status] ?? 0) + 1;
+      return acc;
+    }, {});
+    const scheduledByStatus = scheduled.reduce<Record<string, number>>((acc, s) => {
+      acc[s.status] = (acc[s.status] ?? 0) + 1;
+      return acc;
+    }, {});
+    return {
+      totalPosts: posts.length,
+      postsByStatus: byStatus,
+      totalScheduled: scheduled.length,
+      scheduledByStatus: scheduledByStatus,
+      lastPostAt: posts.length > 0 ? posts[0].created_at : null,
+    };
+  });
+
+  // GET /api/platform/tasks -> lista task (agent_task della pipeline per tenant)
+  app.get("/api/platform/tasks", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+    const { listRuns, listTasks } = await import("./pipeline/repo.js");
+    const runs = await listRuns(tenant.tenantId, { limit: 100 });
+    const tasks: Array<{
+      id: string;
+      runId: string;
+      runTitle: string;
+      runStage: string;
+      runStatus: string;
+      seq: number;
+      droid: string;
+      title: string;
+      status: string;
+      startedAt: Date | null;
+      finishedAt: Date | null;
+    }> = [];
+    for (const run of runs) {
+      const runTasks = await listTasks(tenant.tenantId, run.id);
+      for (const t of runTasks) {
+        tasks.push({
+          id: t.id,
+          runId: run.id,
+          runTitle: run.title,
+          runStage: run.stage,
+          runStatus: run.status,
+          seq: t.seq,
+          droid: t.droid,
+          title: t.title,
+          status: t.status,
+          startedAt: t.started_at,
+          finishedAt: t.finished_at,
+        });
+      }
+    }
+    tasks.sort((a, b) => (b.startedAt?.getTime() ?? 0) - (a.startedAt?.getTime() ?? 0));
+    return tasks;
+  });
+  app.post("/api/platform/agents/:id/activate", async (request, reply) => {
+    const session = requireSession(request, reply);
+    if (!session) return;
+    const { id } = request.params as { id: string };
+    try {
+      return await apFetch<any>(`/api/v1/flows/${encodeURIComponent(id)}/enable`, {
+        method: "POST",
+        token: session.token,
+      });
+    } catch (err) {
+      if (err instanceof ApError) {
+        return reply.code(err.status).send({ code: err.code ?? "ACTIVATE_FAILED", message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  // POST /api/platform/agents/:id/pause -> pausa un agente (flow Activepieces)
+  app.post("/api/platform/agents/:id/pause", async (request, reply) => {
+    const session = requireSession(request, reply);
+    if (!session) return;
+    const { id } = request.params as { id: string };
+    try {
+      return await apFetch<any>(`/api/v1/flows/${encodeURIComponent(id)}/disable`, {
+        method: "POST",
+        token: session.token,
+      });
+    } catch (err) {
+      if (err instanceof ApError) {
+        return reply.code(err.status).send({ code: err.code ?? "PAUSE_FAILED", message: err.message });
+      }
+      throw err;
+    }
   });
 
   // ------------------------------------------- Piattaforma (Business Pulse) ----

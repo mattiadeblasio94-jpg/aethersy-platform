@@ -2,6 +2,27 @@
 
 import type { Task, TaskStep, AgentType, SandboxExecRequest, SandboxExecResult, PlannerInput, PlannerOutput } from "../types.js";
 
+// Riesporta i tipi di dominio: i moduli degli agenti li importano da "./types.js".
+export type {
+  Task,
+  TaskStep,
+  AgentType,
+  SandboxExecRequest,
+  SandboxExecResult,
+  SandboxContainer,
+  PlannerInput,
+  PlannerOutput,
+  ProjectSpec,
+  TaskGraph,
+  TaskNode,
+  TaskEdge,
+  TechStack,
+  Feature,
+  PageSpec,
+  ApiEndpoint,
+  AuthConfig,
+} from "../types.js";
+
 export interface AgentContext {
   task: Task;
   step: TaskStep;

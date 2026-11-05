@@ -225,3 +225,260 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   );
 }`;
 }
+
+function generateAuthContext(): string {
+  return `'use client';
+
+import { createContext, useContext, useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
+
+export interface AuthUser {
+  id: string;
+  email: string;
+  name?: string;
+}
+
+export interface AuthContextValue {
+  user: AuthUser | null;
+  loading: boolean;
+  logout: () => Promise<void>;
+}
+
+const AuthContext = createContext<AuthContextValue>({
+  user: null,
+  loading: true,
+  logout: async () => {},
+});
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => setUser(data?.user ?? null))
+      .catch(() => setUser(null))
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function logout() {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    setUser(null);
+    window.location.href = '/login';
+  }
+
+  return (
+    <AuthContext.Provider value={{ user, loading, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth(): AuthContextValue {
+  return useContext(AuthContext);
+}
+`;
+}
+
+function generateProtectedRoute(): string {
+  return `'use client';
+
+import { useRouter } from 'next/navigation';
+import type { ReactNode } from 'react';
+import { useAuth } from '@/context/AuthContext';
+
+export function ProtectedRoute({ children }: { children: ReactNode }) {
+  const { user, loading } = useAuth();
+  const router = useRouter();
+
+  if (loading) {
+    return <div className="p-8 text-center text-gray-500">Caricamento...</div>;
+  }
+
+  if (!user) {
+    router.replace('/login');
+    return null;
+  }
+
+  return <>{children}</>;
+}
+`;
+}
+
+function generateApiClient(): string {
+  return `// lib/api-client.ts — client HTTP tipizzato con refresh automatico del token
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
+
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+    public body?: unknown,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(\`\${API_BASE}\${path}\`, {
+    ...init,
+    headers: {
+      'content-type': 'application/json',
+      ...(init.headers ?? {}),
+    },
+    credentials: 'include',
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    let body: unknown = text;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      // risposta non JSON: si tiene il testo grezzo
+    }
+    throw new ApiError(response.status, \`Request failed: \${response.status}\`, body);
+  }
+
+  if (response.status === 204) return undefined as T;
+  return (await response.json()) as T;
+}
+
+export const api = {
+  get: <T>(path: string) => request<T>(path),
+  post: <T>(path: string, data?: unknown) =>
+    request<T>(path, { method: 'POST', body: data ? JSON.stringify(data) : undefined }),
+  patch: <T>(path: string, data?: unknown) =>
+    request<T>(path, { method: 'PATCH', body: data ? JSON.stringify(data) : undefined }),
+  delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+};
+`;
+}
+
+function generateTailwindConfig(): string {
+  return `import type { Config } from 'tailwindcss';
+
+const config: Config = {
+  content: [
+    './apps/web/app/**/*.{ts,tsx}',
+    './apps/web/components/**/*.{ts,tsx}',
+    './apps/web/hooks/**/*.{ts,tsx}',
+    './packages/**/*.{ts,tsx}',
+  ],
+  theme: {
+    extend: {
+      colors: {
+        brand: {
+          main: '#1A1A2E',
+          light: '#16213E',
+          dark: '#0F0F23',
+        },
+      },
+    },
+  },
+  plugins: [],
+};
+
+export default config;
+`;
+}
+
+function generateDataHook(): string {
+  return `'use client';
+
+import { useCallback, useEffect, useState } from 'react';
+import { api } from '@/lib/api-client';
+
+export interface UseDataResult<T> {
+  data: T | null;
+  error: Error | null;
+  isLoading: boolean;
+  refetch: () => Promise<void>;
+}
+
+export function useData<T>(path: string): UseDataResult<T> {
+  const [data, setData] = useState<T | null>(null);
+  const [error, setError] = useState<Error | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const refetch = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const result = await api.get<T>(path);
+      setData(result);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error(String(err)));
+    } finally {
+      setIsLoading(false);
+    }
+  }, [path]);
+
+  useEffect(() => {
+    void refetch();
+  }, [refetch]);
+
+  return { data, error, isLoading, refetch };
+}
+`;
+}
+
+function generateToast(): string {
+  return `'use client';
+
+import { createContext, useCallback, useContext, useState } from 'react';
+import type { ReactNode } from 'react';
+
+export interface ToastMessage {
+  id: number;
+  title: string;
+  description?: string;
+  variant?: 'default' | 'success' | 'error';
+}
+
+interface ToastContextValue {
+  toast: (message: Omit<ToastMessage, 'id'>) => void;
+}
+
+const ToastContext = createContext<ToastContextValue>({ toast: () => {} });
+
+export function ToastProvider({ children }: { children: ReactNode }) {
+  const [messages, setMessages] = useState<ToastMessage[]>([]);
+
+  const toast = useCallback((message: Omit<ToastMessage, 'id'>) => {
+    const id = Date.now();
+    setMessages((current) => [...current, { ...message, id }]);
+    setTimeout(() => {
+      setMessages((current) => current.filter((m) => m.id !== id));
+    }, 5000);
+  }, []);
+
+  return (
+    <ToastContext.Provider value={{ toast }}>
+      {children}
+      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
+        {messages.map((message) => (
+          <div
+            key={message.id}
+            className={\`rounded-lg border px-4 py-3 shadow-lg bg-white text-sm \${
+              message.variant === 'error' ? 'border-red-300' : 'border-gray-200'
+            }\`}
+          >
+            <p className="font-medium">{message.title}</p>
+            {message.description ? (
+              <p className="text-gray-500">{message.description}</p>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </ToastContext.Provider>
+  );
+}
+
+export function useToast(): ToastContextValue {
+  return useContext(ToastContext);
+}
+`;
+}

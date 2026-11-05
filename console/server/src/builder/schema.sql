@@ -2,6 +2,8 @@
 -- Idempotent DDL for: tasks, steps, artifacts, projects, credit_ledger
 -- Runs in a single implicit transaction (simple query protocol).
 
+CREATE SCHEMA IF NOT EXISTS builder;
+
 -- Enum types
 DO $$ BEGIN
     CREATE TYPE builder.task_status AS ENUM (

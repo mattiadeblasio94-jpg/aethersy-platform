@@ -36,17 +36,18 @@ interface OpenRouterModel {
 const CACHE_TTL_MS = 5 * 60_000;
 let cache: { at: number; models: AiModel[] } | null = null;
 
-// Preferenze curate per capacita' (aggiornate 30/10/2026).
-// Modelli NVIDIA diretti (senza :free) + modelli OpenRouter gratuiti.
+// Preferenze curate per capacita' (aggiornate 05/11/2026 dopo la verifica
+// live sul catalogo NVIDIA: gli ID precedenti non esistono piu' e rispondevano
+// 404, es. `nvidia/nemotron-3-ultra-550b` -> `...-550b-a55b`).
 // L'ordine e' quello di preferenza: NVIDIA diretta prima, poi OpenRouter.
 const PREFERRED: Record<AiCapability, string[]> = {
   text: [
-    // NVIDIA diretta (gratis, alta qualità)
-    "nvidia/nemotron-3-ultra-550b",
-    "qwen/qwen3.5-122b-a10b",
-    "nvidia/nemotron-3-ultra-253b",
-    "nvidia/nemotron-4-340b",
-    "nvidia/nemotron-3.5-lightning",
+    // NVIDIA diretta (gratis, verifica live: ~2s di risposta)
+    "nvidia/nemotron-3.5-bolt-e4b",
+    "nvidia/nemotron-3.5-lightning-30b-a3b",
+    "nvidia/nemotron-3-super-120b-a12b",
+    "nvidia/nemotron-3-ultra-550b-a55b",
+    "nvidia/nemotron-4-340b-instruct",
     // OpenRouter gratuiti (fallback)
     "google/gemma-4-26b-a4b-it:free",
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
@@ -55,7 +56,7 @@ const PREFERRED: Record<AiCapability, string[]> = {
   ],
   image: [
     // NVIDIA diretta (vision)
-    "nvidia/nemotron-3.5-super-vl",
+    "nvidia/nemotron-3.5-super-vl-120b-a12b",
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
     // OpenRouter gratuiti (fallback)
     "google/gemma-4-26b-a4b-it:free",
@@ -72,11 +73,11 @@ const PREFERRED: Record<AiCapability, string[]> = {
   video: [
     // NVIDIA diretta (omni video input)
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
-    "nvidia/nemotron-3.5-super-vl",
+    "nvidia/nemotron-3.5-super-vl-120b-a12b",
     // OpenRouter gratuiti (fallback)
     "google/gemma-4-26b-a4b-it:free",
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
-    "nvidia/nemotron-3.5-super-vl:free",
+    "nvidia/nemotron-3.5-super-vl-120b-a12b:free",
   ],
 };
 
@@ -136,10 +137,23 @@ async function fetchOpenRouterCatalog(): Promise<AiModel[]> {
 }
 
 async function fetchMergedCatalog(): Promise<AiModel[]> {
-  const [openRouterModels, nvidiaModels] = await Promise.all([
+  // I due cataloghi sono indipendenti: un outage di OpenRouter non deve
+  // disattivare NVIDIA (e viceversa). Promise.allSettled + merge dei soli
+  // provider disponibili.
+  const [openRouter, nvidia] = await Promise.allSettled([
     fetchOpenRouterCatalog(),
     getNvidiaModels(),
   ]);
+
+  const openRouterModels = openRouter.status === "fulfilled" ? openRouter.value : [];
+  const nvidiaModels = nvidia.status === "fulfilled" ? nvidia.value : [];
+
+  if (!openRouterModels.length && !nvidiaModels.length) {
+    const reasons = [openRouter, nvidia]
+      .map((r) => (r.status === "rejected" ? String(r.reason?.message ?? r.reason) : "vuoto"))
+      .join(" | ");
+    throw new Error(`Catalogo AI non disponibile: ${reasons}`);
+  }
 
   // Merge: NVIDIA models take precedence for same id (direct API vs OpenRouter proxy)
   const merged = new Map<string, AiModel>();

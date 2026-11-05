@@ -1,6 +1,30 @@
 // builder/tasks/store.ts — Persistence layer for tasks, steps, artifacts, projects, credits
 
-import { db } from "../metering/db.js";
+import { db } from "../../metering/db.js";
+
+// --- normalizzazione righe Postgres -------------------------------------------
+
+function str(value: unknown): string {
+  return value === null || value === undefined ? "" : String(value);
+}
+
+function strOpt(value: unknown): string | undefined {
+  return value === null || value === undefined ? undefined : String(value);
+}
+
+function num(value: unknown): number {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function obj(value: unknown): Record<string, unknown> {
+  return (value ?? {}) as Record<string, unknown>;
+}
+
+function objOpt(value: unknown): Record<string, unknown> | undefined {
+  return value === null || value === undefined ? undefined : (value as Record<string, unknown>);
+}
+
 import type {
   Project,
   Task,
@@ -12,6 +36,7 @@ import type {
   ProjectType,
   CreditReason,
   ArtifactKind,
+  AgentType,
 } from "./types.js";
 
 export class TaskStore {
@@ -244,87 +269,92 @@ export class TaskStore {
   }
 
   // ========== MAPPERS ==========
+  // Le righe Postgres tornano come `unknown`: i mapper normalizzano i valori
+  // una sola volta, qui, invece di disperdere cast nei consumer.
+
   private mapProject(row: Record<string, unknown>): Project {
     return {
-      id: row.id,
-      tenant_id: row.tenant_id,
-      name: row.name,
-      description: row.description,
-      type: row.type as ProjectType,
-      spec: row.spec as Record<string, unknown>,
-      repo_url: row.repo_url,
-      deploy_targets: row.deploy_targets as Record<string, unknown>,
-      status: row.status,
-      created_at: row.created_at,
-      updated_at: row.updated_at,
+      id: str(row.id),
+      tenant_id: str(row.tenant_id),
+      name: str(row.name),
+      description: strOpt(row.description),
+      type: (row.type as ProjectType) ?? "other",
+      spec: obj(row.spec),
+      repo_url: strOpt(row.repo_url),
+      deploy_targets: obj(row.deploy_targets),
+      status: (str(row.status) || "active") as Project["status"],
+      created_at: str(row.created_at),
+      updated_at: str(row.updated_at),
     };
   }
 
   private mapTask(row: Record<string, unknown>): Task {
     return {
-      id: row.id,
-      project_id: row.project_id,
-      tenant_id: row.tenant_id,
-      type: row.type,
-      title: row.title,
-      description: row.description,
-      status: row.status as TaskStatus,
-      spec: row.spec as Record<string, unknown>,
-      result: row.result as Record<string, unknown> | undefined,
-      cost_credits: Number(row.cost_credits),
-      estimated_credits: row.estimated_credits ? Number(row.estimated_credits) : undefined,
-      parent_task_id: row.parent_task_id,
-      priority: Number(row.priority),
-      started_at: row.started_at,
-      completed_at: row.completed_at,
-      created_at: row.created_at,
-      updated_at: row.updated_at,
+      id: str(row.id),
+      project_id: str(row.project_id),
+      tenant_id: str(row.tenant_id),
+      type: str(row.type),
+      title: str(row.title),
+      description: strOpt(row.description),
+      status: (str(row.status) || "pending") as TaskStatus,
+      spec: obj(row.spec),
+      result: objOpt(row.result),
+      cost_credits: num(row.cost_credits),
+      estimated_credits: row.estimated_credits === null || row.estimated_credits === undefined
+        ? undefined
+        : num(row.estimated_credits),
+      parent_task_id: strOpt(row.parent_task_id),
+      priority: num(row.priority),
+      started_at: strOpt(row.started_at),
+      completed_at: strOpt(row.completed_at),
+      created_at: str(row.created_at),
+      updated_at: str(row.updated_at),
     };
   }
 
   private mapStep(row: Record<string, unknown>): TaskStep {
     return {
-      id: row.id,
-      task_id: row.task_id,
-      agent: row.agent,
-      step_order: Number(row.step_order),
-      status: row.status as StepStatus,
-      input: row.input as Record<string, unknown>,
-      output: row.output as Record<string, unknown> | undefined,
-      error: row.error,
-      started_at: row.started_at,
-      completed_at: row.completed_at,
-      created_at: row.created_at,
+      id: str(row.id),
+      task_id: str(row.task_id),
+      agent: str(row.agent) as AgentType,
+      step_order: num(row.step_order),
+      status: (str(row.status) || "pending") as StepStatus,
+      input: obj(row.input),
+      output: objOpt(row.output),
+      error: strOpt(row.error),
+      started_at: strOpt(row.started_at),
+      completed_at: strOpt(row.completed_at),
+      created_at: str(row.created_at),
     };
   }
 
   private mapArtifact(row: Record<string, unknown>): Artifact {
     return {
-      id: row.id,
-      task_id: row.task_id,
-      project_id: row.project_id,
-      tenant_id: row.tenant_id,
-      kind: row.kind as ArtifactKind,
-      name: row.name,
-      description: row.description,
-      uri: row.uri,
-      metadata: row.metadata as Record<string, unknown>,
-      version: Number(row.version),
-      created_at: row.created_at,
+      id: str(row.id),
+      task_id: str(row.task_id),
+      project_id: str(row.project_id),
+      tenant_id: str(row.tenant_id),
+      kind: str(row.kind) as ArtifactKind,
+      name: str(row.name),
+      description: strOpt(row.description),
+      uri: str(row.uri),
+      metadata: obj(row.metadata),
+      version: num(row.version),
+      created_at: str(row.created_at),
     };
   }
 
   private mapCreditEntry(row: Record<string, unknown>): CreditLedgerEntry {
     return {
-      id: row.id,
-      tenant_id: row.tenant_id,
-      delta: Number(row.delta),
-      reason: row.reason as CreditReason,
-      task_id: row.task_id,
-      project_id: row.project_id,
-      balance_after: Number(row.balance_after),
-      metadata: row.metadata as Record<string, unknown>,
-      created_at: row.created_at,
+      id: str(row.id),
+      tenant_id: str(row.tenant_id),
+      delta: num(row.delta),
+      reason: str(row.reason) as CreditReason,
+      task_id: strOpt(row.task_id),
+      project_id: strOpt(row.project_id),
+      balance_after: num(row.balance_after),
+      metadata: obj(row.metadata),
+      created_at: str(row.created_at),
     };
   }
 }

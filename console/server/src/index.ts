@@ -4,18 +4,18 @@ import cookie from "@fastify/cookie";
 import fastifyStatic from "@fastify/static";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToType } from "node:url";
+import { fileURLToPath } from "node:url";
 import { config } from "./config.js";
 import { registerRoutes } from "./routes.js";
-import { createEdgeServer } from "./edge/index.js";
 
-const here = path.dirname(fileURLToType(import.meta.url));
+const here = path.dirname(fileURLToPath(import.meta.url));
 // In produzione `dist/index.js` -> public/ sta in ../public (COPY nel Dockerfile).
 const publicDir = path.resolve(here, "..", "public");
 
 const app = Fastify({ logger: true, trustProxy: true });
 
 await app.register(cookie);
+await registerRoutes(app);
 
 app.get("/api/health", async () => ({ status: "ok", service: "aethersy-console" }));
 
@@ -50,6 +50,17 @@ try {
   app.log.error({ err }, "migrazione business fallita: business inerte");
 }
 
+// Migrazione idempotente dello schema `builder` (Universal Builder Platform).
+// Senza questa chiamata le tabelle builder.* non esistevano mai: le rotte
+// /api/builder/* rispondevano 500 su Postgres "relation does not exist".
+try {
+  const { migrateBuilder } = await import("./builder/migrate.js");
+  const res = await migrateBuilder();
+  if (res.applied) app.log.info("schema builder applicato");
+} catch (err) {
+  app.log.error({ err }, "migrazione builder fallita: builder inerte");
+}
+
 // Avvia lo scheduler per lo snapshot automatico dei listini (price_book + fx_usd_eur).
 // Cron: "0 */6 * * *" (ogni 6h, minuto 0) in timezone Europe/Rome.
 try {
@@ -64,6 +75,12 @@ try {
 try {
   const { builderRoutes } = await import("./builder/routes.js");
   await builderRoutes(app);
+
+  // Il motore dei task e' creato con autoStart=false: senza start() i task
+  // creati restavano in coda senza mai essere eseguiti.
+  const { taskEngine } = await import("./builder/tasks/engine.js");
+  taskEngine.start();
+
   app.log.info("universal-builder-platform routes registrati");
 } catch (err) {
   app.log.error({ err }, "impossibile registrare builder routes");
@@ -74,6 +91,8 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.once(signal, async () => {
     app.log.info(`ricevuto ${signal}: chiusura in corso`);
     try {
+      const { taskEngine } = await import("./builder/tasks/engine.js");
+      taskEngine.stop();
       const { closeRedis } = await import("./metering/guard.js");
       const { closePool } = await import("./metering/db.js");
       await Promise.allSettled([closeRedis(), closePool()]);
@@ -84,15 +103,20 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
   });
 }
 
-// Integra il server edge per autenticazione, routing e static serving (ADR 0002, fase 1b).
-// Se AETHERSY_EDGE=on, il traffico pubblico passa attraverso l'edge con auth obbligatoria.
-// Se AETHERSY_AUTH=off, l'account di servizio viene iniettato ma l'auth pubblica è disabilitata.
-try {
-  const edgeApp = await createEdgeServer({ app, publicDir, config });
-  app.log.info("server edge integrato");
-} catch (err) {
-  app.log.error({ err }, "errore durante l'integrazione del server edge");
-}
+// Server edge (ADR 0002, fase 1b): rimosso.
+// Il prototipo edge/auth non e' mai stato completato (nessun modulo `src/edge/`
+// nel repo, adapter di verifica assente, router v2 non implementato) e la sua
+// importazione statica rendeva il BFF NON COMPILABILE: `npm run build` falliva
+// con "Cannot find module './edge/index.js'", quindi l'immagine console non
+// poteva essere ricostruita dal sorgente.
+//
+// Architettura oggi: Caddy (TLS) -> platform (nginx, SPA) e -> console (BFF)
+// che espone la sessione reale (/api/auth/login, /api/auth/session, cookie
+// httpOnly). Il livello edge e' quindi superato dal reverse proxy + dalla
+// sessione del console. Se in futuro serve, va reintrodotto come modulo
+// completo e opzionale (import dinamico dentro il try/catch), non come
+// import statico obbligatorio.
+// Riferimento: docs/phases.md -> "Edge auth: prototipo rimosso".
 
 // SPA statica + fallback su index.html per il client router.
 // In sviluppo la cartella public/ puo' non esistere: in quel caso il frontend
