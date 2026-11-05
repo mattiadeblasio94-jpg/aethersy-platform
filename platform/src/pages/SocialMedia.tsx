@@ -26,11 +26,14 @@ import { EmptyState, KpiCard, PageHeader } from "@/components/common/PageElement
 import {
   useConnectPlatform,
   useDisconnectPlatform,
-  usePlatforms,
-  usePosts,
-  useScheduledPosts,
-  useSocialSummary,
 } from "@/lib/queries";
+import {
+  usePlatforms,
+  useSocialPosts,
+  useSocialScheduledPosts,
+  useSocialSummary,
+} from "@/lib/platform-queries";
+import { adaptPlatforms, adaptSocialPosts, adaptSocialScheduledPosts, adaptSocialSummary } from "@/lib/adapters";
 import type { Platform, PlatformId } from "@/lib/types";
 import {
   formatCompactNumber,
@@ -53,16 +56,21 @@ export default function SocialMedia() {
   const [connectionTarget, setConnectionTarget] = useState<Platform | null>(null);
   const { toast } = useToast();
 
-  const platforms = usePlatforms();
-  const posts = usePosts();
-  const scheduled = useScheduledPosts();
-  const summary = useSocialSummary();
+  const platformsReal = usePlatforms();
+  const postsReal = useSocialPosts();
+
+  const platforms = adaptPlatforms(platformsReal.data ?? []);
+  const posts = adaptSocialPosts(postsReal.data ?? []);
+  const scheduledReal = useSocialScheduledPosts();
+  const scheduled = adaptSocialScheduledPosts(scheduledReal.data ?? []);
+  const summaryReal = useSocialSummary();
+  const summary = adaptSocialSummary(summaryReal.data);
 
   const connectPlatform = useConnectPlatform();
   const disconnectPlatform = useDisconnectPlatform();
 
-  const recentPosts = useMemo(() => (posts.data ?? []).slice(0, 6), [posts.data]);
-  const connectedPlatforms = (platforms.data ?? []).filter(
+  const recentPosts = useMemo(() => posts.slice(0, 6), [posts]);
+  const connectedPlatforms = platforms.filter(
     (platform) => platform.status === "connected",
   );
 
@@ -114,7 +122,7 @@ export default function SocialMedia() {
 
       {/* Statistiche rapide */}
       <section aria-label="Statistiche social">
-        {summary.isLoading ? (
+        {summaryReal.isLoading ? (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             {Array.from({ length: 4 }).map((_, index) => (
               <Card key={index} className="flex flex-col gap-3">
@@ -127,28 +135,28 @@ export default function SocialMedia() {
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <KpiCard
               label="Follower totali"
-              value={formatCompactNumber(summary.data?.totalFollowers ?? 0)}
+              value={formatCompactNumber(summary.totalFollowers)}
               icon={<Share2 className="h-5 w-5 text-secondary" aria-hidden="true" />}
               delta="+3,2%"
               trend="up"
             />
             <KpiCard
               label="Engagement rate"
-              value={formatPercent(summary.data?.engagementRate ?? 0)}
+              value={formatPercent(summary.engagementRate)}
               icon={<TrendingUp className="h-5 w-5 text-secondary" aria-hidden="true" />}
               delta="+0,6 pt"
               trend="up"
             />
             <KpiCard
               label="Post questa settimana"
-              value={formatNumber(summary.data?.postsThisWeek ?? 0)}
+              value={formatNumber(summary.postsThisWeek)}
               icon={<CalendarClock className="h-5 w-5 text-secondary" aria-hidden="true" />}
               delta="+4"
               trend="up"
             />
             <KpiCard
               label="Reach"
-              value={formatCompactNumber(summary.data?.reach ?? 0)}
+              value={formatCompactNumber(summary.reach)}
               icon={<Eye className="h-5 w-5 text-secondary" aria-hidden="true" />}
               delta="-1,1%"
               trend="down"
@@ -161,11 +169,13 @@ export default function SocialMedia() {
       <section aria-label="Piattaforme collegate" className="flex flex-col gap-3">
         <h2 className="font-display text-lg font-semibold text-text-primary">Piattaforme</h2>
         <PlatformGrid
-          platforms={platforms.data ?? []}
-          loading={platforms.isLoading}
-          connectingId={connectPlatform.isPending ? (connectPlatform.variables ?? null) : null}
+          platforms={platforms}
+          loading={platformsReal.isLoading}
+          connectingId={(connectPlatform.isPending
+            ? (connectPlatform.variables as PlatformId | null)
+            : null) ?? null}
           onConnect={(id) => {
-            const platform = (platforms.data ?? []).find((item) => item.id === id) ?? null;
+            const platform = platforms.find((item) => item.id === id) ?? null;
             setConnectionTarget(platform);
           }}
           onDisconnect={handleDisconnect}
@@ -184,7 +194,7 @@ export default function SocialMedia() {
             }
             bodyClassName="p-0"
           >
-            {posts.isLoading ? (
+            {postsReal.isLoading ? (
               <ul className="divide-y divide-secondary/10">
                 {Array.from({ length: 4 }).map((_, index) => (
                   <li key={index} className="flex items-center gap-4 px-5 py-4">
@@ -206,7 +216,7 @@ export default function SocialMedia() {
             ) : (
               <ul className="divide-y divide-secondary/10">
                 {recentPosts.map((post) => {
-                  const platform = (platforms.data ?? []).find((item) => item.id === post.platform);
+                  const platform = platforms.find((item) => item.id === post.platform);
                   return (
                     <li key={post.id} className="flex items-start gap-4 px-5 py-4">
                       <span
@@ -271,7 +281,7 @@ export default function SocialMedia() {
             header={<h2 className="text-base font-semibold text-text-primary">Programmati</h2>}
             bodyClassName="p-0"
           >
-            {scheduled.isLoading ? (
+            {scheduledReal.isLoading ? (
               <ul className="divide-y divide-secondary/10">
                 {Array.from({ length: 3 }).map((_, index) => (
                   <li key={index} className="px-5 py-4">
@@ -279,7 +289,7 @@ export default function SocialMedia() {
                   </li>
                 ))}
               </ul>
-            ) : (scheduled.data ?? []).length === 0 ? (
+            ) : scheduled.length === 0 ? (
               <div className="p-5">
                 <EmptyState
                   icon={<CalendarClock className="h-5 w-5" aria-hidden="true" />}
@@ -289,7 +299,7 @@ export default function SocialMedia() {
               </div>
             ) : (
               <ul className="divide-y divide-secondary/10">
-                {(scheduled.data ?? []).map((item) => (
+                {scheduled.map((item) => (
                   <li key={item.id} className="flex items-start gap-3 px-5 py-4">
                     <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-tertiary/15">
                       <CalendarClock className="h-4 w-4 text-tertiary" aria-hidden="true" />

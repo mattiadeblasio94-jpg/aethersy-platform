@@ -19,7 +19,15 @@ export function Protected({ children }: { children: ReactNode }) {
     if (status === "idle") void bootstrap();
   }, [status, bootstrap]);
 
-  if (!isAuthenticated && status === "idle") {
+  // Sezione autenticata: la sessione e' valida, si renderizza il contenuto.
+  if (isAuthenticated) return <>{children}</>;
+
+  // Sessione in verifica (bootstrap non ancora concluso): si mostra lo skeleton.
+  // NON si reindirizza qui: durante il bootstrap lo store passa da "idle" a
+  // "loading" mentre `isAuthenticated` e' ancora false. Reindirizzare in quel
+  // momento rimbalzava l'utente a /login anche con cookie valido (reload su
+  // una rotta protetta). Il redirect avviene solo a risposta negativa.
+  if (status === "idle" || status === "loading") {
     return (
       <div className="px-4 py-8">
         <SkeletonList count={3} />
@@ -27,9 +35,7 @@ export function Protected({ children }: { children: ReactNode }) {
     );
   }
 
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
-  }
-
-  return <>{children}</>;
+  // Sessione assente confermata dal BFF: redirect al login, conservando la
+  // provenienza per tornare indietro dopo l'accesso.
+  return <Navigate to="/login" replace state={{ from: location.pathname }} />;
 }

@@ -23,6 +23,11 @@ export const realKeys = {
   library: ["real", "library"] as const,
   account: ["real", "account"] as const,
   faq: ["real", "faq"] as const,
+  platforms: ["real", "platforms"] as const,
+  socialPosts: ["real", "social-posts"] as const,
+  socialScheduled: ["real", "social-scheduled"] as const,
+  socialSummary: ["real", "social-summary"] as const,
+  tasks: ["real", "tasks"] as const,
 };
 
 export function useBalance() {
@@ -157,6 +162,87 @@ export function useFaq(category?: string) {
   return useQuery({
     queryKey: [...realKeys.faq, category ?? "all"] as const,
     queryFn: () => platformApi.getFaq(category),
+  });
+}
+
+// --- Piattaforme / connessioni social ---------------------------------------
+
+export function usePlatforms() {
+  return useQuery({
+    queryKey: realKeys.platforms,
+    queryFn: () => platformApi.getPlatforms(),
+  });
+}
+
+export function useConnectPlatform() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => platformApi.connectPlatform(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: realKeys.platforms }),
+  });
+}
+
+export function useDisconnectPlatform() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => platformApi.disconnectPlatform(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: realKeys.platforms }),
+  });
+}
+
+// --- Post social ------------------------------------------------------------
+
+export function useSocialPosts() {
+  return useQuery({
+    queryKey: realKeys.socialPosts,
+    queryFn: () => platformApi.getSocialPosts(),
+  });
+}
+
+export function useSocialScheduledPosts() {
+  return useQuery({
+    queryKey: realKeys.socialScheduled,
+    queryFn: () => platformApi.getSocialScheduledPosts(),
+  });
+}
+
+export function useSocialSummary() {
+  return useQuery({
+    queryKey: realKeys.socialSummary,
+    queryFn: () => platformApi.getSocialSummary(),
+  });
+}
+
+// --- Task -------------------------------------------------------------------
+
+export function useTasks() {
+  return useQuery({
+    queryKey: realKeys.tasks,
+    queryFn: () => platformApi.getTasks(),
+  });
+}
+
+// --- Agenti attiva/pausa ----------------------------------------------------
+
+export function useActivateAgent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => platformApi.activateAgent(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: realKeys.platforms });
+      qc.invalidateQueries({ queryKey: realKeys.tasks });
+    },
+  });
+}
+
+export function usePauseAgent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => platformApi.pauseAgent(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: realKeys.platforms });
+      qc.invalidateQueries({ queryKey: realKeys.tasks });
+    },
   });
 }
 

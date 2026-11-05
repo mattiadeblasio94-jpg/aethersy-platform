@@ -55,6 +55,7 @@ import {
   userProfile,
   webhooks,
   workspaces,
+  aiProviders,
 } from "@/mocks";
 import type {
   AdCampaign,
@@ -100,6 +101,8 @@ import type {
   UserProfile,
   Webhook,
   Workspace,
+  AIProvider,
+  AIProviderId,
 } from "./types";
 
 /** Latenza simulata del mock layer. */
@@ -454,6 +457,21 @@ export const api = {
   /** Rimuove (mock) un webhook. Endpoint reale: DELETE /api/settings/webhooks/:id */
   removeWebhook(webhookId: string): Promise<{ ok: true; id: string }> {
     return delay({ ok: true as const, id: webhookId }, 400);
+  },
+
+  // --- Provider AI -------------------------------------------------------
+
+  /** Configurazione provider AI. Endpoint reale: GET /api/settings/ai-providers */
+  getAIProviders(): Promise<AIProvider[]> {
+    return delay(clone(aiProviders));
+  },
+
+  /** Salva/aggiorna la configurazione di un provider AI. Endpoint reale: PUT /api/settings/ai-providers/:id */
+  updateAIProvider(input: { provider: AIProviderId; apiKey: string; baseUrl?: string; model?: string; enabled: boolean }): Promise<{
+    ok: true;
+    provider: AIProviderId;
+  }> {
+    return delay({ ok: true as const, provider: input.provider }, 600);
   },
 
   // --- Notifiche ----------------------------------------------------------

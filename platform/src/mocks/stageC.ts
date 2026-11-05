@@ -10,6 +10,7 @@
 // =============================================================================
 
 import type {
+  AIProvider,
   ApiKey,
   FaqItem,
   HelpCategory,
@@ -365,6 +366,47 @@ export const faqItems: FaqItem[] = [
     question: "Come configuro un webhook?",
     answer:
       "Sempre in Impostazioni > Integrazioni: aggiungi l'URL di destinazione e seleziona gli eventi da ricevere. Aethersy invia una richiesta POST firmata a ogni evento attivato.",
+  },
+];
+
+// --- Provider AI -----------------------------------------------------------
+
+export const aiProviders: AIProvider[] = [
+  {
+    id: "openrouter",
+    name: "OpenRouter",
+    status: "configured",
+    capabilities: ["chat", "image"],
+    keyPrefix: "sk-or-",
+    fallbackFor: undefined,
+    lastCheckedAt: isoHoursAgo(2),
+  },
+  {
+    id: "nvidia",
+    name: "NVIDIA (integrate.api.nvidia.com)",
+    status: "configured",
+    capabilities: ["chat", "image"],
+    keyPrefix: "nvapi-",
+    fallbackFor: undefined,
+    lastCheckedAt: isoHoursAgo(1),
+  },
+  {
+    id: "venice",
+    name: "Venice AI",
+    status: "configured",
+    capabilities: ["image", "tts", "video"],
+    keyPrefix: "sk-venice-",
+    fallbackFor: undefined,
+    lastCheckedAt: isoHoursAgo(4),
+  },
+  {
+    id: "replicate",
+    name: "Replicate",
+    status: "not_configured",
+    capabilities: ["image", "tts", "video"],
+    keyPrefix: "r8_",
+    fallbackFor: "venice",
+    lastCheckedAt: null,
   },
 ];
 

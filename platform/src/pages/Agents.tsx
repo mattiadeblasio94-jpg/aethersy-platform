@@ -12,7 +12,12 @@ import { Tabs } from "@/components/ui/Tabs";
 import { useToast } from "@/components/ui/Toast";
 import { AgentList } from "@/components/domain/AgentList";
 import { EmptyState, PageHeader } from "@/components/common/PageElements";
-import { useActivateAgent, useAgents, usePauseAgent } from "@/lib/queries";
+import {
+  useActivateAgent as useActivateAgentReal,
+  usePauseAgent as usePauseAgentReal,
+  useRoster,
+} from "@/lib/platform-queries";
+import { adaptRoster } from "@/lib/adapters";
 import type { AgentStatus } from "@/lib/types";
 
 const FILTERS: { value: string; label: string }[] = [
@@ -28,12 +33,13 @@ export default function Agents() {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const agents = useAgents();
-  const activateAgent = useActivateAgent();
-  const pauseAgent = usePauseAgent();
+  const roster = useRoster();
+  const agentsData = adaptRoster(roster.data ?? []);
+  const activateAgent = useActivateAgentReal();
+  const pauseAgent = usePauseAgentReal();
 
   const filtered = useMemo(() => {
-    const list = agents.data ?? [];
+    const list = agentsData;
     return list.filter((agent) => {
       const matchesStatus = filter === "all" || agent.status === (filter as AgentStatus);
       const matchesQuery =
@@ -42,7 +48,7 @@ export default function Agents() {
         agent.description.toLowerCase().includes(query.trim().toLowerCase());
       return matchesStatus && matchesQuery;
     });
-  }, [agents.data, filter, query]);
+  }, [agentsData, filter, query]);
 
   const pendingId = activateAgent.isPending
     ? (activateAgent.variables ?? null)
@@ -104,7 +110,7 @@ export default function Agents() {
 
       <AgentList
         agents={filtered}
-        loading={agents.isLoading}
+        loading={roster.isLoading}
         pendingAgentId={pendingId}
         onActivate={handleActivate}
         onPause={handlePause}
@@ -112,7 +118,7 @@ export default function Agents() {
         emptyMessage="Nessun agente corrisponde ai filtri."
       />
 
-      {!agents.isLoading && (agents.data ?? []).length === 0 && (
+      {!roster.isLoading && agentsData.length === 0 && (
         <EmptyState
           icon={<Bot className="h-5 w-5" aria-hidden="true" />}
           title="Nessun agente configurato"
