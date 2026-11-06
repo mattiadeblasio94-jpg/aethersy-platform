@@ -28,6 +28,10 @@ export const realKeys = {
   socialScheduled: ["real", "social-scheduled"] as const,
   socialSummary: ["real", "social-summary"] as const,
   tasks: ["real", "tasks"] as const,
+  goals: ["real", "goals"] as const,
+  memory: ["real", "memory"] as const,
+  businessCatalog: ["real", "business-catalog"] as const,
+  usage: ["real", "usage"] as const,
 };
 
 export function useBalance() {
@@ -224,8 +228,7 @@ export function useTasks() {
 
 // --- Agenti attiva/pausa ----------------------------------------------------
 
-export function useActivateAgent() {
-  const qc = useQueryClient();
+export function useActivateAgent() {  const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => platformApi.activateAgent(id),
     onSuccess: () => {
@@ -247,3 +250,149 @@ export function usePauseAgent() {
 }
 
 export { platformApi };
+
+// --- Obiettivi (business.goal) ---------------------------------------------
+
+export function useGoals(status?: string) {
+  return useQuery({
+    queryKey: [...realKeys.goals, status ?? "all"] as const,
+    queryFn: () => platformApi.getGoals(status),
+  });
+}
+
+export function useCreateGoal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      title: string;
+      description?: string;
+      status?: string;
+      priority?: number;
+      metric?: string;
+      targetDate?: string | null;
+    }) => platformApi.createGoal(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: realKeys.goals });
+      qc.invalidateQueries({ queryKey: realKeys.overview });
+    },
+  });
+}
+
+export function useUpdateGoal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      id: string;
+      body: {
+        title?: string;
+        description?: string;
+        status?: string;
+        priority?: number;
+        metric?: string;
+        targetDate?: string | null;
+      };
+    }) => platformApi.updateGoal(input.id, input.body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: realKeys.goals }),
+  });
+}
+
+export function useDeleteGoal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => platformApi.deleteGoal(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: realKeys.goals }),
+  });
+}
+
+// --- Memoria (business.memory) ----------------------------------------------
+
+export function useMemory(query?: { kind?: string; search?: string; pinned?: string }) {
+  return useQuery({
+    queryKey: [...realKeys.memory, query?.kind ?? "all", query?.search ?? ""] as const,
+    queryFn: () => platformApi.getMemory(query),
+  });
+}
+
+export function useCreateMemory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      kind: string;
+      title: string;
+      content?: string;
+      source?: string;
+      tags?: string[];
+      pinned?: boolean;
+    }) => platformApi.createMemory(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: realKeys.memory }),
+  });
+}
+
+export function useUpdateMemory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      id: string;
+      body: {
+        kind?: string;
+        title?: string;
+        content?: string;
+        source?: string;
+        tags?: string[];
+        pinned?: boolean;
+      };
+    }) => platformApi.updateMemory(input.id, input.body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: realKeys.memory }),
+  });
+}
+
+export function useDeleteMemory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => platformApi.deleteMemory(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: realKeys.memory }),
+  });
+}
+
+export function useBusinessCatalog() {
+  return useQuery({
+    queryKey: realKeys.businessCatalog,
+    queryFn: () => platformApi.getBusinessCatalog(),
+  });
+}
+
+// --- Consumo (crediti) -------------------------------------------------------
+
+export function useUsage(limit = 50) {
+  return useQuery({
+    queryKey: [...realKeys.usage, limit] as const,
+    queryFn: () => platformApi.getUsage(limit),
+  });
+}
+
+// --- Agenda: pausa / riattiva / elimina --------------------------------------
+
+export function useUpdateSchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      id: string;
+      body: { status?: string; title?: string; cron?: string | null; runAt?: string | null };
+    }) => platformApi.updateSchedule(input.id, input.body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: realKeys.schedule });
+      qc.invalidateQueries({ queryKey: realKeys.overview });
+    },
+  });
+}
+
+export function useDeleteSchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => platformApi.deleteSchedule(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: realKeys.schedule });
+      qc.invalidateQueries({ queryKey: realKeys.overview });
+    },
+  });
+}

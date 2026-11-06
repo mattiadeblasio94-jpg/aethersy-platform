@@ -32,6 +32,15 @@ const Help = lazy(() => import("./Help"));
 const Opportunities = lazy(() => import("./Opportunities"));
 const Library = lazy(() => import("./Library"));
 const Subscription = lazy(() => import("./Subscription"));
+const Goals = lazy(() => import("./Goals"));
+const Memory = lazy(() => import("./Memory"));
+const Inbox = lazy(() => import("./Inbox"));
+const ScheduledTasks = lazy(() => import("./ScheduledTasks"));
+const ContentCalendar = lazy(() => import("./ContentCalendar"));
+const Skills = lazy(() => import("./Skills"));
+const Members = lazy(() => import("./Members"));
+const Payouts = lazy(() => import("./Payouts"));
+const Account = lazy(() => import("./Account"));
 
 export interface RouteSpec {
   path: string;
@@ -194,6 +203,60 @@ export const APP_ROUTES: RouteSpec[] = [
     title: "Abbonamento",
     description: "Piano, crediti, fatturazione e domande frequenti.",
     component: Subscription,
+  },
+  {
+    path: "goals",
+    title: "Obiettivi",
+    description: "Obiettivi misurabili del workspace con priorita', metrica e data target.",
+    component: Goals,
+  },
+  {
+    path: "memory",
+    title: "Memoria",
+    description: "Fatti, preferenze, vincoli e decisioni condivisi con gli agenti.",
+    component: Memory,
+  },
+  {
+    path: "inbox",
+    title: "Inbox",
+    description: "Tutte le conversazioni con gli agenti, con invio di nuovi turni.",
+    component: Inbox,
+  },
+  {
+    path: "scheduled-tasks",
+    title: "Attivita' pianificate",
+    description: "Job ricorrenti, prossime esecuzioni e attivita' in corso.",
+    component: ScheduledTasks,
+  },
+  {
+    path: "content-calendar",
+    title: "Calendario editoriale",
+    description: "Contenuti pianificati e pubblicati, per giorno e per stato.",
+    component: ContentCalendar,
+  },
+  {
+    path: "skills",
+    title: "Competenze",
+    description: "Matrice competenze e copertura degli stadi per ogni specialista.",
+    component: Skills,
+  },
+  {
+    path: "members",
+    title: "Membri",
+    description: "Persone e ruoli attivi nel workspace.",
+    component: Members,
+  },
+  {
+    path: "payouts",
+    title: "Pagamenti e consumi",
+    description: "Saldo crediti, riserve e consumo per capability.",
+    component: Payouts,
+  },
+  {
+    path: "account",
+    title: "Account",
+    description: "Tenant, piano, regole di addebito e domande frequenti.",
+    component: Account,
   },
 ];
 
