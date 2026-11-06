@@ -819,13 +819,16 @@ esponeva tutti i dati necessari: non servivano nuove rotte lato server.
   solo quando la richiesta ha un corpo (allineamento al client del platform).
 
 **Verifica (06/11/2026).**
-- QA API dentro il container console (nuovi script temporanei): **16/16** rotte consumate dalle
-  pagine (goals, memory, catalog, roster, library, account, faq, schedule, social scheduled/posts/
-  summary, chat conversations, tasks, `/api/ai/balance`, `/api/ai/usage`); CRUD **7/7**
-  (POST 201 + PATCH 200 + DELETE 200 su obiettivo e memoria, POST memoria senza `content` → 400).
-- QA browser (Chrome headless + CDP, senza dipendenze): login → **9/9** nuove pagine renderizzate
-  con dati reali del tenant QA e **0 errori di console**; **5/5** controlli funzionali sulla UI
-  (creazione obiettivo dalla UI, eliminazione, creazione nota, eliminazione, nessun errore).
+- QA API dentro il container console (`console/server/tools/qa-ia-pages.mjs`, **16/16** rotte consumate
+  dalle pagine: goals, memory, catalog, roster, library, account, faq, schedule, social scheduled/
+  posts/summary, chat conversations, tasks, `/api/ai/balance`, `/api/ai/usage`) e
+  `console/server/tools/qa-ia-crud.mjs` (**7/7**: POST 201 + PATCH 200 + DELETE 200 su obiettivo e
+  memoria, POST memoria senza `content` → 400). Le credenziali passano come argomenti: nessun
+  segreto nel repo.
+- QA browser (`scripts/qa-platform-ui.mjs`, Chrome headless + CDP, nessuna dipendenza esterna):
+  login → **9/9** nuove pagine renderizzate con dati reali del tenant QA e **0 errori di console**;
+  **5/5** controlli funzionali sulla UI (creazione obiettivo dalla UI, eliminazione, creazione nota,
+  eliminazione, nessun errore).
 - Deploy VPS: `docker compose build console platform` → `up -d --no-deps` → entrambi `healthy`;
   `platform.aethersy.online` 200, `/api/health` 200. Console: 1 errore DELETE sparito dai log.
 - Pulizia: le righe di prova create dalle verifiche API/UI sono state rimosse da
