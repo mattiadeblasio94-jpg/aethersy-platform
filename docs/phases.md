@@ -778,3 +778,60 @@ fuori dal repo. Il deploy resta manuale (il VPS non ha git: si copia il codice e
 **Stato GitHub.** I commit delle fasi 13-17 non erano mai stati pushati: sono stati portati su
 `main` con questa fase (PR `fase-18-ci-github` -> merge). La history è stata verificata: nessuna
 occorrenza dei pattern delle chiavi in `git log -p --all`.
+
+### Fase 19 — IA nel platform: 9 pagine su dati reali + fix DELETE JSON (06/11/2026)
+
+**Contesto.** La SPA `platform/` aveva 26 route ma mancavano le nove superfici IA della
+parity pazi.ai (`goals`, `scheduled-tasks`, `content-calendar`, `inbox`, `skills`, `members`,
+`payouts`, `memory`, `account`): la navigazione non offriva obiettivi, memoria, agenda,
+calendario editoriale, inbox, matrice competenze, membri, consumi e account. Il BFF gia'
+esponeva tutti i dati necessari: non servivano nuove rotte lato server.
+
+**Modifiche — frontend (`platform/`).**
+- `src/lib/platform-api.ts`: tipi `Goal`, `MemoryEntry`, `BusinessCatalog`, `UsageEvent`,
+  `UsageResponse` e metodi `getGoals/createGoal/updateGoal/deleteGoal`,
+  `getMemory/createMemory/updateMemory/deleteMemory`, `getBusinessCatalog`, `getUsage`,
+  `updateSchedule`, `deleteSchedule`.
+- `src/lib/platform-queries.ts`: hook `useGoals`, `useCreateGoal`, `useUpdateGoal`,
+  `useDeleteGoal`, `useMemory`, `useCreateMemory`, `useUpdateMemory`, `useDeleteMemory`,
+  `useBusinessCatalog`, `useUsage`, `useUpdateSchedule`, `useDeleteSchedule`; nuove chiavi
+  `realKeys.goals | memory | businessCatalog | usage`.
+- 9 pagine nuove in `src/pages/`: `Goals.tsx` (elenco per stato, creazione, priorita' 1-5,
+  metrica, data target, "segna raggiunto"), `Memory.tsx` (ricerca, filtro per tipo, pin,
+  creazione/edizione/eliminazione), `Inbox.tsx` (thread + conversazione + invio turno),
+  `ScheduledTasks.tsx` (agenda con pausa/riattivazione/elimina + attivita' in corso),
+  `ContentCalendar.tsx` (calendario mensile + pianificati + contenuti),
+  `Skills.tsx` (matrice competenze x agenti, copertura stadi, carico per specialista),
+  `Members.tsx` (membri del workspace da `library.invites`, ricerca per email/ruolo),
+  `Payouts.tsx` (saldo/riservato/disponibile, eventi di consumo, totale per capability),
+  `Account.tsx` (tenant, piano, markup, unita' di credito, stop a saldo zero, FAQ).
+- `src/pages/routes.tsx`: 9 route lazy in `APP_ROUTES`. `src/components/layout/Drawer.tsx`:
+  nuova sezione di navigazione **Controllo** con le 9 voci.
+
+**Modifiche — BFF (`console/server`).**
+- `src/index.ts`: il parser JSON standard rifiutava un corpo vuoto con
+  `content-type: application/json` (400 `FST_ERR_CTP_EMPTY_JSON_BODY`). I client che
+  inviano l'intestazione anche su DELETE senza corpo ricevevano un 400 invece dell'eliminazione:
+  il `DELETE /api/platform/goals/:id` e `DELETE /api/platform/memory/:id` fallivano. Ora il
+  corpo vuoto e' tollerato **solo per DELETE**; POST/PATCH continuano a rifiutare il corpo
+  vuoto come prima (richiesta troncata = errore).
+- `console/web/src/lib/api.ts`: l'intestazione `Content-Type: application/json` viene mandata
+  solo quando la richiesta ha un corpo (allineamento al client del platform).
+
+**Verifica (06/11/2026).**
+- QA API dentro il container console (nuovi script temporanei): **16/16** rotte consumate dalle
+  pagine (goals, memory, catalog, roster, library, account, faq, schedule, social scheduled/posts/
+  summary, chat conversations, tasks, `/api/ai/balance`, `/api/ai/usage`); CRUD **7/7**
+  (POST 201 + PATCH 200 + DELETE 200 su obiettivo e memoria, POST memoria senza `content` → 400).
+- QA browser (Chrome headless + CDP, senza dipendenze): login → **9/9** nuove pagine renderizzate
+  con dati reali del tenant QA e **0 errori di console**; **5/5** controlli funzionali sulla UI
+  (creazione obiettivo dalla UI, eliminazione, creazione nota, eliminazione, nessun errore).
+- Deploy VPS: `docker compose build console platform` → `up -d --no-deps` → entrambi `healthy`;
+  `platform.aethersy.online` 200, `/api/health` 200. Console: 1 errore DELETE sparito dai log.
+- Pulizia: le righe di prova create dalle verifiche API/UI sono state rimosse da
+  `business.memory` e `business.goal` (tabelle a 0 righe per il tenant QA).
+
+**Stato.** Le nove pagine sono in produzione su `https://platform.aethersy.online`. Restano da
+chiudere: nessuna pagina video/audio nel platform (l'API c'è, la UI no), TTS non addebitato
+(metering in caratteri vs listino Replicate in token) e il collegamento Stripe in uscita
+(`metering.billing_outbox` → Stripe) ancora assente.

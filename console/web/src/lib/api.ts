@@ -14,10 +14,11 @@ export class ApiError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
     credentials: "same-origin",
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
+    // La intestazione JSON si manda solo quando c'e' un corpo: un DELETE senza
+    // payload con `content-type: application/json` viene rifiutato dal parser.
+    headers: init?.body
+      ? { "Content-Type": "application/json", ...(init?.headers ?? {}) }
+      : init?.headers,
     ...init,
   });
 

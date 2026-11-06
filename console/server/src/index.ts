@@ -14,6 +14,36 @@ const publicDir = path.resolve(here, "..", "public");
 
 const app = Fastify({ logger: true, trustProxy: true });
 
+// Il parser JSON standard rifiuta un corpo vuoto quando il client manda
+// `content-type: application/json` (400 FST_ERR_CTP_EMPTY_JSON_BODY). I client
+// web che inviano la stessa intestazione anche su DELETE senza corpo (es.
+// console/web) ricevevano quindi un 400 invece del 204/200 atteso. Qui il
+// corpo vuoto e' tollerato solo per i metodi senza payload (DELETE): per POST
+// e PATCH resta l'errore standard, cosi' una richiesta troncata continua a
+// essere rifiutata.
+app.addContentTypeParser("application/json", { parseAs: "string" }, (request, body, done) => {
+  const text = typeof body === "string" ? body : String(body);
+  if (text.trim() === "") {
+    if (request.method === "DELETE") {
+      done(null, undefined);
+      return;
+    }
+    const error = new Error(
+      "Body cannot be empty when content-type is set to 'application/json'",
+    ) as Error & { statusCode: number; code: string };
+    error.statusCode = 400;
+    error.code = "FST_ERR_CTP_EMPTY_JSON_BODY";
+    done(error, undefined);
+    return;
+  }
+  try {
+    done(null, JSON.parse(text));
+  } catch (error) {
+    (error as Error & { statusCode: number }).statusCode = 400;
+    done(error as Error, undefined);
+  }
+});
+
 await app.register(cookie);
 await registerRoutes(app);
 

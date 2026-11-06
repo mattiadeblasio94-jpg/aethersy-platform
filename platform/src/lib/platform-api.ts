@@ -273,6 +273,68 @@ export interface FaqResponse {
   faqs: FaqItem[];
 }
 
+// --- Business (obiettivi, memoria, catalogo) --------------------------------
+
+export interface Goal {
+  id: string;
+  tenant_id: string;
+  title: string;
+  description: string;
+  status: string;
+  priority: number;
+  metric: string;
+  target_date: string | null;
+  meta: unknown;
+  achieved_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoryEntry {
+  id: string;
+  tenant_id: string;
+  kind: string;
+  title: string;
+  content: string;
+  source: string;
+  tags: string[];
+  pinned: boolean;
+  meta: unknown;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BusinessCatalog {
+  goalStatuses: { id: string; label: string }[];
+  memoryKinds: { id: string; label: string }[];
+  productKinds: { id: string; label: string }[];
+  productStatuses: { id: string; label: string }[];
+}
+
+// --- Consumo (crediti) -------------------------------------------------------
+
+export interface UsageEvent {
+  id: string;
+  created_at: string;
+  capability: string;
+  provider: string | null;
+  model: string | null;
+  unit: string;
+  billable_units: number | string;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  price_eur: number | string;
+  credits: number;
+  status: string;
+  latency_ms: number | null;
+  source: string | null;
+}
+
+export interface UsageResponse {
+  metering: boolean;
+  events: UsageEvent[];
+}
+
 // --- API --------------------------------------------------------------------
 
 export const platformApi = {
@@ -304,6 +366,12 @@ export const platformApi = {
   // --- Agenda ---------------------------------------------------------------
   getSchedule: (status?: string) =>
     http.get<ScheduleView[]>("/api/platform/schedule", status ? { status } : undefined),
+  updateSchedule: (
+    id: string,
+    body: { status?: string; title?: string; cron?: string | null; runAt?: string | null },
+  ) => http.patch<ScheduleView>(`/api/platform/schedule/${encodeURIComponent(id)}`, body),
+  deleteSchedule: (id: string) =>
+    http.delete<{ ok: boolean }>(`/api/platform/schedule/${encodeURIComponent(id)}`),
 
   // --- Chat centrale --------------------------------------------------------
   listConversations: () =>
@@ -336,6 +404,60 @@ export const platformApi = {
   getAccount: () => http.get<AccountSummary>("/api/platform/account"),
   getFaq: (category?: string) =>
     http.get<FaqResponse>("/api/platform/faq", category ? { category } : undefined),
+
+  // --- Obiettivi (business.goal) --------------------------------------------
+  getGoals: (status?: string) =>
+    http.get<Goal[]>("/api/platform/goals", status ? { status } : undefined),
+  createGoal: (body: {
+    title: string;
+    description?: string;
+    status?: string;
+    priority?: number;
+    metric?: string;
+    targetDate?: string | null;
+  }) => http.post<Goal>("/api/platform/goals", body),
+  updateGoal: (
+    id: string,
+    body: {
+      title?: string;
+      description?: string;
+      status?: string;
+      priority?: number;
+      metric?: string;
+      targetDate?: string | null;
+    },
+  ) => http.patch<Goal>(`/api/platform/goals/${encodeURIComponent(id)}`, body),
+  deleteGoal: (id: string) =>
+    http.delete<{ ok: boolean }>(`/api/platform/goals/${encodeURIComponent(id)}`),
+
+  // --- Memoria (business.memory) --------------------------------------------
+  getMemory: (query?: { kind?: string; search?: string; pinned?: string; limit?: string }) =>
+    http.get<MemoryEntry[]>("/api/platform/memory", query),
+  createMemory: (body: {
+    kind: string;
+    title: string;
+    content?: string;
+    source?: string;
+    tags?: string[];
+    pinned?: boolean;
+  }) => http.post<MemoryEntry>("/api/platform/memory", body),
+  updateMemory: (
+    id: string,
+    body: {
+      kind?: string;
+      title?: string;
+      content?: string;
+      source?: string;
+      tags?: string[];
+      pinned?: boolean;
+    },
+  ) => http.patch<MemoryEntry>(`/api/platform/memory/${encodeURIComponent(id)}`, body),
+  deleteMemory: (id: string) =>
+    http.delete<{ ok: boolean }>(`/api/platform/memory/${encodeURIComponent(id)}`),
+  getBusinessCatalog: () => http.get<BusinessCatalog>("/api/platform/business/catalog"),
+
+  // --- Consumo --------------------------------------------------------------
+  getUsage: (limit = 50) => http.get<UsageResponse>(`/api/ai/usage?limit=${limit}`),
 
   // --- Piattaforme / connessioni social -------------------------------------
   getPlatforms: () => http.get<PlatformConnection[]>("/api/platform/platforms"),
