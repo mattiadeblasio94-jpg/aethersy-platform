@@ -1001,3 +1001,43 @@ lasciare un contatto: il form sul sito pubblicato era un placeholder.
 **Stato.** Il percorso commerciale e' reale: sito pubblico → lead in piattaforma → notifica
 Slack. Resta la fatturazione (Stripe bloccata dai fondi) e la rotazione delle credenziali.
 
+### Fase 20 — Notifiche reali, webhook firmato e notifica di deploy (07/11/2026)
+
+**Contesto.** Le "notifiche" erano solo preferenze salvate (email/push/ore silenziose)
+senza alcun evento, nessuna campana e nessuna consegna: il canale Slack esisteva ma
+solo come fallback d'ambiente, non configurabile dal tenant. Mancava inoltre un modo per
+sapere che un deploy era andato a buon fine.
+
+**Implementazione.**
+- Schema `pipeline.notification` (scope `tenant`/`platform`, severita', `read_at`) e modulo
+  `console/server/src/pipeline/notifications.ts`: creazione, elenco, non lette, lettura,
+  "segna tutte come lette" e inoltro ai canali outbound.
+- API: `GET /api/platform/notifications`, `POST /api/platform/notifications/:id/read`,
+  `POST /api/platform/notifications/read-all`.
+- Eventi che generano notifiche reali: `lead.created` (form del sito pubblicato),
+  `run.delivered` (run consegnata) e `deploy` (hook `POST /api/internal/deploys`, protetto
+  da `DEPLOY_HOOK_TOKEN` con confronto a tempo costante).
+- **Webhook in uscita**: `POST /api/pipeline/webhooks` registra l'endpoint del tenant
+  (URL + secret di firma cifrati insieme, AES-256-GCM). Gli eventi `lead.created`,
+  `run.delivered` e `deploy` arrivano come POST JSON con `X-Aethersy-Event` e
+  `X-Aethersy-Signature` (HMAC-SHA256). Sono ammessi `http` solo su host privati o di
+  loopback.
+- **Slack configurabile dal tenant**: pagina Integrazioni con URL del webhook, cifrato a
+  riposo, pulsante "Invia test" che invia davvero un messaggio e revoca. Rimossa la
+  connessione fittizia che creava credenziali vuote.
+- UI: pagina `/notifications` (elenco, filtri per stato, lettura, "segna tutte come
+  lette"), campana con badge delle non lette nell'header, voce nel menu laterale.
+- `scripts/deploy-stack.sh`: deploy di console e platform (archivio + scp + build +
+  riavvio + health check) che registra la versione e il commit nell'env del VPS e chiama
+  l'hook di notifica: **ogni deploy produce una notifica**.
+
+**Verifica (07/11/2026).**
+- Deploy reale con lo script: `201` dall'hook con `outbound: {slack: true, webhook: true}`;
+  notifica in piattaforma "Deploy Aethersy 734e431" con commit e nota del deploy.
+- Evento `lead.created` ricevuto dal webhook con **firma HMAC-SHA256 verificata**
+  (`sha256=` + ricalcolo locale uguale) e contenuto reale del lead.
+- Test Slack dal tenant: `{"ok":true,"provider":"slack","status":200}` e segreto non
+  presente nelle risposte dell'API (`grep` del webhook: 0 occorrenze).
+- QA browser: badge campana = 2, pagina `/notifications` con le due notifiche di deploy,
+  click su una notifica -> badge = 1, **0 errori di console**, nessuna risposta HTTP >= 400.
+- Lead di prova dal sito pubblicato -> notifica in-app "Nuovo lead dal sito: Notifica Prova".
