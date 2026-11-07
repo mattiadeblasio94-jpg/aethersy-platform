@@ -154,6 +154,8 @@ services:
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
       - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI:-}
+      - PLATFORM_PUBLIC_URL=${PLATFORM_PUBLIC_URL:-https://platform.aethersy.online}
+      - CONSOLE_PUBLIC_URL=${CONSOLE_PUBLIC_URL:-https://console.aethersy.online}
       - CONSOLE_PGHOST=postgres
       - CONSOLE_PGPORT=5432
       - CONSOLE_PGUSER=${AP_POSTGRES_USERNAME}
@@ -167,7 +169,12 @@ services:
       - METERING_SIGNUP_CREDITS=${METERING_SIGNUP_CREDITS:-0}
       - CONSOLE_SECRETS_KEY=${CONSOLE_SECRETS_KEY:-}
       - AP_ENCRYPTION_KEY=${AP_ENCRYPTION_KEY}
+      - BUILDER_SANDBOX_IMAGE=${BUILDER_SANDBOX_IMAGE:-aethersy/builder-sandbox:0.1.0}
       - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
+    # Il builder esegue i task degli agenti in container isolati: serve il socket
+    # Docker per crearli (vedi console/server/src/builder/agents/sandbox.ts).
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - app
       - postgres

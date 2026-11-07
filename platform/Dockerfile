@@ -1,9 +1,9 @@
 # Aethersy Platform - build multi-stage
-#   stage build -> build Vite (React + TS + Tailwind), dati demo (mock layer)
+#   stage build -> build Vite (React + TS + Tailwind)
 #   runtime     -> nginx minimale che serve la SPA con fallback su index.html
 #
-# Nessun segreto nel build: l'app di piattaforma e' interamente mock-first
-# (nessun endpoint di rete), quindi l'immagine non ha env di runtime.
+# Nessun segreto nel build: l'app di piattaforma chiama il BFF Console (/api/*)
+# a runtime, quindi l'immagine non ha env di runtime.
 
 FROM node:22-alpine AS build
 WORKDIR /app

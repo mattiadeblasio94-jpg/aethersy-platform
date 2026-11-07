@@ -123,10 +123,9 @@
 }
 
 # -----------------------------------------------------------------------------
-# Platform: piattaforma Aethersy (SPA mock-first) su container `platform:80`.
+# Platform: piattaforma Aethersy (SPA) su container `platform:80`.
 #
-# La SPA e' mock-first: legge dai dati mock in src/lib/api.ts.
-# Le chiamate /api/auth/* vanno al BFF Console (console:3000) per la sessione.
+# La SPA chiama il BFF Console su /api/* (dati reali, sessione httpOnly).
 # Tutto il resto -> SPA statica.
 # -----------------------------------------------------------------------------
 {$PLATFORM_DOMAIN} {
