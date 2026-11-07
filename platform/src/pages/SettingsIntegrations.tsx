@@ -16,8 +16,9 @@ import {
   useSaveIntegration,
   useSaveWebhook,
   useTestIntegration,
+  useWebhookDeliveries,
 } from "@/lib/platform-queries";
-import { formatDate, platformLabel } from "@/lib/utils";
+import { formatDate, formatDateTime, platformLabel } from "@/lib/utils";
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : "Operazione non riuscita";
@@ -35,6 +36,7 @@ export default function SettingsIntegrations() {
   const [webhookUrl, setWebhookUrl] = useState("");
   const [webhookSecret, setWebhookSecret] = useState("");
   const saveWebhook = useSaveWebhook();
+  const deliveries = useWebhookDeliveries();
 
   const webhookRows = (integrations.data ?? []).filter(
     (item) => item.provider === "webhook" && item.status !== "revoked",
@@ -387,6 +389,26 @@ export default function SettingsIntegrations() {
                 Salva webhook
               </Button>
             </div>
+            {deliveries.data && deliveries.data.deliveries.length > 0 ? (
+              <div className="rounded-lg border border-secondary/15 p-3">
+                <p className="text-xs font-medium text-text-secondary">
+                  Eventi realmente consegnati ({deliveries.data.deliveries.length})
+                </p>
+                <ul className="mt-2 flex flex-col gap-1.5">
+                  {deliveries.data.deliveries.slice(0, 6).map((item) => (
+                    <li key={item.id} className="flex flex-wrap items-center gap-2 text-xs text-text-muted">
+                      <Badge variant="success">{item.event}</Badge>
+                      <span>{formatDateTime(item.receivedAt)}</span>
+                      <span className="truncate">
+                        {item.signature
+                          ? `firma ${item.signature.slice(0, 18)}...`
+                          : "senza firma"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             {webhookRows.length > 0 ? (
               <ul className="divide-y divide-secondary/10 rounded-lg border border-secondary/15">
                 {webhookRows.map((row) => (

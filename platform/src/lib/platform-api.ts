@@ -545,6 +545,8 @@ export const platformApi = {
     http.post<{ ok: boolean }>(`/api/pipeline/integrations/${encodeURIComponent(id)}/revoke`, {}),
   saveWebhook: (body: { url: string; signingSecret?: string; label?: string }) =>
     http.post<IntegrationItem>("/api/pipeline/webhooks", body),
+  getWebhookDeliveries: () =>
+    http.get<{ deliveries: WebhookDelivery[] }>("/api/platform/webhook-deliveries"),
 
   // --- Agenti specialistici e task (Universal Builder Platform) --------------
   getBuilderAgents: () => http.get<{ available: string[] }>("/api/builder/agents/available"),
@@ -684,6 +686,14 @@ export interface LeadItem {
   meta: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface WebhookDelivery {
+  id: string;
+  event: string;
+  signature: string | null;
+  payload: Record<string, unknown>;
+  receivedAt: string;
 }
 
 export interface NotificationItem {

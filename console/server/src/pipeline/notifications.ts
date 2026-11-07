@@ -173,3 +173,29 @@ async function platformTenantIds(): Promise<string[]> {
   );
   return rows.map((row) => row.id);
 }
+
+export interface WebhookDeliveryRow {
+  id: string;
+  tenant_id: string | null;
+  event: string;
+  signature: string | null;
+  payload: unknown;
+  received_at: Date;
+}
+
+/** Ultime consegne webhook ricevute dal tenant (endpoint di verifica). */
+export async function listWebhookDeliveries(
+  tenantId: string,
+  limit = 20,
+): Promise<WebhookDeliveryRow[]> {
+  const { rows } = await withTx((client) =>
+    client.query<WebhookDeliveryRow>(
+      `SELECT * FROM pipeline.webhook_delivery
+        WHERE tenant_id = $1
+        ORDER BY received_at DESC
+        LIMIT $2`,
+      [tenantId, limit],
+    ),
+  );
+  return rows;
+}

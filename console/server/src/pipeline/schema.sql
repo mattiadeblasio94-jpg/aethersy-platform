@@ -204,3 +204,17 @@ CREATE INDEX IF NOT EXISTS notification_scope_time
   ON pipeline.notification(scope, created_at DESC);
 CREATE INDEX IF NOT EXISTS notification_unread
   ON pipeline.notification(created_at DESC) WHERE read_at IS NULL;
+
+-- Consegne webhook ricevute (P0.8) ---------------------------------------------
+-- Log delle POST arrivate all'endpoint di verifica del tenant: permette di
+-- dimostrare che gli eventi sono realmente usciti e come erano firmati.
+CREATE TABLE IF NOT EXISTS pipeline.webhook_delivery (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id   uuid REFERENCES metering.tenant(id) ON DELETE CASCADE,
+  event       text NOT NULL,
+  signature   text,
+  payload     jsonb NOT NULL DEFAULT '{}'::jsonb,
+  received_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS webhook_delivery_tenant_time
+  ON pipeline.webhook_delivery(tenant_id, received_at DESC);

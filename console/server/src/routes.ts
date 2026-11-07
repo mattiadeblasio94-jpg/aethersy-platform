@@ -1431,6 +1431,8 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     if (parsed.protocol !== "http:") return false;
     const host = parsed.hostname;
     if (host === "localhost" || host === "127.0.0.1" || host === "::1") return true;
+    // Nomi interni del cluster (single-label, es. "console").
+    if (!host.includes(".") && host !== "") return true;
     if (/^10\./.test(host)) return true;
     if (/^192\.168\./.test(host)) return true;
     if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
@@ -1587,6 +1589,36 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   });
 
   /**
+   * POST /api/internal/webhook-echo/:tenantId — endpoint di verifica.
+   *
+   * Riceve gli eventi che il tenant ha configurato come webhook in uscita e li
+   * registra: serve a dimostrare che l'evento e' davvero partito e con quale
+   * firma. Risponde 200 con l'id della consegna.
+   */
+  app.post<{ Params: { tenantId: string } }>(
+    "/api/internal/webhook-echo/:tenantId",
+    async (request, reply) => {
+      const { tenantId } = request.params;
+      const body = (request.body ?? {}) as { event?: string; payload?: unknown };
+      const signature = request.headers["x-aethersy-signature"];
+      const { rows } = await (await import("./metering/db.js")).withTx((client) =>
+        client.query<{ id: string }>(
+          `INSERT INTO pipeline.webhook_delivery (tenant_id, event, signature, payload)
+           VALUES ($1, $2, $3, $4::jsonb)
+           RETURNING id`,
+          [
+            tenantId,
+            body.event ?? "unknown",
+            typeof signature === "string" ? signature : null,
+            JSON.stringify(body.payload ?? {}),
+          ],
+        ),
+      );
+      return reply.code(201).send({ ok: true, id: rows[0]?.id ?? null });
+    },
+  );
+
+  /**
    * POST /api/internal/deploys — hook di deploy.
    *
    * Chiamato dal processo di deploy dopo il riavvio dei container: registra
@@ -1643,6 +1675,25 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       body: notification.body,
       outbound,
     });
+  });
+
+  /**
+   * GET /api/platform/webhook-deliveries -> ultime consegne webhook del tenant.
+   */
+  app.get("/api/platform/webhook-deliveries", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+    const { listWebhookDeliveries } = await import("./pipeline/notifications.js");
+    const rows = await listWebhookDeliveries(tenant.tenantId, 20);
+    return {
+      deliveries: rows.map((row) => ({
+        id: row.id,
+        event: row.event,
+        signature: row.signature,
+        payload: row.payload,
+        receivedAt: row.received_at,
+      })),
+    };
   });
 
   // ------------------------------------------ Piattaforme / Social (P1.2) ----

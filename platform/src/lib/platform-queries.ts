@@ -38,6 +38,7 @@ export const realKeys = {
   leads: ["real", "leads"] as const,
   integrations: ["real", "integrations"] as const,
   notifications: ["real", "notifications"] as const,
+  webhookDeliveries: ["real", "webhook-deliveries"] as const,
   builderAgents: ["real", "builder-agents"] as const,
   builderTasks: ["real", "builder-tasks"] as const,
   builderProjects: ["real", "builder-projects"] as const,
@@ -526,6 +527,13 @@ export function useUpdateLead() {
 }
 
 // --- Integrazioni (canali OAuth/webhook collegati) ---------------------------
+
+export function useWebhookDeliveries() {
+  return useQuery({
+    queryKey: realKeys.webhookDeliveries,
+    queryFn: () => platformApi.getWebhookDeliveries(),
+  });
+}
 
 export function useNotifications() {
   return useQuery({
