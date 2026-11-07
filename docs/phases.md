@@ -3,7 +3,7 @@
 > Aggiornare dopo **ogni** fase con: data/ora, esito, comandi di verifica, note.
 > Stati ammessi: `DONE`, `BLOCKED: input #N`, `NOTE`.
 >
-> Ultima revisione: 2026-10-29 (fasi 0–12 `DONE`; P0.1–P0.10 + P1.1 + **P2.1/P2.2** implementati e deployati; restano solo azioni utente per la rotazione credenziali)
+> Ultima revisione: 2026-11-07 (fasi 0–12 `DONE`; **fasi 13–20** implementate e deployate: CI, IA nel platform, **platform a dati reali senza mock + UI cyber + agenti builder eseguibili**; restano azioni utente per la rotazione credenziali e Stripe)
 
 ## Stato sintetico
 
@@ -838,3 +838,109 @@ esponeva tutti i dati necessari: non servivano nuove rotte lato server.
 chiudere: nessuna pagina video/audio nel platform (l'API c'è, la UI no), TTS non addebitato
 (metering in caratteri vs listino Replicate in token) e il collegamento Stripe in uscita
 (`metering.billing_outbox` → Stripe) ancora assente.
+
+### Fase 20 — Platform a dati reali (zero mock), UI cyber e agenti builder eseguibili (07/11/2026)
+
+**Contesto.** La SPA `platform/` mostrava dati inventati (`src/mocks/*`, `src/lib/api.ts`,
+`src/lib/queries.ts`): 19 pagine non interrogavano mai il BFF, `Pulse` mostrava un piano
+finto, la chat non aveva collegamento con le conversazioni reali e il "Universal Builder"
+produceva task con un piano finto (`generateMockPlan`), sandbox immaginario e QA che
+falliva sui workspace non scaffoldati. Obiettivo: **zero mock** end-to-end, agenti
+orchestratori realmente eseguibili, UI cyber (HUD su `Pulse`, chat in `Studio`) e ogni
+bottone collegato a una API reale.
+
+**Frontend (`platform/`).**
+- **Mock rimossi**: `src/mocks/{data,index,stageB,stageC}.ts`, `src/lib/api.ts`,
+  `src/lib/queries.ts` (2910 righe). Restano solo i **tipi** in `src/lib/types.ts`, usati
+  dai componenti di dominio.
+- `src/lib/platform-api.ts`: client HTTP unico verso il BFF; nuovi endpoint
+  `getProfile/updateProfile`, `getPreferences/updatePreferences`, `getProducts/create/update/delete`,
+  `getLeads/updateLead`, `getLeadCounts`, `getIntegrations`, `getLibraryAsset` (contenuto
+  della risorsa), `getBuilderArtifacts`, `deleteBuilderProject/deleteBuilderTask`.
+- `src/lib/platform-queries.ts`: hook reali (`useProfile`, `useUpdateProfile`,
+  `usePreferences`, `useUpdatePreferences`, `useProducts`, `useCreateProduct`,
+  `useUpdateProduct`, `useDeleteProduct`, `useLeads`, `useLeadCounts`, `useUpdateLead`,
+  `useIntegrations`, `useBuilderAgents`, `useBuilderTasks`, `useBuilderProjects`,
+  `useCreateBuilderTask`, `useBuilderArtifacts`, `useDeleteBuilderTask`,
+  `useDeleteBuilderProject`) con chiavi `realKeys.*`.
+- 19 pagine riscritte su dati reali: `Ads, Analytics, Website, Outreach, Help, Landing,
+  Onboarding, AgentCreate, AgentDetail, AgentLogs, SettingsBilling, SettingsIntegrations,
+  SettingsNotifications, SettingsProfile, SocialMedia, SocialPlatformDetail, Products,
+  Drawer, Header`. Nessun numero business inventato: solo dati del tenant, empty state
+  espliciti e copy in italiano.
+- **UI cyber**: nuovo `src/components/common/Cyber.tsx` (`CyberPanel`, `CyberStat`,
+  `CyberBar`, `CyberStatus` con toni `neutral|active|attention|idle`), keyframe `scanline` in
+  `tailwind.config.js`; `Pulse.tsx` riscritto come HUD (piano reale da `useAccount().plan`,
+  crediti reali, tile di stato reali, CTA → `/studio`); `Studio.tsx` ristilizzato con
+  deep-link `?conv=<id>` verso le conversazioni reali. Eventi custom morti
+  (`open-assistant`) sostituiti dalla navigazione reale in `Pulse.tsx` e `Subscription.tsx`.
+- Rotte: `/dashboard` = `Pulse` (era shadowato da `Dashboard`), `Dashboard.tsx` spostato a
+  `/overview` con voce di menu **Panoramica** in `Drawer.tsx`.
+- **Libreria**: nuova tab **Artefatti** (`useBuilderArtifacts`) con anteprima del
+  `metadata.content`; tab **Risorse** con bottone anteprima (nuova rotta
+  `GET /api/platform/library/:assetId`), download (Blob dal contenuto reale) e copia link;
+  toggle **Filtri** reale; ordinamento per dimensione con `size_bytes` reale; bottone
+  "Copia" del messaggio collegato alla clipboard.
+
+**BFF (`console/server`).**
+- `src/platform/routes.ts` + `src/platform/repo.ts`: rotte di dominio
+  (profilo, preferenze, prodotti, lead, conteggi lead, integrazioni) e
+  `GET /api/platform/library/:assetId` (asset di pipeline con `meta.content`, tenant scoped).
+- `src/builder/routes.ts`: **tenancy** su `POST /api/builder/tasks` (proprietà del progetto
+  verificata, `tenant_id` forzato dalla sessione, default applicati),
+  `GET /api/builder/tasks/:id`, `POST/GET /api/builder/artifacts`; nuove rotte
+  `GET /api/builder/artifacts` e `DELETE /api/builder/projects|tasks/:id` (cascade su
+  task, step e artefatti).
+- `src/builder/agents/planner.ts`: il piano viene davvero da un LLM (`chat()` dell'
+  ai-router, capability `text`, parsing JSON con fence markdown), tabella `AGENT_ACTIONS`
+  delle azioni implementate, `sanitizePlan` (azioni note, agente coerente, dipendenze
+  filtriate) e fallback `defaultNodes`/`defaultSpec`. **Rimosso `generateMockPlan`**.
+- `src/builder/agents/sandbox.ts`: immagine sandbox da env `BUILDER_SANDBOX_IMAGE`
+  (default `aethersy/builder-sandbox:0.1.0`, mai `latest`) e `ensureWorkdir()` che crea
+  `/workspace/<project_id>` prima dell'esecuzione.
+- `src/builder/agents/runtime.ts`: il contenuto degli artefatti viene salvato in
+  `metadata` (`encoding`, `size`, `content` troncato a 65536 byte, `content_truncated`).
+- `src/builder/agents/specializations/qa.ts`: probe `scriptDefined` con exit code 3/4/5 →
+  check **SKIPPED** con motivo invece di un fallimento; `run_full_qa` produce il report
+  PASS/SKIP/FAIL.
+- `console/server/builder-sandbox/Dockerfile`: immagine `node:22-alpine` con bash, git,
+  openssh, curl, ca-certificates e pnpm 9 (usata per costruire l'immagine sul VPS).
+
+**Auth e infrastruttura.**
+- `console/server/src/auth/*`: OAuth Google/GitHub completo (state HMAC + cookie,
+  sessione, `requireApToken`, `saveIdentityCredential` con credenziale Activepieces cifrata)
+  con schema `auth` applicato in produzione.
+- `docker-compose.yml`: console con `PLATFORM_PUBLIC_URL`, `CONSOLE_PUBLIC_URL`,
+  `BUILDER_SANDBOX_IMAGE` e volume `/var/run/docker.sock` (necessario al sandbox);
+  `.env.example` con `BUILDER_SANDBOX_IMAGE`; `caddy/Caddyfile` e `platform/Dockerfile`
+  aggiornati (niente più percorso "mock-first").
+
+**Verifica (07/11/2026).**
+- `npm run typecheck` + `npm run build` verdi in `platform/` e `console/server`.
+- QA API reale (tenant QA): `login`, `session`, `overview`, `profile`, `preferences`,
+  `roster`, `products`, `leads`, `builder/agents|available`, `builder/tasks`,
+  `builder/projects`, `builder/artifacts`, `faq` → **200**.
+- **Pipeline reale**: `POST /api/pipeline/runs` (stage `website`) + `execute` → 7 task
+  `done` (forge, quill, prism, …) con 46 crediti ciascuno e **7 asset** salvati con
+  contenuto; `GET /api/platform/library` li elenca e `GET /api/platform/library/:assetId`
+  restituisce il testo reale del deliverable.
+- **Agenti builder**: `POST /api/builder/projects` + `POST /api/builder/tasks` → task
+  `completed` (190 e 225 crediti), **11 step** eseguiti e **artefatti reali** scritti nel
+  container sandbox sul VPS; crediti addebitati sul tenant.
+- QA browser (`scripts/qa-platform-routes.mjs`, Chrome headless + CDP): **30/30** rotte
+  verificate (login, navigazione, marker attesi, 0 errori di console, 0 risposte HTTP ≥ 400),
+  screenshot di `/dashboard`, `/studio`, `/library`, `/agents`, `/library?tab=artefatti`,
+  `/library?tab=risorse`.
+- QA interazioni (script temporaneo, fuori dal repo): anteprima risorsa con contenuto reale
+  **OK**, toggle filtri **OK**, artefatto con contenuto + bottone copia **OK**.
+- Deploy VPS: `docker compose build console platform` → `up -d --no-deps` → entrambi
+  `healthy`; immagine `aethersy/builder-sandbox:0.1.0` costruita sul VPS.
+- Pulizia tenant QA: 7 progetti di prova e i task falliti eliminati con le nuove rotte
+  `DELETE` (cascade verificato: 575 → 164 artefatti), progetto superstiti rinominato.
+
+**Stato.** La piattaforma è in produzione su `https://platform.aethersy.online` senza mock:
+le pagine leggono e scrivono il BFF, la pipeline produce deliverable reali, gli agenti
+builder eseguono task reali con crediti addebitati e artefatti persistiti. Restano fuori
+dal codice: rotazione delle chiavi provider, saldo Stripe (0 EUR e sender
+`metering.billing_outbox` → Stripe assente), crediti z.ai/Venice, fatture/metodi di pagamento
+e metriche per canale non esposti dal BFF, e la decisione su `console.aethersy.online`.
