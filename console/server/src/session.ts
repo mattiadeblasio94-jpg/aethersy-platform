@@ -60,6 +60,11 @@ export function decodeSession(raw: string | undefined): Session | null {
 }
 
 export function setSessionCookie(reply: FastifyReply, session: Session): void {
+  // Se il browser ha ancora il cookie "host-only" (senza attributo Domain,
+  // impostato prima che esistesse CONSOLE_COOKIE_DOMAIN) lo si cancella: due
+  // cookie con lo stesso nome fanno vincere quello sbagliato e la sessione
+  // sembra valida al login ma non sulle richieste successive.
+  reply.clearCookie(config.cookieName, { path: "/" });
   reply.setCookie(config.cookieName, encodeSession(session), {
     path: "/",
     httpOnly: true,
@@ -79,6 +84,33 @@ export function clearSessionCookie(reply: FastifyReply): void {
   });
 }
 
+/**
+ * Tutti i valori del cookie di sessione presenti nell'intestazione `Cookie`.
+ * Il browser puo' inviare piu' cookie con lo stesso nome (host-only + Domain):
+ * si tentano tutti, non solo il primo.
+ */
+function sessionCookieValues(request: FastifyRequest): string[] {
+  const values: string[] = [];
+  const parsed = request.cookies[config.cookieName];
+  if (parsed) values.push(parsed);
+  const header = request.headers.cookie;
+  if (header) {
+    for (const part of header.split(";")) {
+      const eq = part.indexOf("=");
+      if (eq < 0) continue;
+      const name = part.slice(0, eq).trim();
+      if (name !== config.cookieName) continue;
+      const value = part.slice(eq + 1).trim();
+      if (value && !values.includes(value)) values.push(value);
+    }
+  }
+  return values;
+}
+
 export function getSession(request: FastifyRequest): Session | null {
-  return decodeSession(request.cookies[config.cookieName]);
+  for (const value of sessionCookieValues(request)) {
+    const session = decodeSession(value);
+    if (session) return session;
+  }
+  return null;
 }
