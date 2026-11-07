@@ -1,264 +1,324 @@
 // =============================================================================
-// Outreach (brief §3.5) — rotta /outreach. KPI, campagne, sequenze di follow-up
-// e tabella lead/prospect con azioni e creazione campagna.
+// Outreach — solo dati reali dal BFF.
+//
+// Il funnel dei lead e' l'unica fonte reale disponibile: GET
+// /api/pipeline/leads (elenco + conteggi per stato) e PATCH
+// /api/pipeline/leads/:id per l'avanzamento nel funnel. Le transizioni
+// ammesse sono quelle del BFF (new -> contacted/qualified/won/lost/spam,
+// won/lost/spam terminali). Campagne, sequenze e automazioni di follow-up
+// non esistono come modulo nel BFF: non vengono mostrate.
 // =============================================================================
 
 import { useMemo, useState } from "react";
-import { Mail, MessageSquare, Plus, Send, Target, TrendingUp } from "lucide-react";
+import { Inbox, Mail, MessageSquare, Send, Target, Users } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
-import { Modal } from "@/components/ui/Modal";
+import { Select } from "@/components/ui/Select";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
-import { EmptyState, KpiCard, PageHeader, ProgressBar } from "@/components/common/PageElements";
+import { EmptyState, KpiCard, PageHeader } from "@/components/common/PageElements";
 import {
-  useCreateOutreachCampaign,
+  useLeadCounts,
   useLeads,
-  useOutreachCampaigns,
-  useOutreachSequences,
-  useOutreachSummary,
-} from "@/lib/queries";
-import type { LeadStatus, OutreachChannel, OutreachStatus } from "@/lib/types";
-import {
-  formatDateTime,
-  formatNumber,
-  formatPercent,
-  formatRelative,
-  leadStatusLabel,
-  outreachChannelLabel,
-  outreachStatusLabel,
-} from "@/lib/utils";
+  useOpportunities,
+  useSendMessage,
+  useUpdateLead,
+} from "@/lib/platform-queries";
+import type { LeadItem } from "@/lib/platform-api";
+import { formatDate, formatNumber } from "@/lib/utils";
 
-const OUTREACH_STATUS_VARIANT: Record<OutreachStatus, "success" | "warning" | "default" | "info"> = {
-  active: "success",
-  paused: "warning",
-  completed: "info",
-  draft: "default",
+/** Il BFF restituisce i lead con i campi del DB (snake_case). */
+type LeadRow = LeadItem & { created_at?: string; updated_at?: string; phone?: string | null };
+
+type LeadStatus =
+  | "new"
+  | "contacted"
+  | "qualified"
+  | "won"
+  | "lost"
+  | "spam";
+
+const LEAD_STATUS_LABEL: Record<LeadStatus, string> = {
+  new: "Nuovo",
+  contacted: "Contattato",
+  qualified: "Qualificato",
+  won: "Acquisito",
+  lost: "Perso",
+  spam: "Spam",
 };
 
-const LEAD_STATUS_VARIANT: Record<LeadStatus, "default" | "info" | "success" | "warning" | "error" | "accent"> = {
+const LEAD_STATUS_VARIANT: Record<
+  LeadStatus,
+  "default" | "info" | "success" | "warning" | "error" | "accent"
+> = {
   new: "default",
   contacted: "info",
-  replied: "accent",
-  interested: "info",
-  meeting: "warning",
+  qualified: "accent",
   won: "success",
   lost: "error",
+  spam: "warning",
 };
 
-const CHANNEL_ICON: Record<OutreachChannel, typeof Mail> = {
-  email: Mail,
-  linkedin: MessageSquare,
-  twitter: MessageSquare,
-  phone: Send,
+/** Transizioni ammesse dal BFF (stessa macchina a stati del server). */
+const LEAD_TRANSITIONS: Record<LeadStatus, LeadStatus[]> = {
+  new: ["contacted", "qualified", "won", "lost", "spam"],
+  contacted: ["qualified", "won", "lost", "spam"],
+  qualified: ["won", "lost", "spam"],
+  won: [],
+  lost: [],
+  spam: [],
 };
+
+const STATUS_ORDER: LeadStatus[] = [
+  "new",
+  "contacted",
+  "qualified",
+  "won",
+  "lost",
+  "spam",
+];
+
+const RUN_STATUS_LABEL: Record<string, string> = {
+  draft: "Aperta",
+  in_progress: "In corso",
+  in_review: "In revisione",
+  approved: "Approvata",
+  delivered: "Consegnata",
+  failed: "Fallita",
+};
+
+const STAGE_LABEL: Record<string, string> = {
+  brand: "Brand",
+  website: "Sito / Web",
+  content: "Contenuti",
+  social: "Social media",
+};
+
+/** Testo esplicito della richiesta inviata all'orchestratore. */
+const OUTREACH_PROMPT =
+  "Avvia il lavoro di outreach: prendi i lead in stato 'new', proponi il primo messaggio di contatto per ciascuno e dimmi cosa serve per portarli avanti nel funnel.";
+
+function isLeadStatus(value: string): value is LeadStatus {
+  return (STATUS_ORDER as string[]).includes(value);
+}
+
+function leadCreatedAt(lead: LeadRow): string {
+  return lead.created_at ?? lead.createdAt;
+}
 
 export default function Outreach() {
   const { toast } = useToast();
-  const [modalOpen, setModalOpen] = useState(false);
-  const [campaignName, setCampaignName] = useState("");
-  const [channel, setChannel] = useState<OutreachChannel>("linkedin");
-  const [target, setTarget] = useState("");
-  const [template, setTemplate] = useState("");
+  const [pendingLeadId, setPendingLeadId] = useState<string | null>(null);
 
-  const summary = useOutreachSummary();
-  const campaigns = useOutreachCampaigns();
-  const sequences = useOutreachSequences();
   const leads = useLeads();
-  const createCampaign = useCreateOutreachCampaign();
+  const counts = useLeadCounts();
+  const opportunities = useOpportunities();
+  const updateLead = useUpdateLead();
+  const sendMessage = useSendMessage();
 
-  const sequencesByCampaign = useMemo(() => {
-    const map = new Map<string, typeof sequences.data>();
-    for (const step of sequences.data ?? []) {
-      const list = map.get(step.campaignId) ?? [];
-      list.push(step);
-      map.set(step.campaignId, list);
-    }
-    return map;
-  }, [sequences.data]);
+  const leadRows: LeadRow[] = leads.data ?? [];
+  const countMap = counts.data ?? {};
 
-  function resetForm() {
-    setCampaignName("");
-    setChannel("linkedin");
-    setTarget("");
-    setTemplate("");
-  }
+  const funnel = useMemo(
+    () =>
+      STATUS_ORDER.map((status) => ({
+        status,
+        label: LEAD_STATUS_LABEL[status],
+        count: countMap[status] ?? 0,
+      })),
+    [countMap],
+  );
 
-  async function handleCreate() {
+  const totals = useMemo(() => {
+    const total = leadRows.length;
+    const active = leadRows.filter((lead) => lead.status === "new" || lead.status === "contacted").length;
+    const qualified = leadRows.filter((lead) => lead.status === "qualified").length;
+    const won = leadRows.filter((lead) => lead.status === "won").length;
+    return { total, active, qualified, won };
+  }, [leadRows]);
+
+  async function handleStatusChange(lead: LeadRow, status: LeadStatus) {
+    setPendingLeadId(lead.id);
     try {
-      await createCampaign.mutateAsync({ name: campaignName.trim() || "Nuova campagna" });
+      await updateLead.mutateAsync({ id: lead.id, body: { status } });
       toast({
         kind: "success",
-        title: "Campagna creata",
-        description: `${campaignName.trim() || "Nuova campagna"} e' in bozza.`,
+        title: "Lead aggiornato",
+        description: `${lead.name ?? lead.email ?? "Lead"} ora e' in stato "${LEAD_STATUS_LABEL[status]}".`,
       });
-      setModalOpen(false);
-      resetForm();
-    } catch {
-      toast({ kind: "error", title: "Creazione non riuscita" });
+    } catch (error) {
+      toast({
+        kind: "error",
+        title: "Transizione non riuscita",
+        description: error instanceof Error ? error.message : undefined,
+      });
+    } finally {
+      setPendingLeadId(null);
     }
   }
 
-  function handleLeadAction(name: string, action: string) {
-    toast({ kind: "info", title: action, description: `Azione registrata per ${name}.` });
+  async function handleStartOutreach() {
+    try {
+      const turn = await sendMessage.mutateAsync({ text: OUTREACH_PROMPT });
+      toast({
+        kind: "success",
+        title: "Richiesta inviata al consulente",
+        description:
+          turn.action === "run_started"
+            ? "Il lavoro di outreach e' partito."
+            : turn.reply?.content,
+      });
+    } catch (error) {
+      toast({
+        kind: "error",
+        title: "Invio non riuscito",
+        description: error instanceof Error ? error.message : undefined,
+      });
+    }
   }
+
+  const runs = opportunities.data ?? [];
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Outreach"
-        description="Sequenze di contatto, prospect qualificati e automazioni di follow-up."
+        description="Lead reali del funnel, stato di qualificazione e lavoro di contatto in corso."
         actions={
           <Button
             variant="primary"
-            leftIcon={<Plus className="h-4 w-4" aria-hidden="true" />}
-            onClick={() => setModalOpen(true)}
+            leftIcon={<Send className="h-4 w-4" aria-hidden="true" />}
+            loading={sendMessage.isPending}
+            onClick={handleStartOutreach}
           >
-            Nuova Campagna
+            Avvia outreach
           </Button>
         }
       />
 
-      {/* KPI */}
       <section aria-label="KPI outreach" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {summary.isLoading ? (
+        {leads.isLoading ? (
           Array.from({ length: 4 }).map((_, index) => (
             <Skeleton key={index} className="h-28 rounded-xl" />
           ))
         ) : (
           <>
             <KpiCard
-              label="Messaggi inviati"
-              value={formatNumber(summary.data?.messagesSent ?? 0)}
-              icon={<Send className="h-5 w-5 text-secondary" aria-hidden="true" />}
-              delta="+124 questa settimana"
-              trend="up"
+              label="Lead totali"
+              value={formatNumber(totals.total)}
+              icon={<Users className="h-5 w-5 text-secondary" aria-hidden="true" />}
+              hint="contatti registrati"
             />
             <KpiCard
-              label="Tasso di risposta"
-              value={formatPercent(summary.data?.responseRate ?? 0)}
-              icon={<MessageSquare className="h-5 w-5 text-secondary" aria-hidden="true" />}
-              delta="+2,1 pt"
-              trend="up"
+              label="Da contattare"
+              value={formatNumber(totals.active)}
+              icon={<Inbox className="h-5 w-5 text-secondary" aria-hidden="true" />}
+              hint="nuovi e contattati"
             />
             <KpiCard
-              label="Riunioni fissate"
-              value={formatNumber(summary.data?.meetings ?? 0)}
+              label="Qualificati"
+              value={formatNumber(totals.qualified)}
               icon={<Target className="h-5 w-5 text-secondary" aria-hidden="true" />}
-              delta="+5"
-              trend="up"
+              hint="pronti per la trattativa"
             />
             <KpiCard
-              label="Conversione"
-              value={formatPercent(summary.data?.conversionRate ?? 0)}
-              icon={<TrendingUp className="h-5 w-5 text-secondary" aria-hidden="true" />}
-              delta="-0,4 pt"
-              trend="down"
+              label="Acquisiti"
+              value={formatNumber(totals.won)}
+              icon={<Mail className="h-5 w-5 text-secondary" aria-hidden="true" />}
+              hint="chiusi come won"
             />
           </>
         )}
       </section>
 
-      {/* Campagne */}
-      <section aria-label="Campagne di outreach" className="flex flex-col gap-3">
-        <h2 className="font-display text-lg font-semibold text-text-primary">Campagne</h2>
-        {campaigns.isLoading ? (
-          <div className="grid gap-4 lg:grid-cols-2">
-            {Array.from({ length: 2 }).map((_, index) => (
-              <Skeleton key={index} className="h-56 rounded-xl" />
-            ))}
-          </div>
-        ) : (campaigns.data ?? []).length === 0 ? (
-          <EmptyState
-            icon={<Send className="h-5 w-5" aria-hidden="true" />}
-            title="Nessuna campagna"
-            description="Crea la tua prima campagna di outreach."
-          />
-        ) : (
-          <div className="grid gap-4 lg:grid-cols-2">
-            {(campaigns.data ?? []).map((campaign) => {
-              const ChannelIcon = CHANNEL_ICON[campaign.channel];
-              const steps = sequencesByCampaign.get(campaign.id) ?? [];
-              return (
-                <Card key={campaign.id} className="flex flex-col gap-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-secondary/15">
-                        <ChannelIcon className="h-5 w-5 text-secondary" aria-hidden="true" />
-                      </span>
-                      <div>
-                        <h3 className="text-base font-semibold text-text-primary">{campaign.name}</h3>
-                        <p className="text-xs text-text-muted">
-                          {outreachChannelLabel(campaign.channel)} · iniziata {formatRelative(campaign.startedAt)}
-                        </p>
-                      </div>
-                    </div>
-                    <Badge variant={OUTREACH_STATUS_VARIANT[campaign.status]}>
-                      {outreachStatusLabel(campaign.status)}
+      <div className="grid gap-6 xl:grid-cols-[1fr_2fr]">
+        <Card
+          header={
+            <>
+              <h2 className="text-base font-semibold text-text-primary">Funnel dei lead</h2>
+              <span className="text-xs text-text-muted">conteggi reali</span>
+            </>
+          }
+        >
+          {counts.isLoading ? (
+            <Skeleton lines={6} />
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {funnel.map((row) => (
+                <li
+                  key={row.status}
+                  className="flex items-center justify-between gap-3 rounded-lg border border-secondary/10 px-3 py-2 text-sm"
+                >
+                  <span className="text-text-secondary">{row.label}</span>
+                  <Badge variant={LEAD_STATUS_VARIANT[row.status]}>
+                    {formatNumber(row.count)}
+                  </Badge>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
+        <Card
+          header={
+            <>
+              <h2 className="text-base font-semibold text-text-primary">Esecuzioni della pipeline</h2>
+              <span className="text-xs text-text-muted">{runs.length} run</span>
+            </>
+          }
+          bodyClassName="p-0"
+        >
+          {opportunities.isLoading ? (
+            <div className="p-5">
+              <Skeleton lines={5} />
+            </div>
+          ) : runs.length === 0 ? (
+            <div className="p-5">
+              <EmptyState
+                icon={<MessageSquare className="h-5 w-5" aria-hidden="true" />}
+                title="Nessuna esecuzione attiva"
+                description="Le esecuzioni reali della pipeline (brand, sito, contenuti, social) compariranno qui."
+              />
+            </div>
+          ) : (
+            <ul className="divide-y divide-secondary/10">
+              {runs.map((run) => (
+                <li key={run.id} className="flex flex-col gap-1 px-5 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="min-w-0 truncate text-sm font-medium text-text-primary">
+                      {run.title}
+                    </span>
+                    <Badge
+                      variant={
+                        run.status === "failed"
+                          ? "error"
+                          : run.status === "delivered" || run.status === "approved"
+                            ? "success"
+                            : run.status === "in_review"
+                              ? "warning"
+                              : "info"
+                      }
+                    >
+                      {RUN_STATUS_LABEL[run.status] ?? run.status}
                     </Badge>
                   </div>
+                  <span className="text-xs text-text-muted">
+                    {STAGE_LABEL[run.stage] ?? run.stage} · aggiornata {formatDate(run.updated_at)}
+                    {run.opportunity?.needsHuman ? " · richiede una decisione" : ""}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
 
-                  <dl className="grid grid-cols-3 gap-3 text-sm">
-                    <div className="rounded-lg bg-primary/40 px-3 py-2">
-                      <dt className="text-xs text-text-muted">Inviati</dt>
-                      <dd className="font-semibold text-text-primary">{formatNumber(campaign.sent)}</dd>
-                    </div>
-                    <div className="rounded-lg bg-primary/40 px-3 py-2">
-                      <dt className="text-xs text-text-muted">Risposte</dt>
-                      <dd className="font-semibold text-text-primary">{formatNumber(campaign.replies)}</dd>
-                    </div>
-                    <div className="rounded-lg bg-primary/40 px-3 py-2">
-                      <dt className="text-xs text-text-muted">Conversione</dt>
-                      <dd className="font-semibold text-text-primary">{formatPercent(campaign.conversionRate)}</dd>
-                    </div>
-                  </dl>
-
-                  <ProgressBar
-                    value={campaign.replies}
-                    max={Math.max(campaign.sent, 1)}
-                    label={`Risposte su inviati`}
-                  />
-
-                  {steps.length > 0 && (
-                    <div>
-                      <p className="mb-2 text-xs font-medium text-text-secondary">
-                        Sequenza di follow-up
-                      </p>
-                      <ol className="flex flex-col gap-2">
-                        {steps
-                          .sort((a, b) => a.order - b.order)
-                          .map((step) => (
-                            <li key={step.id} className="flex items-center gap-3 text-sm">
-                              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-bg-hover text-xs font-semibold text-text-secondary">
-                                {step.order}
-                              </span>
-                              <span className="min-w-0 flex-1 truncate text-text-primary">
-                                {step.subject}
-                              </span>
-                              <span className="text-xs text-text-muted">+{step.dayOffset}g</span>
-                              <span className="text-xs text-secondary">
-                                {formatPercent(step.openRate, 0)}
-                              </span>
-                            </li>
-                          ))}
-                      </ol>
-                    </div>
-                  )}
-                </Card>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
-      {/* Lead */}
       <Card
         header={
           <>
             <h2 className="text-base font-semibold text-text-primary">Lead e prospect</h2>
-            <span className="text-xs text-text-muted">{leads.data?.length ?? 0} contatti</span>
+            <span className="text-xs text-text-muted">{leadRows.length} contatti</span>
           </>
         }
         bodyClassName="p-0"
@@ -267,133 +327,100 @@ export default function Outreach() {
           <div className="p-5">
             <Skeleton lines={6} />
           </div>
-        ) : (leads.data ?? []).length === 0 ? (
+        ) : leadRows.length === 0 ? (
           <div className="p-5">
-            <EmptyState title="Nessun lead" description="I prospect appariranno qui." />
+            <EmptyState
+              icon={<Inbox className="h-5 w-5" aria-hidden="true" />}
+              title="Nessun lead"
+              description="I contatti arrivano dal form del sito o da webhook: qui compariranno con nome, email, messaggio e stato del funnel."
+              action={
+                <Button
+                  variant="primary"
+                  leftIcon={<Send className="h-4 w-4" aria-hidden="true" />}
+                  loading={sendMessage.isPending}
+                  onClick={handleStartOutreach}
+                >
+                  Avvia outreach
+                </Button>
+              }
+            />
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] border-collapse text-sm">
+            <table className="w-full min-w-[820px] border-collapse text-sm">
               <caption className="sr-only">Elenco lead e prospect</caption>
               <thead>
                 <tr className="border-b border-secondary/10 text-left text-xs text-text-muted">
-                  <th scope="col" className="py-2 pl-5 pr-4 font-medium">Nome</th>
-                  <th scope="col" className="py-2 pr-4 font-medium">Azienda</th>
-                  <th scope="col" className="py-2 pr-4 font-medium">Canale</th>
+                  <th scope="col" className="py-2 pl-5 pr-4 font-medium">Contatto</th>
+                  <th scope="col" className="py-2 pr-4 font-medium">Messaggio</th>
+                  <th scope="col" className="py-2 pr-4 font-medium">Fonte</th>
                   <th scope="col" className="py-2 pr-4 font-medium">Stato</th>
-                  <th scope="col" className="py-2 pr-4 font-medium">Ultimo contatto</th>
-                  <th scope="col" className="py-2 pr-5 font-medium text-right">Azioni</th>
+                  <th scope="col" className="py-2 pr-4 font-medium">Ricevuto il</th>
+                  <th scope="col" className="py-2 pr-5 font-medium text-right">Aggiorna stato</th>
                 </tr>
               </thead>
               <tbody>
-                {(leads.data ?? []).map((lead) => (
-                  <tr key={lead.id} className="border-b border-secondary/5">
-                    <td className="py-3 pl-5 pr-4">
-                      <span className="font-medium text-text-primary">{lead.name}</span>
-                      <span className="block text-xs text-text-muted">{lead.email}</span>
-                    </td>
-                    <td className="py-3 pr-4 text-text-secondary">{lead.company}</td>
-                    <td className="py-3 pr-4 text-text-secondary">
-                      {outreachChannelLabel(lead.channel)}
-                    </td>
-                    <td className="py-3 pr-4">
-                      <Badge variant={LEAD_STATUS_VARIANT[lead.status]}>
-                        {leadStatusLabel(lead.status)}
-                      </Badge>
-                    </td>
-                    <td className="py-3 pr-4 text-text-muted">
-                      {lead.lastContact ? formatDateTime(lead.lastContact) : "—"}
-                    </td>
-                    <td className="py-3 pr-5 text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleLeadAction(lead.name, "Follow-up inviato")}
-                      >
-                        Follow-up
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
+                {leadRows.map((lead) => {
+                  const status = isLeadStatus(lead.status) ? lead.status : "new";
+                  const options = LEAD_TRANSITIONS[status].map((target) => ({
+                    value: target,
+                    label: LEAD_STATUS_LABEL[target],
+                  }));
+                  return (
+                    <tr key={lead.id} className="border-b border-secondary/5">
+                      <td className="py-3 pl-5 pr-4">
+                        <span className="font-medium text-text-primary">{lead.name ?? "—"}</span>
+                        <span className="block text-xs text-text-muted">{lead.email ?? "—"}</span>
+                      </td>
+                      <td className="max-w-[260px] py-3 pr-4 text-text-secondary">
+                        {lead.message ?? "—"}
+                      </td>
+                      <td className="py-3 pr-4 text-text-secondary">{lead.source ?? "—"}</td>
+                      <td className="py-3 pr-4">
+                        <Badge variant={LEAD_STATUS_VARIANT[status]}>
+                          {LEAD_STATUS_LABEL[status]}
+                        </Badge>
+                      </td>
+                      <td className="py-3 pr-4 text-text-secondary">
+                        {formatDate(leadCreatedAt(lead))}
+                      </td>
+                      <td className="py-3 pr-5 text-right">
+                        {options.length === 0 ? (
+                          <span className="text-xs text-text-muted">stato finale</span>
+                        ) : (
+                          <div className="flex justify-end">
+                            <Select
+                              aria-label={`Nuovo stato per ${lead.name ?? lead.email ?? "lead"}`}
+                              className="min-w-[150px]"
+                              options={[{ value: "", label: "Scegli…" }, ...options]}
+                              value=""
+                              disabled={pendingLeadId === lead.id}
+                              onChange={(event) => {
+                                const target = event.target.value;
+                                if (isLeadStatus(target)) {
+                                  void handleStatusChange(lead, target);
+                                }
+                              }}
+                            />
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
       </Card>
 
-      {/* Modale nuova campagna */}
-      <Modal
-        open={modalOpen}
-        onOpenChange={setModalOpen}
-        title="Nuova campagna"
-        description="Definisci canale, target e messaggio di apertura."
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setModalOpen(false)}>
-              Annulla
-            </Button>
-            <Button
-              variant="primary"
-              loading={createCampaign.isPending}
-              disabled={campaignName.trim().length < 3}
-              onClick={handleCreate}
-            >
-              Crea campagna
-            </Button>
-          </>
-        }
-      >
-        <div className="flex flex-col gap-4">
-          <Input
-            label="Nome campagna"
-            placeholder="Es. Agenzie digitali — Nord Italia"
-            value={campaignName}
-            onChange={(event) => setCampaignName(event.target.value)}
-          />
-
-          <fieldset>
-            <legend className="mb-2 text-sm font-medium text-text-secondary">Canale</legend>
-            <div className="flex flex-wrap gap-2">
-              {(["linkedin", "email", "twitter", "phone"] as OutreachChannel[]).map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  aria-pressed={channel === item}
-                  onClick={() => setChannel(item)}
-                  className={`rounded-full border px-3.5 py-2 text-sm transition-colors ${
-                    channel === item
-                      ? "border-secondary/50 bg-secondary/15 text-secondary"
-                      : "border-secondary/15 text-text-secondary hover:bg-bg-hover"
-                  }`}
-                >
-                  {outreachChannelLabel(item)}
-                </button>
-              ))}
-            </div>
-          </fieldset>
-
-          <Input
-            label="Target"
-            placeholder="Es. Agenzie con 10-50 dipendenti"
-            value={target}
-            onChange={(event) => setTarget(event.target.value)}
-          />
-
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="outreach-template" className="text-sm font-medium text-text-secondary">
-              Messaggio template
-            </label>
-            <textarea
-              id="outreach-template"
-              rows={3}
-              value={template}
-              onChange={(event) => setTemplate(event.target.value)}
-              placeholder="Ciao {{nome}}, ho notato che…"
-              className="w-full rounded-lg border border-secondary/20 bg-primary/60 px-3.5 py-2.5 text-base text-text-primary placeholder:text-text-muted focus:border-secondary focus:outline-none focus:ring-1 focus:ring-secondary"
-            />
-          </div>
-        </div>
-      </Modal>
+      <Card header={<h2 className="text-base font-semibold text-text-primary">Moduli non disponibili</h2>}>
+        <p className="text-sm text-text-secondary">
+          Il BFF non espone campagne, sequenze di follow-up, tasso di risposta, riunioni fissate o
+          automazioni di invio: sono dati che non vengono registrati e quindi non sono mostrati.
+          L'avanzamento dei contatti si gestisce qui, tramite le transizioni di stato del funnel.
+        </p>
+      </Card>
     </div>
   );
 }

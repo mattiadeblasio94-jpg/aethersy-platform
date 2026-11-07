@@ -195,6 +195,22 @@ export interface StageSpec {
 
 // --- Library types ----------------------------------------------------------
 
+export interface LibraryAssetDetail {
+  asset: {
+    id: string;
+    kind: string;
+    name: string;
+    mime: string | null;
+    storageKey: string;
+    status: string;
+    runId: string | null;
+    version: number;
+    createdAt: string;
+  };
+  content: string | null;
+  meta: Record<string, unknown>;
+}
+
 export interface LibraryResource {
   id: string;
   kind: string;
@@ -202,6 +218,7 @@ export interface LibraryResource {
   status: string;
   storage_key: string;
   mime: string | null;
+  size_bytes: string | null;
   version: number;
   created_at: string;
   run_id: string | null;
@@ -399,6 +416,8 @@ export const platformApi = {
 
   // --- Libreria -------------------------------------------------------------
   getLibrary: () => http.get<LibraryData>("/api/platform/library"),
+  getLibraryAsset: (id: string) =>
+    http.get<LibraryAssetDetail>(`/api/platform/library/${encodeURIComponent(id)}`),
 
   // --- Account / Abbonamento ------------------------------------------------
   getAccount: () => http.get<AccountSummary>("/api/platform/account"),
@@ -475,6 +494,60 @@ export const platformApi = {
   // --- Task -----------------------------------------------------------------
   getTasks: () => http.get<PlatformTask[]>("/api/platform/tasks"),
 
+  // --- Profilo e preferenze (dati reali, schema `auth`) ----------------------
+  getProfile: () => http.get<{ profile: IdentityProfile }>("/api/platform/profile"),
+  updateProfile: (body: Partial<Omit<IdentityProfile, "email">>) =>
+    http.patch<{ profile: IdentityProfile }>("/api/platform/profile", body),
+  getPreferences: () => http.get<{ preferences: IdentityPreferences }>("/api/platform/preferences"),
+  updatePreferences: (body: Partial<Omit<IdentityPreferences, "email" | "updatedAt">>) =>
+    http.patch<{ preferences: IdentityPreferences }>("/api/platform/preferences", body),
+
+  // --- Catalogo prodotti (business.product) ---------------------------------
+  getProducts: () => http.get<ProductItem[]>("/api/platform/products"),
+  createProduct: (body: { name: string; kind?: string; description?: string; priceCents?: number; sku?: string }) =>
+    http.post<ProductItem>("/api/platform/products", body),
+  updateProduct: (
+    id: string,
+    body: { name?: string; kind?: string; description?: string; priceCents?: number; status?: string },
+  ) => http.patch<ProductItem>(`/api/platform/products/${encodeURIComponent(id)}`, body),
+  deleteProduct: (id: string) => http.delete<{ ok: boolean }>(`/api/platform/products/${encodeURIComponent(id)}`),
+
+  // --- Lead (pipeline) -------------------------------------------------------
+  getLeads: () => http.get<{ leads: LeadItem[]; counts: Record<string, number> }>("/api/pipeline/leads"),
+  createLead: (body: { email: string; name?: string; source?: string; message?: string }) =>
+    http.post<LeadItem>("/api/pipeline/leads", body),
+  updateLead: (id: string, body: { status?: string; note?: string }) =>
+    http.patch<LeadItem>(`/api/pipeline/leads/${encodeURIComponent(id)}`, body),
+
+  // --- Integrazioni (canali OAuth collegati) --------------------------------
+  getIntegrations: () => http.get<IntegrationItem[]>("/api/pipeline/integrations"),
+
+  // --- Agenti specialistici e task (Universal Builder Platform) --------------
+  getBuilderAgents: () => http.get<{ available: string[] }>("/api/builder/agents/available"),
+  getBuilderTasks: () => http.get<{ tasks: BuilderTask[] }>("/api/builder/tasks"),
+  getBuilderArtifacts: () => http.get<{ artifacts: BuilderArtifact[] }>("/api/builder/artifacts"),
+  getBuilderTask: (id: string) =>
+    http.get<{ task: BuilderTask; steps: BuilderStep[]; artifacts: BuilderArtifact[] }>(
+      `/api/builder/tasks/${encodeURIComponent(id)}`,
+    ),
+  createBuilderTask: (body: {
+    project_id: string;
+    tenant_id?: string;
+    type: string;
+    title: string;
+    description?: string;
+    spec?: Record<string, unknown>;
+    priority?: number;
+    estimated_credits?: number;
+  }) => http.post<{ task: BuilderTask }>("/api/builder/tasks", body),
+  createBuilderProject: (body: { name: string; description?: string; type?: string; spec?: Record<string, unknown> }) =>
+    http.post<{ project: BuilderProject }>("/api/builder/projects", body),
+  getBuilderProjects: () => http.get<{ projects: BuilderProject[] }>("/api/builder/projects"),
+  deleteBuilderProject: (id: string) =>
+    http.delete<{ ok: boolean }>(`/api/builder/projects/${encodeURIComponent(id)}`),
+  deleteBuilderTask: (id: string) =>
+    http.delete<{ ok: boolean }>(`/api/builder/tasks/${encodeURIComponent(id)}`),
+
   // --- Agenti attiva/pausa --------------------------------------------------
   activateAgent: (id: string) =>
     http.post<{ ok: boolean }>(`/api/platform/agents/${encodeURIComponent(id)}/activate`, {}),
@@ -539,4 +612,119 @@ export interface PlatformTask {
   status: string;
   startedAt: string | null;
   finishedAt: string | null;
+}
+
+// --- Tipi: profilo, preferenze, catalogo, lead, integrazioni, builder ------
+
+export interface IdentityProfile {
+  email: string;
+  firstName: string;
+  lastName: string;
+  company: string;
+  roleTitle: string;
+  timezone: string;
+  locale: string;
+}
+
+export interface IdentityPreferences {
+  emailDigest: "off" | "daily" | "weekly";
+  runUpdates: boolean;
+  leadAlerts: boolean;
+  budgetAlerts: boolean;
+  channelEmail: boolean;
+  channelPush: boolean;
+  quietHours: boolean;
+  updatedAt: string | null;
+}
+
+export interface ProductItem {
+  id: string;
+  kind: string;
+  name: string;
+  sku: string;
+  description: string;
+  priceCents: number;
+  currency: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LeadItem {
+  id: string;
+  email: string;
+  name: string | null;
+  source: string | null;
+  message: string | null;
+  status: string;
+  meta: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface IntegrationItem {
+  id: string;
+  provider: string;
+  kind: string;
+  label: string;
+  scopes: string[];
+  status: string;
+  meta: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BuilderProject {
+  id: string;
+  name: string;
+  description: string | null;
+  type: string;
+  status: string;
+  createdAt: string;
+}
+
+export interface BuilderTask {
+  id: string;
+  project_id: string;
+  tenant_id: string;
+  type: string;
+  title: string;
+  description?: string;
+  status: string;
+  spec: Record<string, unknown>;
+  result?: Record<string, unknown>;
+  cost_credits: number;
+  estimated_credits?: number;
+  priority: number;
+  started_at?: string;
+  completed_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BuilderStep {
+  id: string;
+  task_id: string;
+  agent: string;
+  step_order: number;
+  status: string;
+  input: Record<string, unknown>;
+  output?: Record<string, unknown>;
+  error?: string;
+  started_at?: string;
+  completed_at?: string;
+}
+
+export interface BuilderArtifact {
+  id: string;
+  task_id: string;
+  project_id: string;
+  tenant_id: string;
+  kind: string;
+  name: string;
+  description?: string;
+  uri: string;
+  metadata: Record<string, unknown>;
+  version: number;
+  created_at: string;
 }

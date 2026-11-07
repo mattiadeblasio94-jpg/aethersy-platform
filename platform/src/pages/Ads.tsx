@@ -1,104 +1,121 @@
 // =============================================================================
-// Annunci (brief §3.7) — rotta /ads. KPI, andamento spesa/conversioni,
-// campagne advertising e creativita' con creazione campagna.
+// Annunci — solo dati reali dal BFF.
+//
+// I deliverable "annuncio" sono gli asset prodotti dalla pipeline
+// (GET /api/pipeline/assets) e le esecuzioni reali (GET /api/pipeline/runs).
+// Il BFF non espone un modulo advertising: campagne con budget, creativita' con
+// impression/CTR/CPM, ROAS e serie storiche di spesa non esistono e quindi non
+// vengono mostrate. L'unica azione disponibile e' chiedere all'orchestratore
+// (POST /api/platform/chat) la produzione di un annuncio.
 // =============================================================================
 
-import { useMemo, useState } from "react";
-import { Megaphone, MousePointerClick, Plus, Target, TrendingUp, Wallet } from "lucide-react";
+import { useMemo } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle, BarChart3, Megaphone, Send, Sparkles } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
-import { Modal } from "@/components/ui/Modal";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
-import { BarChart, LineChart } from "@/components/charts/Charts";
-import { EmptyState, KpiCard, PageHeader, ProgressBar } from "@/components/common/PageElements";
-import {
-  useAdCampaigns,
-  useAdCreatives,
-  useAdsSeries,
-  useAdsSummary,
-  useCreateAdCampaign,
-} from "@/lib/queries";
-import type { AdObjective, AdStatus, PlatformId } from "@/lib/types";
-import {
-  adObjectiveLabel,
-  channelLabel,
-  formatCompactNumber,
-  formatCurrency,
-  formatNumber,
-  formatPercent,
-  platformLabel,
-} from "@/lib/utils";
+import { EmptyState, KpiCard, PageHeader } from "@/components/common/PageElements";
+import { realKeys, useRuns, useSendMessage } from "@/lib/platform-queries";
+import { platformApi } from "@/lib/platform-api";
+import type { PipelineAsset } from "@/lib/platform-api";
+import { formatDate, formatNumber } from "@/lib/utils";
 
-const AD_STATUS_VARIANT: Record<AdStatus, "success" | "warning" | "info" | "default"> = {
-  active: "success",
-  paused: "warning",
-  completed: "info",
+const ASSET_STATUS_VARIANT: Record<
+  string,
+  "default" | "success" | "warning" | "error" | "info"
+> = {
   draft: "default",
+  in_review: "warning",
+  approved: "success",
+  rejected: "error",
+  delivered: "success",
 };
 
-const OBJECTIVES: AdObjective[] = ["awareness", "traffic", "engagement", "leads", "conversions"];
+const STAGE_LABEL: Record<string, string> = {
+  brand: "Brand",
+  website: "Sito web",
+  content: "Contenuti",
+  social: "Social",
+};
 
-const PLATFORMS: PlatformId[] = ["instagram", "facebook", "linkedin", "tiktok", "youtube"];
+const RUN_STATUS_VARIANT: Record<
+  string,
+  "default" | "success" | "warning" | "error" | "info"
+> = {
+  draft: "default",
+  in_progress: "info",
+  in_review: "warning",
+  approved: "success",
+  delivered: "success",
+  failed: "error",
+};
 
-/** Importo con due decimali, es. CPM "8,40 €". */
-function formatDecimalCurrency(value: number): string {
-  return `${value.toFixed(2).replace(".", ",")} €`;
+const RUN_STATUS_LABEL: Record<string, string> = {
+  draft: "Aperta",
+  in_progress: "In corso",
+  in_review: "In revisione",
+  approved: "Approvata",
+  delivered: "Consegnata",
+  failed: "Fallita",
+};
+
+/** Testo esplicito della richiesta inviata all'orchestratore. */
+const GENERATE_PROMPT =
+  "Crea un annuncio pubblicitario per questo tenant: definisci obiettivo, pubblico, messaggio, formato del creativo e canali consigliati, poi produci il deliverable corrispondente.";
+
+/** Stadio dichiarato dal pipeline nell'asset (meta.stage). */
+function assetStage(asset: PipelineAsset): string {
+  const stage = asset.meta?.stage;
+  return typeof stage === "string" ? stage : "";
 }
 
 export default function Ads() {
   const { toast } = useToast();
-  const [modalOpen, setModalOpen] = useState(false);
-  const [campaignName, setCampaignName] = useState("");
-  const [objective, setObjective] = useState<AdObjective>("conversions");
-  const [platform, setPlatform] = useState<PlatformId>("instagram");
+  const queryClient = useQueryClient();
 
-  const summary = useAdsSummary();
-  const campaigns = useAdCampaigns();
-  const creatives = useAdCreatives();
-  const series = useAdsSeries();
-  const createCampaign = useCreateAdCampaign();
+  const assets = useQuery({
+    queryKey: realKeys.assets("all"),
+    queryFn: () => platformApi.listAssets(),
+  });
+  const runs = useRuns();
+  const sendMessage = useSendMessage();
 
-  const spendPoints = useMemo(
-    () =>
-      (series.data ?? []).map((point) => ({
-        label: point.label,
-        value: point.spend,
-      })),
-    [series.data],
-  );
+  const assetRows = assets.data ?? [];
+  const runRows = runs.data ?? [];
 
-  const conversionPoints = useMemo(
-    () =>
-      (series.data ?? []).map((point) => ({
-        label: point.label,
-        value: point.conversions,
-      })),
-    [series.data],
-  );
+  const stats = useMemo(() => {
+    const inReview = assetRows.filter((asset) => asset.status === "in_review").length;
+    const accepted = assetRows.filter(
+      (asset) => asset.status === "approved" || asset.status === "delivered",
+    ).length;
+    const latest = assetRows.reduce<string | null>((acc, asset) => {
+      if (!acc || asset.created_at > acc) return asset.created_at;
+      return acc;
+    }, null);
+    return { total: assetRows.length, inReview, accepted, latest };
+  }, [assetRows]);
 
-  const creativesByCampaign = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const creative of creatives.data ?? []) {
-      map.set(creative.campaignId, (map.get(creative.campaignId) ?? 0) + 1);
-    }
-    return map;
-  }, [creatives.data]);
-
-  async function handleCreate() {
+  async function handleGenerate() {
     try {
-      await createCampaign.mutateAsync({ name: campaignName.trim() || "Nuova campagna ads" });
+      const turn = await sendMessage.mutateAsync({ text: GENERATE_PROMPT });
+      queryClient.invalidateQueries({ queryKey: realKeys.assets("all") });
       toast({
         kind: "success",
-        title: "Campagna creata",
-        description: `${campaignName.trim() || "Nuova campagna"} salvata in bozza.`,
+        title: "Richiesta inviata all'orchestratore",
+        description:
+          turn.action === "run_started"
+            ? "La produzione e' partita: il deliverable comparira' tra gli asset."
+            : turn.reply?.content,
       });
-      setModalOpen(false);
-      setCampaignName("");
-    } catch {
-      toast({ kind: "error", title: "Creazione non riuscita" });
+    } catch (error) {
+      toast({
+        kind: "error",
+        title: "Invio non riuscito",
+        description: error instanceof Error ? error.message : undefined,
+      });
     }
   }
 
@@ -106,156 +123,118 @@ export default function Ads() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Annunci"
-        description="Monitora spesa, creativita' e performance delle campagne advertising."
+        description="Gli annunci sono i deliverable reali prodotti dalla pipeline, con stato e data di uscita."
         actions={
           <Button
             variant="primary"
-            leftIcon={<Plus className="h-4 w-4" aria-hidden="true" />}
-            onClick={() => setModalOpen(true)}
+            leftIcon={<Send className="h-4 w-4" aria-hidden="true" />}
+            loading={sendMessage.isPending}
+            onClick={handleGenerate}
           >
-            Nuova Campagna
+            Genera annuncio
           </Button>
         }
       />
 
-      {/* KPI */}
       <section aria-label="KPI annunci" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {summary.isLoading ? (
+        {assets.isLoading ? (
           Array.from({ length: 4 }).map((_, index) => (
             <Skeleton key={index} className="h-28 rounded-xl" />
           ))
         ) : (
           <>
             <KpiCard
-              label="Spesa"
-              value={formatCurrency(summary.data?.spend ?? 0)}
-              icon={<Wallet className="h-5 w-5 text-secondary" aria-hidden="true" />}
-              delta="-4,2%"
-              trend="down"
-              inverse
-            />
-            <KpiCard
-              label="Impression"
-              value={formatCompactNumber(summary.data?.impressions ?? 0)}
+              label="Asset prodotti"
+              value={formatNumber(stats.total)}
               icon={<Megaphone className="h-5 w-5 text-secondary" aria-hidden="true" />}
-              delta="+12,0%"
-              trend="up"
+              hint="deliverable della pipeline"
             />
             <KpiCard
-              label="CTR"
-              value={formatPercent(summary.data?.ctr ?? 0, 2)}
-              icon={<MousePointerClick className="h-5 w-5 text-secondary" aria-hidden="true" />}
-              delta="+0,18 pt"
-              trend="up"
+              label="In revisione"
+              value={formatNumber(stats.inReview)}
+              icon={<Sparkles className="h-5 w-5 text-secondary" aria-hidden="true" />}
+              hint="da approvare"
             />
             <KpiCard
-              label="ROAS"
-              value={`${(summary.data?.roas ?? 0).toFixed(1).replace(".", ",")}x`}
-              icon={<TrendingUp className="h-5 w-5 text-secondary" aria-hidden="true" />}
-              delta="+0,4x"
-              trend="up"
+              label="Approvati"
+              value={formatNumber(stats.accepted)}
+              hint="approvati e consegnati"
+            />
+            <KpiCard
+              label="Ultimo asset"
+              value={stats.latest ? formatDate(stats.latest) : "—"}
+              hint={stats.latest ? "data di produzione" : "nessun asset prodotto"}
             />
           </>
         )}
       </section>
 
-      {/* Andamento spesa e conversioni */}
-      <div className="grid gap-6 xl:grid-cols-2">
-        <Card header={<h2 className="text-base font-semibold text-text-primary">Spesa giornaliera</h2>}>
-          {series.isLoading ? (
-            <Skeleton className="h-52 rounded-lg" />
-          ) : (
-            <LineChart
-              data={spendPoints}
-              area
-              ariaLabel="Andamento della spesa pubblicitaria giornaliera"
-              valueFormatter={(value) => formatCurrency(value)}
-            />
-          )}
-        </Card>
-
-        <Card header={<h2 className="text-base font-semibold text-text-primary">Conversioni giornaliere</h2>}>
-          {series.isLoading ? (
-            <Skeleton className="h-52 rounded-lg" />
-          ) : (
-            <BarChart
-              data={conversionPoints}
-              height={200}
-              ariaLabel="Conversioni pubblicitarie giornaliere"
-              valueFormatter={(value) => formatNumber(value)}
-            />
-          )}
-        </Card>
-      </div>
-
-      {/* Campagne */}
       <Card
         header={
           <>
-            <h2 className="text-base font-semibold text-text-primary">Campagne</h2>
-            <span className="text-xs text-text-muted">{campaigns.data?.length ?? 0} campagne</span>
+            <h2 className="text-base font-semibold text-text-primary">Annunci prodotti</h2>
+            <span className="text-xs text-text-muted">{assetRows.length} asset</span>
           </>
         }
         bodyClassName="p-0"
       >
-        {campaigns.isLoading ? (
+        {assets.isLoading ? (
           <div className="p-5">
             <Skeleton lines={5} />
           </div>
-        ) : (campaigns.data ?? []).length === 0 ? (
+        ) : assetRows.length === 0 ? (
           <div className="p-5">
             <EmptyState
               icon={<Megaphone className="h-5 w-5" aria-hidden="true" />}
-              title="Nessuna campagna"
-              description="Crea la tua prima campagna advertising."
+              title="Nessun annuncio prodotto"
+              description="Chiedi all'orchestratore di creare un annuncio: il deliverable comparira' qui con il suo stato reale."
+              action={
+                <Button
+                  variant="primary"
+                  leftIcon={<Send className="h-4 w-4" aria-hidden="true" />}
+                  loading={sendMessage.isPending}
+                  onClick={handleGenerate}
+                >
+                  Genera annuncio
+                </Button>
+              }
             />
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[820px] border-collapse text-sm">
-              <caption className="sr-only">Campagne advertising</caption>
+            <table className="w-full min-w-[720px] border-collapse text-sm">
+              <caption className="sr-only">Annunci prodotti dalla pipeline</caption>
               <thead>
                 <tr className="border-b border-secondary/10 text-left text-xs text-text-muted">
-                  <th scope="col" className="py-2 pl-5 pr-4 font-medium">Campagna</th>
-                  <th scope="col" className="py-2 pr-4 font-medium">Obiettivo</th>
+                  <th scope="col" className="py-2 pl-5 pr-4 font-medium">Annuncio</th>
+                  <th scope="col" className="py-2 pr-4 font-medium">Stadio</th>
+                  <th scope="col" className="py-2 pr-4 font-medium">Tipo</th>
                   <th scope="col" className="py-2 pr-4 font-medium">Stato</th>
-                  <th scope="col" className="py-2 pr-4 font-medium">Budget</th>
-                  <th scope="col" className="py-2 pr-4 font-medium">Speso</th>
-                  <th scope="col" className="py-2 pr-5 font-medium text-right">Conversione</th>
+                  <th scope="col" className="py-2 pr-5 font-medium text-right">Prodotto il</th>
                 </tr>
               </thead>
               <tbody>
-                {(campaigns.data ?? []).map((campaign) => (
-                  <tr key={campaign.id} className="border-b border-secondary/5">
+                {assetRows.map((asset) => (
+                  <tr key={asset.id} className="border-b border-secondary/5">
                     <td className="py-3 pl-5 pr-4">
-                      <span className="font-medium text-text-primary">{campaign.name}</span>
-                      <span className="block text-xs text-text-muted">
-                        {channelLabel(campaign.channel)} · {platformLabel(campaign.platform)} ·{" "}
-                        {creativesByCampaign.get(campaign.id) ?? 0} creativita'
-                      </span>
+                      <span className="font-medium text-text-primary">{asset.name}</span>
+                      {typeof asset.meta?.title === "string" && (
+                        <span className="block text-xs text-text-muted">
+                          {asset.meta.title}
+                        </span>
+                      )}
                     </td>
                     <td className="py-3 pr-4 text-text-secondary">
-                      {adObjectiveLabel(campaign.objective)}
+                      {STAGE_LABEL[assetStage(asset)] || "—"}
                     </td>
+                    <td className="py-3 pr-4 text-text-secondary">{asset.kind}</td>
                     <td className="py-3 pr-4">
-                      <Badge variant={AD_STATUS_VARIANT[campaign.status]}>
-                        {campaign.status}
+                      <Badge variant={ASSET_STATUS_VARIANT[asset.status] ?? "default"}>
+                        {asset.status}
                       </Badge>
                     </td>
-                    <td className="py-3 pr-4 text-text-secondary">
-                      {formatCurrency(campaign.budget)}
-                    </td>
-                    <td className="w-40 py-3 pr-4">
-                      <ProgressBar
-                        value={campaign.spent}
-                        max={Math.max(campaign.budget, 1)}
-                        label={`${formatCurrency(campaign.spent)} spesi`}
-                      />
-                    </td>
-                    <td className="py-3 pr-5 text-right">
-                      <span className="font-medium text-text-primary">
-                        {formatNumber(campaign.conversions)}
-                      </span>
+                    <td className="py-3 pr-5 text-right text-text-secondary">
+                      {formatDate(asset.created_at)}
                     </td>
                   </tr>
                 ))}
@@ -265,54 +244,53 @@ export default function Ads() {
         )}
       </Card>
 
-      {/* Creativita' */}
       <Card
         header={
           <>
-            <h2 className="text-base font-semibold text-text-primary">Creativita'</h2>
-            <span className="text-xs text-text-muted">{creatives.data?.length ?? 0} annunci</span>
+            <h2 className="text-base font-semibold text-text-primary">Esecuzioni della pipeline</h2>
+            <span className="text-xs text-text-muted">{runRows.length} run</span>
           </>
         }
         bodyClassName="p-0"
       >
-        {creatives.isLoading ? (
+        {runs.isLoading ? (
           <div className="p-5">
-            <Skeleton lines={5} />
+            <Skeleton lines={4} />
           </div>
-        ) : (creatives.data ?? []).length === 0 ? (
+        ) : runRows.length === 0 ? (
           <div className="p-5">
-            <EmptyState title="Nessuna creativita'" description="Non ci sono annunci in questa campagna." />
+            <EmptyState
+              icon={<BarChart3 className="h-5 w-5" aria-hidden="true" />}
+              title="Nessuna esecuzione"
+              description="Le esecuzioni reali della pipeline compariranno qui: da lì partono gli annunci."
+            />
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] border-collapse text-sm">
-              <caption className="sr-only">Creativita' pubblicitarie</caption>
+            <table className="w-full min-w-[640px] border-collapse text-sm">
+              <caption className="sr-only">Esecuzioni della pipeline</caption>
               <thead>
                 <tr className="border-b border-secondary/10 text-left text-xs text-text-muted">
-                  <th scope="col" className="py-2 pl-5 pr-4 font-medium">Nome</th>
-                  <th scope="col" className="py-2 pr-4 font-medium">Piattaforma</th>
-                  <th scope="col" className="py-2 pr-4 font-medium">Impression</th>
-                  <th scope="col" className="py-2 pr-4 font-medium">Click</th>
-                  <th scope="col" className="py-2 pr-4 font-medium">CPM</th>
-                  <th scope="col" className="py-2 pr-5 font-medium text-right">Conversioni</th>
+                  <th scope="col" className="py-2 pl-5 pr-4 font-medium">Esecuzione</th>
+                  <th scope="col" className="py-2 pr-4 font-medium">Stadio</th>
+                  <th scope="col" className="py-2 pr-4 font-medium">Stato</th>
+                  <th scope="col" className="py-2 pr-5 font-medium text-right">Aggiornata</th>
                 </tr>
               </thead>
               <tbody>
-                {(creatives.data ?? []).map((creative) => (
-                  <tr key={creative.id} className="border-b border-secondary/5">
-                    <td className="py-3 pl-5 pr-4 text-text-primary">{creative.name}</td>
+                {runRows.map((run) => (
+                  <tr key={run.id} className="border-b border-secondary/5">
+                    <td className="py-3 pl-5 pr-4 font-medium text-text-primary">{run.title}</td>
                     <td className="py-3 pr-4 text-text-secondary">
-                      {platformLabel(creative.platform)}
+                      {STAGE_LABEL[run.stage] ?? run.stage}
                     </td>
-                    <td className="py-3 pr-4 text-text-secondary">
-                      {formatCompactNumber(creative.impressions)}
+                    <td className="py-3 pr-4">
+                      <Badge variant={RUN_STATUS_VARIANT[run.status] ?? "default"}>
+                        {RUN_STATUS_LABEL[run.status] ?? run.status}
+                      </Badge>
                     </td>
-                    <td className="py-3 pr-4 text-text-secondary">{formatNumber(creative.clicks)}</td>
-                    <td className="py-3 pr-4 text-text-secondary">
-                      {formatDecimalCurrency(creative.cpm)}
-                    </td>
-                    <td className="py-3 pr-5 text-right font-medium text-text-primary">
-                      {formatNumber(creative.conversions)}
+                    <td className="py-3 pr-5 text-right text-text-secondary">
+                      {formatDate(run.updated_at)}
                     </td>
                   </tr>
                 ))}
@@ -322,84 +300,32 @@ export default function Ads() {
         )}
       </Card>
 
-      {/* Modale nuova campagna */}
-      <Modal
-        open={modalOpen}
-        onOpenChange={setModalOpen}
-        title="Nuova campagna ads"
-        description="Scegli piattaforma e obiettivo della campagna."
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setModalOpen(false)}>
-              Annulla
-            </Button>
-            <Button
-              variant="primary"
-              loading={createCampaign.isPending}
-              disabled={campaignName.trim().length < 3}
-              onClick={handleCreate}
-            >
-              Crea campagna
-            </Button>
-          </>
-        }
-      >
-        <div className="flex flex-col gap-4">
-          <Input
-            label="Nome campagna"
-            placeholder="Es. Retargeting autunno"
-            value={campaignName}
-            onChange={(event) => setCampaignName(event.target.value)}
-          />
-
-          <fieldset>
-            <legend className="mb-2 text-sm font-medium text-text-secondary">Piattaforma</legend>
-            <div className="flex flex-wrap gap-2">
-              {PLATFORMS.map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  aria-pressed={platform === item}
-                  onClick={() => setPlatform(item)}
-                  className={`rounded-full border px-3.5 py-2 text-sm transition-colors ${
-                    platform === item
-                      ? "border-secondary/50 bg-secondary/15 text-secondary"
-                      : "border-secondary/15 text-text-secondary hover:bg-bg-hover"
-                  }`}
-                >
-                  {platformLabel(item)}
-                </button>
-              ))}
-            </div>
-          </fieldset>
-
-          <fieldset>
-            <legend className="mb-2 text-sm font-medium text-text-secondary">Obiettivo</legend>
-            <div className="flex flex-wrap gap-2">
-              {OBJECTIVES.map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  aria-pressed={objective === item}
-                  onClick={() => setObjective(item)}
-                  className={`rounded-full border px-3.5 py-2 text-sm transition-colors ${
-                    objective === item
-                      ? "border-secondary/50 bg-secondary/15 text-secondary"
-                      : "border-secondary/15 text-text-secondary hover:bg-bg-hover"
-                  }`}
-                >
-                  {adObjectiveLabel(item)}
-                </button>
-              ))}
-            </div>
-          </fieldset>
-
-          <p className="flex items-center gap-2 text-xs text-text-muted">
-            <Target className="h-3.5 w-3.5" aria-hidden="true" />
-            Potrai definire budget e pubblico dopo la creazione.
+      <Card header={<h2 className="text-base font-semibold text-text-primary">Dati non ancora disponibili</h2>}>
+        <div className="flex flex-col gap-3">
+          <p className="flex items-start gap-2 text-sm text-text-secondary">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
+            Il BFF non espone un modulo advertising: per non mostrare dati inventati, campaggi e
+            serie storiche restano dichiarati come non disponibili. L'unica azione reale e' chiedere
+            la produzione all'orchestratore.
           </p>
+          <ul className="grid gap-2 sm:grid-cols-2">
+            {[
+              ["Campagne e budget", "non disponibili"],
+              ["Creativita' con impression e CTR", "non disponibili"],
+              ["Serie storiche di spesa", "non disponibili"],
+              ["ROAS e conversioni", "non disponibili"],
+            ].map(([label, value]) => (
+              <li
+                key={label}
+                className="flex items-center justify-between gap-3 rounded-lg border border-secondary/10 bg-primary/40 px-3 py-2 text-sm"
+              >
+                <span className="text-text-secondary">{label}</span>
+                <Badge variant="warning">{value}</Badge>
+              </li>
+            ))}
+          </ul>
         </div>
-      </Modal>
+      </Card>
     </div>
   );
 }

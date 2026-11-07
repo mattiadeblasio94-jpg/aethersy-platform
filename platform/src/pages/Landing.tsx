@@ -1,5 +1,17 @@
+// =============================================================================
+// Landing pubblica — solo dati reali.
+//
+// I contenuti descrivono cio' che la piattaforma fa davvero (stadi della
+// pipeline: brand, sito, contenuti, social; lead dal form; analytics sui
+// crediti consumati) e le uniche informazioni dinamiche sono quelle del
+// workspace dell'utente autenticato: piano, crediti e canali collegati
+// (GET /api/platform/account, GET /api/platform/platforms). Niente
+// testimonianze, prezzi o metriche inventate.
+// =============================================================================
+
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
   BarChart3,
@@ -7,51 +19,121 @@ import {
   Check,
   Globe,
   Menu,
-  Quote,
-  Shield,
+  PenLine,
   Share2,
   Sparkles,
+  Target,
   X,
-  Zap,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { useLandingContent } from "@/lib/queries";
-import { formatCurrency, platformLabel } from "@/lib/utils";
+import { realKeys } from "@/lib/platform-queries";
+import { platformApi } from "@/lib/platform-api";
+import { useAuthStore } from "@/store/auth";
+import { formatNumber, platformLabel } from "@/lib/utils";
 
-/** Risolve il nome icona salvato nei mock verso il componente lucide-react. */
-const FEATURE_ICONS = {
-  // "Robot" e' il nome storicizzato nei mock; in lucide-react l'icona e' Bot.
-  Robot: Bot,
-  Share2,
-  BarChart3,
-  Zap,
-  Globe,
-  Shield,
-} as const;
-
-type FeatureIconName = keyof typeof FEATURE_ICONS;
-
-function resolveFeatureIcon(name: string) {
-  return FEATURE_ICONS[name as FeatureIconName] ?? Sparkles;
+interface Feature {
+  id: string;
+  title: string;
+  description: string;
+  icon: LucideIcon;
 }
 
-/**
- * Landing pubblica (brief §4.1). Sezioni: hero, funzionalita', piattaforme,
- * come funziona, testimonianze, prezzi e CTA finale. Tutti i contenuti
- * arrivano dal mock layer tipizzato tramite React Query.
- */
+const FEATURES: Feature[] = [
+  {
+    id: "brand",
+    title: "Brand",
+    description:
+      "Naming, moodboard, palette, tipografia, tone of voice e logo kit: l'identita' visiva del tuo business.",
+    icon: PenLine,
+  },
+  {
+    id: "website",
+    title: "Sito web",
+    description:
+      "Sitemap, wireframe, copy delle pagine, build del sito, form per i lead e SEO on-page di base.",
+    icon: Globe,
+  },
+  {
+    id: "content",
+    title: "Contenuti",
+    description:
+      "Piano editoriale, keyword map, primi articoli in bozza e mappa di linking interno tra i contenuti.",
+    icon: Bot,
+  },
+  {
+    id: "social",
+    title: "Social media",
+    description:
+      "Calendario editoriale, caption, asset statici, reel e coda di pubblicazione programmata.",
+    icon: Share2,
+  },
+  {
+    id: "lead",
+    title: "Lead e outreach",
+    description:
+      "I contatti che arrivano dal form del sito entrano in un funnel con stati reali: nuovo, contattato, qualificato, acquisito.",
+    icon: Target,
+  },
+  {
+    id: "analytics",
+    title: "Analisi dei consumi",
+    description:
+      "Crediti effettivamente consumati per capability e per giorno, stato dei deliverable e riepilogo dei lead.",
+    icon: BarChart3,
+  },
+];
+
+const STEPS = [
+  {
+    id: "step-1",
+    title: "Definisci il lavoro",
+    description:
+      "Descrivi il bisogno al consulente della piattaforma: la richiesta viene trasformata in un'esecuzione con specialisti dedicati.",
+  },
+  {
+    id: "step-2",
+    title: "Gli agenti producono",
+    description:
+      "Ogni stadio della pipeline (brand, sito, contenuti, social) genera deliverable reali, con i crediti consumati registrati.",
+  },
+  {
+    id: "step-3",
+    title: "Tu approvi",
+    description:
+      "I deliverable passano in revisione: approvi o rifiuti, e il lavoro riparte da li'.",
+  },
+];
+
+/** Canali social supportati dal collegamento account. */
+const SUPPORTED_CHANNELS = ["instagram", "linkedin", "tiktok", "facebook", "x", "youtube"];
+
 const NAV_LINKS = [
   { href: "#funzionalita", label: "Funzionalita'" },
-  { href: "#piattaforme", label: "Piattaforme" },
   { href: "#come-funziona", label: "Come funziona" },
-  { href: "#prezzi", label: "Prezzi" },
+  { href: "#piano", label: "Il tuo piano" },
 ];
 
 export default function Landing() {
-  const { data, isLoading, isError } = useLandingContent();
   const [menuOpen, setMenuOpen] = useState(false);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+
+  const account = useQuery({
+    queryKey: realKeys.account,
+    queryFn: () => platformApi.getAccount(),
+    enabled: isAuthenticated,
+  });
+  const platforms = useQuery({
+    queryKey: realKeys.platforms,
+    queryFn: () => platformApi.getPlatforms(),
+    enabled: isAuthenticated,
+  });
+
+  const connectedChannels = (platforms.data ?? [])
+    .filter((platform) => platform.connected)
+    .map((platform) => platform.provider);
 
   return (
     <div className="min-h-dvh">
@@ -105,7 +187,6 @@ export default function Landing() {
           </div>
         </div>
 
-        {/* Menu mobile: stessi link della nav desktop. */}
         {menuOpen && (
           <nav
             id="landing-mobile-menu"
@@ -138,16 +219,6 @@ export default function Landing() {
         )}
       </header>
 
-      {isError && (
-        <div className="mx-auto max-w-content px-4 py-10 lg:px-8">
-          <Card>
-            <p className="text-sm text-error">
-              Impossibile caricare i contenuti in questo momento. Ricarica la pagina.
-            </p>
-          </Card>
-        </div>
-      )}
-
       {/* --- Hero ------------------------------------------------------------ */}
       <section className="relative overflow-hidden">
         <div className="mx-auto flex w-full max-w-content flex-col items-center gap-6 px-4 py-16 text-center lg:px-8 lg:py-24">
@@ -161,8 +232,9 @@ export default function Landing() {
           </h1>
 
           <p className="max-w-2xl text-base text-text-secondary lg:text-lg">
-            Aethersy pianifica, crea e pubblica contenuti, gestisce l'outreach e monitora i
-            risultati su tutte le piattaforme. Tu definisci gli obiettivi, gli agenti eseguono.
+            Aethersy produce il brand, il sito, i contenuti e i contenuti social del tuo business,
+            gestisce i lead e registra ogni consumo. Tu definisci gli obiettivi, gli agenti
+            eseguono.
           </p>
 
           <div className="flex flex-col gap-3 sm:flex-row">
@@ -182,7 +254,7 @@ export default function Landing() {
           </div>
 
           <p className="text-sm text-text-muted">
-            Nessuna carta di credito · Setup in 2 minuti · Disdici quando vuoi
+            Il piano Free include 100 crediti al mese e non richiede carta di credito.
           </p>
         </div>
       </section>
@@ -194,71 +266,96 @@ export default function Landing() {
             Tutto cio' che serve per crescere
           </h2>
           <p className="mt-2 text-base text-text-secondary">
-            Un'unica piattaforma per social, contenuti, outreach e analytics.
+            Ogni area e' una specializzazione della pipeline, con deliverable e consumi registrati.
           </p>
         </div>
 
-        {isLoading ? (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {Array.from({ length: 6 }).map((_, index) => (
-              <Card key={index} className="flex flex-col gap-3">
-                <Skeleton className="h-11 w-11 rounded-xl" />
-                <Skeleton className="h-5 w-1/2" />
-                <Skeleton className="h-4 w-4/5" />
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {FEATURES.map((feature) => {
+            const Icon = feature.icon;
+            return (
+              <Card key={feature.id} interactive className="flex flex-col gap-3">
+                <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-secondary/15">
+                  <Icon className="h-5 w-5 text-secondary" aria-hidden="true" />
+                </span>
+                <h3 className="font-display text-lg font-semibold text-text-primary">
+                  {feature.title}
+                </h3>
+                <p className="text-sm text-text-secondary">{feature.description}</p>
               </Card>
-            ))}
-          </div>
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {(data?.features ?? []).map((feature) => {
-              const Icon = resolveFeatureIcon(feature.icon);
-              return (
-                <Card key={feature.id} interactive className="flex flex-col gap-3">
-                  <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-secondary/15">
-                    <Icon className="h-5 w-5 text-secondary" aria-hidden="true" />
-                  </span>
-                  <h3 className="font-display text-lg font-semibold text-text-primary">
-                    {feature.title}
-                  </h3>
-                  <p className="text-sm text-text-secondary">{feature.description}</p>
-                </Card>
-              );
-            })}
-          </div>
-        )}
+            );
+          })}
+        </div>
       </section>
 
-      {/* --- Piattaforme ----------------------------------------------------- */}
-      <section id="piattaforme" className="border-y border-secondary/10 bg-primary/40">
+      {/* --- Canali ---------------------------------------------------------- */}
+      <section className="border-y border-secondary/10 bg-primary/40">
         <div className="mx-auto w-full max-w-content px-4 py-16 lg:px-8">
           <div className="mb-8 text-center">
             <h2 className="font-display text-3xl font-semibold text-text-primary">
-              Tutte le tue piattaforme, un solo posto
+              I tuoi canali, un solo posto
             </h2>
             <p className="mt-2 text-base text-text-secondary">
-              Collega i canali social e lascia che gli agenti distribuiscano i contenuti.
+              Collega gli account social dal tuo workspace e lascia che la coda di pubblicazione
+              venga gestita dalla pipeline.
             </p>
           </div>
 
-          <ul className="flex flex-wrap items-center justify-center gap-3">
-            {(data?.platforms ?? []).map((platformId) => (
-              <li
-                key={platformId}
-                className="flex items-center gap-3 rounded-full border border-secondary/15 bg-bg-card px-4 py-2.5"
-              >
-                <img
-                  src={`/icons/${platformId}.svg`}
-                  alt=""
-                  width={20}
-                  height={20}
-                  className="h-5 w-5"
-                />
-                <span className="text-sm font-medium text-text-primary">
-                  {platformLabel(platformId)}
-                </span>
-              </li>
-            ))}
-          </ul>
+          {isAuthenticated && platforms.isLoading ? (
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              {Array.from({ length: 3 }).map((_, index) => (
+                <Skeleton key={index} className="h-11 w-40 rounded-full" />
+              ))}
+            </div>
+          ) : connectedChannels.length > 0 ? (
+            <ul className="flex flex-wrap items-center justify-center gap-3">
+              {connectedChannels.map((provider) => (
+                <li
+                  key={provider}
+                  className="flex items-center gap-3 rounded-full border border-secondary/15 bg-bg-card px-4 py-2.5"
+                >
+                  <img
+                    src={`/icons/${provider}.svg`}
+                    alt=""
+                    width={20}
+                    height={20}
+                    className="h-5 w-5"
+                  />
+                  <span className="text-sm font-medium text-text-primary">
+                    {platformLabel(provider)}
+                  </span>
+                  <Check className="h-4 w-4 text-success" aria-hidden="true" />
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <ul className="flex flex-wrap items-center justify-center gap-3">
+              {SUPPORTED_CHANNELS.map((provider) => (
+                <li
+                  key={provider}
+                  className="flex items-center gap-3 rounded-full border border-secondary/15 bg-bg-card px-4 py-2.5"
+                >
+                  <img
+                    src={`/icons/${provider}.svg`}
+                    alt=""
+                    width={20}
+                    height={20}
+                    className="h-5 w-5"
+                  />
+                  <span className="text-sm font-medium text-text-primary">
+                    {platformLabel(provider)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {isAuthenticated && connectedChannels.length === 0 && !platforms.isLoading && (
+            <p className="mt-6 text-center text-sm text-text-muted">
+              Nessun canale collegato al momento: puoi collegarli in qualsiasi momento dalla sezione
+              Integrazioni.
+            </p>
+          )}
         </div>
       </section>
 
@@ -272,7 +369,7 @@ export default function Landing() {
         </div>
 
         <ol className="grid gap-4 lg:grid-cols-3">
-          {(data?.steps ?? []).map((step, index) => (
+          {STEPS.map((step, index) => (
             <li key={step.id}>
               <Card className="flex h-full flex-col gap-3">
                 <span className="gradient-accent flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold text-accent-foreground">
@@ -288,104 +385,89 @@ export default function Landing() {
         </ol>
       </section>
 
-      {/* --- Testimonianze --------------------------------------------------- */}
-      <section className="border-y border-secondary/10 bg-primary/40">
-        <div className="mx-auto w-full max-w-content px-4 py-16 lg:px-8">
-          <div className="mb-10 text-center">
-            <h2 className="font-display text-3xl font-semibold text-text-primary">
-              Chi lo usa ogni giorno
-            </h2>
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-3">
-            {(data?.testimonials ?? []).map((testimonial) => (
-              <Card key={testimonial.id} className="flex h-full flex-col gap-4">
-                <Quote className="h-6 w-6 text-tertiary" aria-hidden="true" />
-                <blockquote className="flex-1 text-sm text-text-secondary">
-                  “{testimonial.quote}”
-                </blockquote>
-                <div className="flex items-center gap-3">
-                  <img
-                    src={testimonial.avatar ?? "/brand/logo-192.png"}
-                    alt=""
-                    width={40}
-                    height={40}
-                    className="h-10 w-10 rounded-full border border-secondary/20"
-                  />
-                  <div>
-                    <p className="text-sm font-semibold text-text-primary">
-                      {testimonial.name}
-                    </p>
-                    <p className="text-xs text-text-muted">
-                      {testimonial.role} · {testimonial.company}
-                    </p>
-                  </div>
-                </div>
-              </Card>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* --- Prezzi ---------------------------------------------------------- */}
-      <section id="prezzi" className="mx-auto w-full max-w-content px-4 py-16 lg:px-8">
-        <div className="mb-10 text-center">
+      {/* --- Piano reale ------------------------------------------------------ */}
+      <section id="piano" className="mx-auto w-full max-w-content px-4 pb-16 lg:px-8">
+        <div className="mb-8 text-center">
           <h2 className="font-display text-3xl font-semibold text-text-primary">
-            Prezzi semplici e trasparenti
+            Il tuo piano, i tuoi crediti
           </h2>
           <p className="mt-2 text-base text-text-secondary">
-            Scegli il piano giusto e cambia quando vuoi.
+            Dati letti dal tuo workspace: niente stime ne' prezzi ipotetici.
           </p>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-3">
-          {(data?.pricing ?? []).map((tier) => (
-            <Card
-              key={tier.id}
-              variant={tier.highlighted ? "elevated" : "default"}
-              className="flex h-full flex-col gap-5"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <h3 className="font-display text-xl font-semibold text-text-primary">
-                  {tier.name}
-                </h3>
-                {tier.highlighted && <Badge variant="accent">Consigliato</Badge>}
-              </div>
-
+        {isAuthenticated && account.isLoading ? (
+          <Skeleton className="h-40 rounded-xl" />
+        ) : isAuthenticated && account.data ? (
+          <Card className="flex flex-col gap-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p className="font-display text-3xl font-semibold text-text-primary">
-                  {formatCurrency(tier.monthlyPrice)}
-                  <span className="text-base font-normal text-text-muted"> / mese</span>
-                </p>
-                <p className="mt-1 text-sm text-text-muted">
-                  oppure {formatCurrency(tier.annualPrice)} all'anno
+                <p className="text-sm text-text-muted">Workspace</p>
+                <p className="font-display text-xl font-semibold text-text-primary">
+                  {account.data.tenantName}
                 </p>
               </div>
+              <Badge variant="info">{account.data.plan}</Badge>
+            </div>
 
-              <p className="text-sm text-text-secondary">{tier.description}</p>
+            <dl className="grid gap-4 sm:grid-cols-3">
+              <div className="rounded-lg bg-primary/40 px-4 py-3">
+                <dt className="text-xs text-text-muted">Crediti disponibili</dt>
+                <dd className="font-display text-2xl font-semibold text-text-primary">
+                  {formatNumber(account.data.available)}
+                </dd>
+              </div>
+              <div className="rounded-lg bg-primary/40 px-4 py-3">
+                <dt className="text-xs text-text-muted">Crediti riservati</dt>
+                <dd className="font-display text-2xl font-semibold text-text-primary">
+                  {formatNumber(account.data.reserved)}
+                </dd>
+              </div>
+              <div className="rounded-lg bg-primary/40 px-4 py-3">
+                <dt className="text-xs text-text-muted">Hard-stop a crediti esauriti</dt>
+                <dd className="font-display text-2xl font-semibold text-text-primary">
+                  {account.data.hardStopOnEmpty ? "Attivo" : "Disattivato"}
+                </dd>
+              </div>
+            </dl>
 
-              <ul className="flex flex-1 flex-col gap-2.5">
-                {tier.features.map((feature) => (
-                  <li key={feature} className="flex items-start gap-2 text-sm text-text-secondary">
-                    <Check className="mt-0.5 h-4 w-4 shrink-0 text-success" aria-hidden="true" />
-                    {feature}
-                  </li>
-                ))}
-              </ul>
-
+            <div className="flex flex-wrap items-center gap-3">
+              <Link
+                to="/subscription"
+                className="gradient-accent inline-flex h-11 items-center justify-center gap-2 rounded-lg px-5 text-sm font-semibold text-accent-foreground shadow-glow transition-all hover:brightness-110"
+              >
+                Vai all'abbonamento
+                <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              </Link>
+              <p className="text-sm text-text-muted">
+                Pacchetti crediti e ricarica automatica si gestiscono nella sezione Abbonamento.
+              </p>
+            </div>
+          </Card>
+        ) : (
+          <Card className="flex flex-col gap-4">
+            <p className="text-sm text-text-secondary">
+              Accedi per vedere piano, crediti disponibili e consumi reali del tuo workspace. Il
+              piano Free parte con 100 crediti al mese e senza carta di credito; i pacchetti crediti
+              si acquistano nella sezione Abbonamento.
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <Link
+                to="/login"
+                className="gradient-accent inline-flex h-11 items-center justify-center gap-2 rounded-lg px-5 text-sm font-semibold text-accent-foreground shadow-glow transition-all hover:brightness-110"
+              >
+                Accedi
+                <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              </Link>
               <Link
                 to="/register"
-                className={
-                  tier.highlighted
-                    ? "gradient-accent inline-flex h-11 items-center justify-center rounded-lg text-sm font-semibold text-accent-foreground shadow-glow transition-all hover:brightness-110"
-                    : "inline-flex h-11 items-center justify-center rounded-lg border border-secondary/25 text-sm font-medium text-text-primary transition-colors hover:bg-bg-hover"
-                }
+                className="inline-flex h-11 items-center justify-center rounded-lg border border-secondary/25 px-5 text-sm font-medium text-text-primary transition-colors hover:bg-bg-hover"
               >
-                Scegli {tier.name}
+                Crea un account
               </Link>
-            </Card>
-          ))}
-        </div>
+            </div>
+          </Card>
+        )}
       </section>
 
       {/* --- CTA finale ------------------------------------------------------ */}
@@ -395,7 +477,8 @@ export default function Landing() {
             Pronto a mettere al lavoro i tuoi agenti?
           </h2>
           <p className="max-w-xl text-base text-text-secondary">
-            Inizia oggi e lascia che Aethersy gestisca la tua presenza digitale.
+            Inizia oggi e lascia che Aethersy produca brand, sito, contenuti e social del tuo
+            business.
           </p>
           <Link
             to="/register"
@@ -419,8 +502,8 @@ export default function Landing() {
             <a href="#funzionalita" className="text-sm text-text-muted hover:text-text-secondary">
               Funzionalita'
             </a>
-            <a href="#prezzi" className="text-sm text-text-muted hover:text-text-secondary">
-              Prezzi
+            <a href="#come-funziona" className="text-sm text-text-muted hover:text-text-secondary">
+              Come funziona
             </a>
             <Link to="/login" className="text-sm text-text-muted hover:text-text-secondary">
               Accedi

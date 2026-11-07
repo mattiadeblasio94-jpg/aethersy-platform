@@ -1,10 +1,9 @@
 import { memo, useMemo } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Bell, CreditCard, LogOut, Menu, User, ChevronDown } from "lucide-react";
 import { useUiStore } from "@/store/ui";
-import { useNotifications } from "@/lib/queries";
 import { useAuthStore } from "@/store/auth";
-import { useBalance } from "@/lib/platform-queries";
+import { useBalance, useSchedule } from "@/lib/platform-queries";
 import { ThemeToggle } from "@/components/common/ThemeToggle";
 import { Button } from "@/components/ui/Button";
 import { Dropdown, DropdownItem } from "@/components/ui/Dropdown";
@@ -16,13 +15,17 @@ import { cn, formatNumber } from "@/lib/utils";
  */
 export const Header = memo(function Header() {
   const toggleDrawer = useUiStore((state) => state.toggleDrawer);
-  const { data: notifications } = useNotifications();
   const location = useLocation();
+  const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
   const balance = useBalance();
+  const schedule = useSchedule();
 
-  const unread = (notifications ?? []).filter((item) => !item.read).length;
+  const pending = useMemo(
+    () => (schedule.data ?? []).filter((item) => item.status === "scheduled").length,
+    [schedule.data],
+  );
   const isMarketing = location.pathname === "/landing";
 
   const pageTitle = useMemo(() => {
@@ -55,10 +58,31 @@ export const Header = memo(function Header() {
     : "U";
 
   const dropdownItems: DropdownItem[] = [
-    { id: "profile", label: "Profilo", icon: <User className="h-4 w-4" aria-hidden="true" />, onSelect: () => (window.location.href = "/settings/profile") },
-    { id: "billing", label: "Abbonamento", icon: <CreditCard className="h-4 w-4" aria-hidden="true" />, onSelect: () => (window.location.href = "/settings/billing") },
-    { id: "subscription-faq", label: "Abbonamento (FAQ)", icon: <CreditCard className="h-4 w-4" aria-hidden="true" />, onSelect: () => (window.location.href = "/subscription") },
-    { id: "logout", label: "Esci", icon: <LogOut className="h-4 w-4" aria-hidden="true" />, onSelect: () => logout(), destructive: true },
+    {
+      id: "profile",
+      label: "Profilo",
+      icon: <User className="h-4 w-4" aria-hidden="true" />,
+      onSelect: () => navigate("/settings/profile"),
+    },
+    {
+      id: "billing",
+      label: "Abbonamento",
+      icon: <CreditCard className="h-4 w-4" aria-hidden="true" />,
+      onSelect: () => navigate("/settings/billing"),
+    },
+    {
+      id: "subscription-faq",
+      label: "Abbonamento (FAQ)",
+      icon: <CreditCard className="h-4 w-4" aria-hidden="true" />,
+      onSelect: () => navigate("/subscription"),
+    },
+    {
+      id: "logout",
+      label: "Esci",
+      icon: <LogOut className="h-4 w-4" aria-hidden="true" />,
+      onSelect: () => logout(),
+      destructive: true,
+    },
   ];
 
   return (
@@ -108,33 +132,35 @@ export const Header = memo(function Header() {
           <Link
             to="/settings/billing"
             className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary/10 hover:bg-secondary/20 transition-colors"
-            title="Vai a Abbonamento"
+            title="Vai a Fatturazione"
           >
             <CreditCard className="h-4 w-4 text-secondary" aria-hidden="true" />
             <span className="text-sm font-mono font-medium text-text-primary">
-              {formatNumber(balance.data.available)} crediti
+              {formatNumber(balance.data.available ?? 0)} crediti
             </span>
           </Link>
         )}
 
         <ThemeToggle />
 
-        <button
-          type="button"
-          aria-label={unread > 0 ? `Notifiche, ${unread} non lette` : "Notifiche"}
+        <Link
+          to="/scheduled-tasks"
+          aria-label={
+            pending > 0 ? `Attività pianificate, ${pending} da eseguire` : "Attività pianificate"
+          }
           className="relative inline-flex h-11 w-11 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary lg:hidden"
         >
           <Bell className="h-5 w-5" aria-hidden="true" />
-          {unread > 0 && (
+          {pending > 0 && (
             <span
               className={cn(
                 "absolute right-2 top-2 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-tertiary px-1 text-[10px] font-bold text-accent-foreground",
               )}
             >
-              {unread > 9 ? "9+" : unread}
+              {pending > 9 ? "9+" : pending}
             </span>
           )}
-        </button>
+        </Link>
 
         {user && (
           <Dropdown

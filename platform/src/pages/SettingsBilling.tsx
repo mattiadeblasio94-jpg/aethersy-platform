@@ -1,313 +1,270 @@
-// =============================================================================
-// Impostazioni > Fatturazione (brief §4) — rotta /settings/billing. Piano
-// corrente, consumo crediti, metodi di pagamento (aggiungi/rimuovi mock) e
-// storico fatture. Nessun dato di carta reale: solo ultime 4 cifre.
-// =============================================================================
-
-import { useState } from "react";
-import type { FormEvent } from "react";
-import { Check, CreditCard, Plus, Sparkles, Trash2 } from "lucide-react";
+import { useMemo } from "react";
+import { Link } from "react-router-dom";
+import { CreditCard, Receipt, Wallet } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { Input } from "@/components/ui/Input";
-import { Modal } from "@/components/ui/Modal";
-import { Select } from "@/components/ui/Select";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { useToast } from "@/components/ui/Toast";
 import { SettingsLayout } from "@/components/settings/SettingsLayout";
 import { EmptyState, ProgressBar } from "@/components/common/PageElements";
 import { PageTransition } from "@/components/common/Motion";
-import {
-  useAddPaymentMethod,
-  useCreditUsage,
-  useInvoices,
-  usePaymentMethods,
-  useRemovePaymentMethod,
-} from "@/lib/queries";
-import type { InvoiceStatus } from "@/lib/types";
-import { formatCurrency, formatDate, formatNumber } from "@/lib/utils";
+import { useAccount, useBalance, useUsage } from "@/lib/platform-queries";
+import { formatCurrency, formatDateTime, formatNumber, formatPercent } from "@/lib/utils";
 
-const INVOICE_STATUS: Record<InvoiceStatus, { label: string; variant: "success" | "warning" | "error" }> = {
-  paid: { label: "Pagata", variant: "success" },
-  pending: { label: "In attesa", variant: "warning" },
-  failed: { label: "Non riuscita", variant: "error" },
+const CAPABILITY_LABEL: Record<string, string> = {
+  chat: "Chat",
+  text: "Testo",
+  image: "Immagini",
+  video: "Video",
+  tts: "Audio",
+  embedding: "Embedding",
 };
 
-const PLAN_FEATURES = [
-  "10 agenti AI attivi",
-  "6 piattaforme social collegate",
-  "2.000 crediti al mese",
-  "Report e analisi illimitati",
-  "Supporto prioritario",
-];
+const STATUS_VARIANT: Record<string, "default" | "success" | "warning" | "error" | "info"> = {
+  succeeded: "success",
+  completed: "success",
+  pending: "warning",
+  reserved: "warning",
+  failed: "error",
+  released: "info",
+};
 
-const CARD_BRANDS = [
-  { value: "Visa", label: "Visa" },
-  { value: "Mastercard", label: "Mastercard" },
-  { value: "Amex", label: "American Express" },
-];
+interface QuotaView {
+  limitCredits: number;
+  window: string;
+  softPct: number;
+  consumed: number;
+}
+
+function readQuota(quota: unknown): QuotaView | null {
+  if (!quota || typeof quota !== "object") return null;
+  const value = quota as Partial<QuotaView>;
+  if (typeof value.limitCredits !== "number" || typeof value.consumed !== "number") return null;
+  return {
+    limitCredits: value.limitCredits,
+    window: typeof value.window === "string" ? value.window : "month",
+    softPct: typeof value.softPct === "number" ? value.softPct : 0,
+    consumed: value.consumed,
+  };
+}
 
 export default function SettingsBilling() {
-  const { toast } = useToast();
-  const creditUsage = useCreditUsage();
-  const invoices = useInvoices();
-  const paymentMethods = usePaymentMethods();
-  const addPaymentMethod = useAddPaymentMethod();
-  const removePaymentMethod = useRemovePaymentMethod();
+  const account = useAccount();
+  const balance = useBalance();
+  const usage = useUsage(50);
 
-  const [addOpen, setAddOpen] = useState(false);
-  const [brand, setBrand] = useState("Visa");
-  const [last4, setLast4] = useState("");
-  const [formError, setFormError] = useState<string | null>(null);
-
-  const used = creditUsage.data?.used ?? 0;
-  const total = creditUsage.data?.total ?? 0;
-
-  async function handleAddPaymentMethod(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!/^\d{4}$/.test(last4)) {
-      setFormError("Inserisci le ultime 4 cifre della carta.");
-      return;
-    }
-    setFormError(null);
-    try {
-      await addPaymentMethod.mutateAsync({ brand, last4 });
-      toast({ kind: "success", title: "Metodo aggiunto", description: `${brand} •••• ${last4}` });
-      setAddOpen(false);
-      setLast4("");
-    } catch {
-      toast({ kind: "error", title: "Aggiunta non riuscita" });
-    }
-  }
-
-  async function handleRemove(id: string, label: string) {
-    try {
-      await removePaymentMethod.mutateAsync(id);
-      toast({ kind: "info", title: "Metodo rimosso", description: label });
-    } catch {
-      toast({ kind: "error", title: "Rimozione non riuscita" });
-    }
-  }
+  const events = usage.data?.events ?? [];
+  const meteringOn = (usage.data as { metering?: boolean } | undefined)?.metering ?? null;
+  const quota = useMemo(() => readQuota(balance.data?.quota), [balance.data?.quota]);
+  const balanceValue = balance.data?.balance ?? null;
+  const reservedValue = balance.data?.reserved ?? null;
+  const availableValue = balance.data?.available ?? null;
 
   return (
     <PageTransition>
       <SettingsLayout
         title="Fatturazione"
-        description="Piano, crediti, metodi di pagamento e storico fatture."
-        actions={
-          <Button
-            variant="secondary"
-            leftIcon={<Sparkles className="h-4 w-4" aria-hidden="true" />}
-            onClick={() => toast({ kind: "info", title: "Upgrade piano", description: "Flusso in arrivo (mock)." })}
-          >
-            Cambia piano
-          </Button>
-        }
+        description="Saldo crediti, quota di consumo e piano del tenant: fatture e metodi di pagamento non sono esposti dal BFF."
       >
-        {/* Piano + crediti */}
-        <div className="grid gap-6 lg:grid-cols-2">
-          <Card
-            variant="elevated"
-            header={
-              <>
-                <h3 className="text-base font-semibold text-text-primary">Piano Pro</h3>
-                <Badge variant="info">Attivo</Badge>
-              </>
-            }
-          >
-            <div className="flex items-baseline gap-1">
-              <span className="font-display text-3xl font-semibold text-text-primary">€79</span>
-              <span className="text-sm text-text-muted">/ mese</span>
-            </div>
-            <ul className="mt-4 flex flex-col gap-2">
-              {PLAN_FEATURES.map((feature) => (
-                <li key={feature} className="flex items-center gap-2 text-sm text-text-secondary">
-                  <Check className="h-4 w-4 shrink-0 text-success" aria-hidden="true" />
-                  {feature}
-                </li>
-              ))}
-            </ul>
-          </Card>
-
-          <Card header={<h3 className="text-base font-semibold text-text-primary">Consumo crediti</h3>}>
-            {creditUsage.isLoading ? (
-              <Skeleton lines={3} />
-            ) : (
-              <div className="flex flex-col gap-4">
-                <div className="flex items-end justify-between">
-                  <p className="font-display text-2xl font-semibold text-text-primary">
-                    {formatNumber(used)}{" "}
-                    <span className="text-base font-normal text-text-muted">
-                      / {formatNumber(total)}
-                    </span>
-                  </p>
-                  <span className="text-sm text-text-muted">
-                    {total > 0 ? Math.round((used / total) * 100) : 0}%
-                  </span>
-                </div>
-                <ProgressBar value={used} max={total} label="Crediti utilizzati questo mese" />
-                <p className="text-xs text-text-muted">
-                  I crediti non utilizzati si azzerano all'inizio del prossimo ciclo di fatturazione.
-                </p>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  leftIcon={<Plus className="h-4 w-4" aria-hidden="true" />}
-                  onClick={() => toast({ kind: "info", title: "Acquisto crediti", description: "Flusso in arrivo (mock)." })}
-                >
-                  Acquista crediti
-                </Button>
-              </div>
-            )}
-          </Card>
-        </div>
-
-        {/* Metodi di pagamento */}
-        <Card
-          header={
-            <>
-              <h3 className="text-base font-semibold text-text-primary">Metodi di pagamento</h3>
-              <Button
-                variant="ghost"
-                size="sm"
-                leftIcon={<Plus className="h-4 w-4" aria-hidden="true" />}
-                onClick={() => setAddOpen(true)}
-              >
-                Aggiungi
-              </Button>
-            </>
-          }
-          bodyClassName="p-0"
-        >
-          {paymentMethods.isLoading ? (
-            <div className="p-5">
-              <Skeleton lines={3} />
-            </div>
-          ) : (paymentMethods.data ?? []).length === 0 ? (
-            <div className="p-5">
-              <EmptyState
-                icon={<CreditCard className="h-5 w-5" aria-hidden="true" />}
-                title="Nessun metodo di pagamento"
-                description="Aggiungi una carta per rinnovare l'abbonamento."
-              />
-            </div>
+        <Card header={<h3 className="text-base font-semibold text-text-primary">Piano e tenant</h3>}>
+          {account.isLoading ? (
+            <Skeleton lines={3} />
           ) : (
-            <ul className="divide-y divide-secondary/10">
-              {(paymentMethods.data ?? []).map((method) => (
-                <li key={method.id} className="flex items-center gap-4 px-5 py-4">
-                  <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-secondary/15">
-                    <CreditCard className="h-5 w-5 text-secondary" aria-hidden="true" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-text-primary">
-                      {method.brand} •••• {method.last4}
-                    </p>
-                    <p className="text-xs text-text-muted">Scade {method.expiry}</p>
-                  </div>
-                  {method.isDefault && <Badge variant="info">Predefinito</Badge>}
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`Rimuovi ${method.brand} che termina con ${method.last4}`}
-                    loading={removePaymentMethod.isPending && removePaymentMethod.variables === method.id}
-                    onClick={() => handleRemove(method.id, `${method.brand} •••• ${method.last4}`)}
-                  >
-                    <Trash2 className="h-4 w-4 text-error" aria-hidden="true" />
-                  </Button>
-                </li>
-              ))}
-            </ul>
+            <dl className="flex flex-col gap-3">
+              <div className="flex items-center justify-between gap-4 border-b border-secondary/5 pb-2">
+                <dt className="text-sm text-text-muted">Workspace</dt>
+                <dd className="text-right text-sm font-medium text-text-primary">
+                  {account.data?.tenantName ?? "—"}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-4 border-b border-secondary/5 pb-2">
+                <dt className="text-sm text-text-muted">Piano</dt>
+                <dd className="text-right text-sm font-medium text-text-primary">
+                  {account.data?.plan ?? "Nessun piano attivo"}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-4 border-b border-secondary/5 pb-2">
+                <dt className="text-sm text-text-muted">Unita' di credito</dt>
+                <dd className="text-right text-sm font-medium text-text-primary">
+                  {formatNumber(account.data?.creditUnit ?? 1)}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <dt className="text-sm text-text-muted">Blocco a saldo zero</dt>
+                <dd className="text-right text-sm font-medium text-text-primary">
+                  {account.data?.hardStopOnEmpty ? "Attivo" : "Disattivo"}
+                </dd>
+              </div>
+            </dl>
           )}
         </Card>
 
-        {/* Storico fatture */}
         <Card
           header={
             <>
-              <h3 className="text-base font-semibold text-text-primary">Storico fatture</h3>
-              <span className="text-xs text-text-muted">{invoices.data?.length ?? 0} fatture</span>
+              <h3 className="flex items-center gap-2 text-base font-semibold text-text-primary">
+                <Wallet className="h-4 w-4 text-secondary" aria-hidden="true" />
+                Saldo crediti
+              </h3>
+              {meteringOn === false && <Badge variant="warning">Metering disattivato</Badge>}
+            </>
+          }
+        >
+          {balance.isLoading ? (
+            <Skeleton lines={4} />
+          ) : balance.isError ? (
+            <EmptyState
+              icon={<Wallet className="h-4 w-4" aria-hidden="true" />}
+              title="Saldo non raggiungibile"
+              description="Il BFF non ha risposto sulla rotta crediti. Riprova fra poco."
+              action={
+                <Button variant="secondary" size="sm" onClick={() => balance.refetch()}>
+                  Ricarica saldo
+                </Button>
+              }
+            />
+          ) : meteringOn === false ? (
+            <EmptyState
+              title="Saldo non disponibile"
+              description="Il metering dei crediti e' disattivato su questa installazione: saldo, riserve e quota non vengono calcolati."
+            />
+          ) : (
+            <div className="flex flex-col gap-4">
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div>
+                  <p className="text-xs text-text-muted">Saldo</p>
+                  <p className="mt-1 font-display text-2xl font-semibold text-text-primary">
+                    {balanceValue === null ? "—" : formatNumber(balanceValue)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-text-muted">Disponibile</p>
+                  <p className="mt-1 font-display text-2xl font-semibold text-text-primary">
+                    {availableValue === null ? "—" : formatNumber(availableValue)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-text-muted">Riservato</p>
+                  <p className="mt-1 font-display text-2xl font-semibold text-text-primary">
+                    {reservedValue === null ? "—" : formatNumber(reservedValue)}
+                  </p>
+                </div>
+              </div>
+
+              {quota ? (
+                <div className="flex flex-col gap-2">
+                  <ProgressBar
+                    value={quota.consumed}
+                    max={quota.limitCredits}
+                    label={`Quota ${quota.window === "day" ? "giornaliera" : "mensile"}`}
+                  />
+                  <p className="text-xs text-text-muted">
+                    {formatNumber(quota.consumed)} crediti consumati su {formatNumber(quota.limitCredits)} ·{" "}
+                    soglia di avviso al {formatPercent(quota.softPct, 0)}
+                  </p>
+                </div>
+              ) : (
+                <p className="text-sm text-text-muted">
+                  Nessuna quota configurata per questo tenant.
+                </p>
+              )}
+            </div>
+          )}
+        </Card>
+
+        <Card
+          header={
+            <>
+              <h3 className="text-base font-semibold text-text-primary">Consumo recente</h3>
+              <span className="text-xs text-text-muted">{events.length} eventi</span>
             </>
           }
           bodyClassName="p-0"
         >
-          {invoices.isLoading ? (
+          {usage.isLoading ? (
             <div className="p-5">
               <Skeleton lines={5} />
             </div>
+          ) : usage.isError ? (
+            <div className="p-5">
+              <EmptyState
+                icon={<Receipt className="h-5 w-5" aria-hidden="true" />}
+                title="Consumo non disponibile"
+                description="Impossibile leggere lo storico eventi di consumo dal BFF."
+                action={
+                  <Button variant="secondary" size="sm" onClick={() => usage.refetch()}>
+                    Ricarica consumo
+                  </Button>
+                }
+              />
+            </div>
+          ) : events.length === 0 ? (
+            <div className="p-5">
+              <EmptyState
+                icon={<Receipt className="h-5 w-5" aria-hidden="true" />}
+                title="Nessun evento di consumo"
+                description="Gli usi di chat, immagini, audio e video compariranno qui con crediti e costo provider."
+              />
+            </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[560px] border-collapse text-sm">
-                <caption className="sr-only">Storico fatture del workspace</caption>
+              <table className="w-full min-w-[640px] border-collapse text-sm">
+                <caption className="sr-only">Eventi di consumo del tenant</caption>
                 <thead>
                   <tr className="border-b border-secondary/10 text-left text-xs text-text-muted">
-                    <th scope="col" className="py-2 pl-5 pr-4 font-medium">Numero</th>
-                    <th scope="col" className="py-2 pr-4 font-medium">Data</th>
-                    <th scope="col" className="py-2 pr-4 font-medium">Importo</th>
+                    <th scope="col" className="py-2 pl-5 pr-4 font-medium">Data e ora</th>
+                    <th scope="col" className="py-2 pr-4 font-medium">Capability</th>
+                    <th scope="col" className="py-2 pr-4 font-medium">Provider</th>
+                    <th scope="col" className="py-2 pr-4 font-medium">Costo</th>
+                    <th scope="col" className="py-2 pr-4 font-medium">Crediti</th>
                     <th scope="col" className="py-2 pr-5 font-medium">Stato</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(invoices.data ?? []).map((invoice) => {
-                    const status = INVOICE_STATUS[invoice.status];
-                    return (
-                      <tr key={invoice.id} className="border-b border-secondary/5">
-                        <td className="py-3 pl-5 pr-4 font-mono text-xs text-text-secondary">
-                          {invoice.number}
-                        </td>
-                        <td className="py-3 pr-4 text-text-secondary">{formatDate(invoice.date)}</td>
-                        <td className="py-3 pr-4 font-medium text-text-primary">
-                          {formatCurrency(invoice.amount, invoice.currency)}
-                        </td>
-                        <td className="py-3 pr-5">
-                          <Badge variant={status.variant}>{status.label}</Badge>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {events.map((event) => (
+                    <tr key={event.id} className="border-b border-secondary/5">
+                      <td className="whitespace-nowrap py-3 pl-5 pr-4 text-text-muted">
+                        {formatDateTime(event.created_at)}
+                      </td>
+                      <td className="py-3 pr-4 text-text-primary">
+                        {CAPABILITY_LABEL[event.capability] ?? event.capability}
+                      </td>
+                      <td className="py-3 pr-4 text-text-secondary">
+                        {event.provider ?? "—"}
+                        {event.model ? (
+                          <span className="text-xs text-text-muted"> · {event.model}</span>
+                        ) : null}
+                      </td>
+                      <td className="py-3 pr-4 text-text-secondary">
+                        {formatCurrency(Number(event.price_eur ?? 0))}
+                      </td>
+                      <td className="py-3 pr-4 font-medium text-text-primary">
+                        {formatNumber(Number(event.credits))}
+                      </td>
+                      <td className="py-3 pr-5">
+                        <Badge variant={STATUS_VARIANT[event.status] ?? "default"}>{event.status}</Badge>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
           )}
         </Card>
-      </SettingsLayout>
 
-      {/* Modale aggiunta metodo */}
-      <Modal
-        open={addOpen}
-        onOpenChange={setAddOpen}
-        title="Aggiungi metodo di pagamento"
-        description="Solo per demo: inserisci le ultime 4 cifre, nessun dato reale viene salvato."
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setAddOpen(false)}>
-              Annulla
-            </Button>
-            <Button type="submit" form="add-payment-form" loading={addPaymentMethod.isPending}>
-              Aggiungi carta
-            </Button>
-          </>
-        }
-      >
-        <form id="add-payment-form" onSubmit={handleAddPaymentMethod} className="flex flex-col gap-4" noValidate>
-          <Select
-            label="Circuito"
-            value={brand}
-            onChange={(event) => setBrand(event.target.value)}
-            options={CARD_BRANDS}
+        <Card header={<h3 className="text-base font-semibold text-text-primary">Fatture</h3>}>
+          <EmptyState
+            icon={<CreditCard className="h-5 w-5" aria-hidden="true" />}
+            title="Fatture e metodi di pagamento non disponibili"
+            description="Il BFF non espone un ledger di fatturazione e Stripe non e' configurato su questa installazione. Il consumo resta comunque visibile qui sopra."
+            action={
+              <Link to="/account" className="text-sm font-medium text-secondary hover:underline">
+                Apri il riepilogo account
+              </Link>
+            }
           />
-          <Input
-            label="Ultime 4 cifre"
-            inputMode="numeric"
-            maxLength={4}
-            placeholder="4242"
-            value={last4}
-            error={formError ?? undefined}
-            onChange={(event) => setLast4(event.target.value.replace(/\D/g, "").slice(0, 4))}
-            required
-          />
-        </form>
-      </Modal>
+        </Card>
+      </SettingsLayout>
     </PageTransition>
   );
 }

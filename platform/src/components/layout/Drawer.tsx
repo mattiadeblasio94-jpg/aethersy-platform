@@ -23,13 +23,19 @@ import {
   Users,
   Wallet,
   Globe,
+  LayoutDashboard,
   X,
   Zap,
 } from "lucide-react";
 import { useUiStore } from "@/store/ui";
 import { useAuthStore } from "@/store/auth";
-import { useAgents, usePlatforms, useTasks, useWorkspaces } from "@/lib/queries";
-import { WorkspaceSelector } from "@/components/domain/WorkspaceSelector";
+import {
+  useAccount,
+  useBalance,
+  useOverview,
+  usePlatforms,
+  useRoster,
+} from "@/lib/platform-queries";
 import { CreditDisplay } from "@/components/domain/CreditDisplay";
 import { CountBadge } from "@/components/ui/Badge";
 import { cn } from "@/lib/utils";
@@ -57,42 +63,32 @@ export interface DrawerProps {
  */
 export const Drawer = memo(function Drawer({ variant }: DrawerProps) {
   const closeDrawer = useUiStore((state) => state.closeDrawer);
-  const activeWorkspaceId = useUiStore((state) => state.activeWorkspaceId);
-  const setActiveWorkspace = useUiStore((state) => state.setActiveWorkspace);
-  const customWorkspaces = useUiStore((state) => state.customWorkspaces);
-  const { data: remoteWorkspaces } = useWorkspaces();
-  const { data: agents } = useAgents();
-  const { data: platforms } = usePlatforms();
-  const { data: tasks } = useTasks();
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
   const navigate = useNavigate();
-  // Il drawer mobile non deve scorrere se l'utente preferisce meno movimento.
   const reduceMotion = useReducedMotion();
 
-  // I workspace creati in onboarding precedono quelli remoti nel selettore.
-  const workspaces = useMemo(
-    () => [...customWorkspaces, ...(remoteWorkspaces ?? [])],
-    [customWorkspaces, remoteWorkspaces],
-  );
+  const account = useAccount();
+  const balance = useBalance();
+  const overview = useOverview();
+  const platforms = usePlatforms();
+  const roster = useRoster();
 
   const sections = useMemo<NavSection[]>(() => {
-    const activeTasks = (tasks ?? []).filter(
-      (task) => task.status === "pending" || task.status === "running",
-    ).length;
-    const connectedPlatforms = (platforms ?? []).filter(
-      (platform) => platform.status === "connected",
-    ).length;
-    const activeAgents = (agents ?? []).filter((agent) => agent.status === "active").length;
+    const counters = overview.data?.counters;
+    const connectedPlatforms = (platforms.data ?? []).filter((platform) => platform.connected).length;
+    const activeAgents = (roster.data ?? []).filter((entry) => entry.running > 0).length;
+    const activeTasks = (counters?.tasks.pending ?? 0) + (counters?.tasks.running ?? 0);
 
     return [
       {
         title: "Operazioni",
         items: [
-          { to: "/dashboard", label: "Home", icon: Home, badge: 3 },
+          { to: "/dashboard", label: "Home", icon: Home },
+          { to: "/overview", label: "Panoramica", icon: LayoutDashboard },
           { to: "/studio", label: "Studio", icon: Zap },
           { to: "/agents", label: "Agenti", icon: Bot, badge: activeAgents },
-          { to: "/opportunities", label: "Opportunità", icon: Target },
+          { to: "/opportunities", label: "Opportunità", icon: Target, badge: counters?.runs.open ?? 0 },
           { to: "/library", label: "Libreria", icon: FolderOpen },
           { to: "/outreach", label: "Outreach", icon: Send },
           {
@@ -128,7 +124,7 @@ export const Drawer = memo(function Drawer({ variant }: DrawerProps) {
         ],
       },
     ];
-  }, [agents, platforms, tasks]);
+  }, [overview.data, platforms.data, roster.data]);
 
   const secondaryItems: NavItem[] = [
     { to: "/settings", label: "Impostazioni", icon: Settings },
@@ -159,12 +155,14 @@ export const Drawer = memo(function Drawer({ variant }: DrawerProps) {
       </div>
 
       <div className="border-t border-secondary/10 px-3 py-3">
-        <WorkspaceSelector
-          workspaces={workspaces}
-          activeWorkspaceId={activeWorkspaceId}
-          onChange={setActiveWorkspace}
-          onCreate={() => navigate("/onboarding")}
-        />
+        <div className="rounded-lg border border-secondary/10 bg-primary/40 px-3 py-2.5">
+          <p className="truncate text-sm font-medium text-text-primary">
+            {account.data?.tenantName ?? "Workspace"}
+          </p>
+          <p className="truncate text-xs text-text-muted">
+            {account.data?.plan ? `Piano ${account.data.plan}` : "Nessun piano attivo"}
+          </p>
+        </div>
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 pb-3" aria-label="Navigazione principale">
@@ -210,7 +208,7 @@ export const Drawer = memo(function Drawer({ variant }: DrawerProps) {
                 )
               }
             >
-              <item.icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <item.icon className="h-4 w-4" aria-hidden="true" />
               {item.label}
             </NavLink>
           ))}
@@ -235,7 +233,7 @@ export const Drawer = memo(function Drawer({ variant }: DrawerProps) {
         </div>
 
         <CreditDisplay
-          amount={user?.credits ?? 1250}
+          amount={balance.data?.available ?? user?.credits ?? 0}
           showUpgrade
           onUpgradeClick={() => navigate("/settings/billing")}
         />

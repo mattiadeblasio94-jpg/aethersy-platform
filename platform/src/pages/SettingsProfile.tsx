@@ -1,12 +1,7 @@
-// =============================================================================
-// Impostazioni > Profilo (brief §4) — rotta /settings/profile. Dati personali,
-// preferenze di visualizzazione (lingua, fuso orario, tema) con salvataggio
-// mock e Toast di conferma.
-// =============================================================================
-
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
-import { Building2, Check, Globe, Mail, Phone, Save, User as UserIcon } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Building2, Check, Globe, Mail, Save, User as UserIcon } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
@@ -14,45 +9,85 @@ import { Select } from "@/components/ui/Select";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
 import { SettingsLayout } from "@/components/settings/SettingsLayout";
+import { EmptyState } from "@/components/common/PageElements";
 import { ThemeSelector } from "@/components/common/ThemeToggle";
 import { PageTransition } from "@/components/common/Motion";
-import { useUpdateUserProfile, useUserProfile } from "@/lib/queries";
-import { languageOptions, timezoneOptions } from "@/mocks";
+import { platformApi } from "@/lib/platform-api";
+import { useProfile, useUpdateProfile } from "@/lib/platform-queries";
+
+const TIMEZONE_OPTIONS = [
+  { value: "Europe/Rome", label: "Europe/Rome" },
+  { value: "Europe/Paris", label: "Europe/Paris" },
+  { value: "Europe/Berlin", label: "Europe/Berlin" },
+  { value: "Europe/Madrid", label: "Europe/Madrid" },
+  { value: "Europe/London", label: "Europe/London" },
+  { value: "America/New_York", label: "America/New_York" },
+  { value: "America/Sao_Paulo", label: "America/Sao_Paulo" },
+  { value: "America/Los_Angeles", label: "America/Los_Angeles" },
+  { value: "Asia/Dubai", label: "Asia/Dubai" },
+  { value: "Asia/Tokyo", label: "Asia/Tokyo" },
+  { value: "UTC", label: "UTC" },
+];
+
+const LOCALE_OPTIONS = [
+  { value: "it", label: "Italiano" },
+  { value: "en", label: "English" },
+];
 
 interface ProfileForm {
-  name: string;
-  email: string;
-  phone: string;
+  firstName: string;
+  lastName: string;
   company: string;
-  bio: string;
-  language: string;
+  roleTitle: string;
   timezone: string;
+  locale: string;
 }
 
 const EMPTY_FORM: ProfileForm = {
-  name: "",
-  email: "",
-  phone: "",
+  firstName: "",
+  lastName: "",
   company: "",
-  bio: "",
-  language: "it",
+  roleTitle: "",
   timezone: "Europe/Rome",
+  locale: "it",
 };
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : "Salvataggio non riuscito";
+}
 
 export default function SettingsProfile() {
   const { toast } = useToast();
-  const profile = useUserProfile();
-  const updateProfile = useUpdateUserProfile();
+  const profile = useProfile();
+  const updateProfile = useUpdateProfile();
+  const session = useQuery({
+    queryKey: ["real", "session"],
+    queryFn: () => platformApi.getSession(),
+  });
 
   const [form, setForm] = useState<ProfileForm>(EMPTY_FORM);
   const [error, setError] = useState<string | null>(null);
 
-  // Popola il form quando il profilo arriva dal mock layer.
   useEffect(() => {
     if (!profile.data) return;
-    const { name, email, phone, company, bio, language, timezone } = profile.data;
-    setForm({ name, email, phone, company, bio, language, timezone });
+    setForm({
+      firstName: profile.data.firstName ?? "",
+      lastName: profile.data.lastName ?? "",
+      company: profile.data.company ?? "",
+      roleTitle: profile.data.roleTitle ?? "",
+      timezone: profile.data.timezone || "Europe/Rome",
+      locale: profile.data.locale || "it",
+    });
   }, [profile.data]);
+
+  const timezoneOptions = useMemo(() => {
+    if (form.timezone && !TIMEZONE_OPTIONS.some((option) => option.value === form.timezone)) {
+      return [{ value: form.timezone, label: form.timezone }, ...TIMEZONE_OPTIONS];
+    }
+    return TIMEZONE_OPTIONS;
+  }, [form.timezone]);
+
+  const email = session.data?.email ?? profile.data?.email ?? "";
 
   function update<K extends keyof ProfileForm>(key: K, value: ProfileForm[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -60,24 +95,31 @@ export default function SettingsProfile() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!form.name.trim()) {
+    if (!form.firstName.trim()) {
       setError("Il nome e' obbligatorio.");
-      return;
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
-      setError("Inserisci un indirizzo email valido.");
       return;
     }
     setError(null);
     try {
-      await updateProfile.mutateAsync(form);
+      await updateProfile.mutateAsync({
+        firstName: form.firstName.trim(),
+        lastName: form.lastName.trim(),
+        company: form.company.trim(),
+        roleTitle: form.roleTitle.trim(),
+        timezone: form.timezone,
+        locale: form.locale,
+      });
       toast({
         kind: "success",
         title: "Profilo aggiornato",
-        description: "Le modifiche sono state salvate.",
+        description: "Le modifiche sono state salvate sul tuo profilo.",
       });
-    } catch {
-      toast({ kind: "error", title: "Salvataggio non riuscito" });
+    } catch (mutationError) {
+      toast({
+        kind: "error",
+        title: "Salvataggio non riuscito",
+        description: errorText(mutationError),
+      });
     }
   }
 
@@ -85,7 +127,7 @@ export default function SettingsProfile() {
     <PageTransition>
       <SettingsLayout
         title="Profilo"
-        description="Dati personali e preferenze di visualizzazione del tuo account."
+        description="Dati anagrafici e preferenze di visualizzazione legati alla tua identita'."
         actions={
           <Button
             type="submit"
@@ -101,52 +143,46 @@ export default function SettingsProfile() {
           <Card>
             <Skeleton lines={6} />
           </Card>
+        ) : profile.isError ? (
+          <Card bodyClassName="p-5">
+            <EmptyState
+              title="Profilo non disponibile"
+              description={errorText(profile.error)}
+              action={
+                <Button variant="secondary" size="sm" onClick={() => profile.refetch()}>
+                  Ricarica profilo
+                </Button>
+              }
+            />
+          </Card>
         ) : (
           <form id="profile-form" onSubmit={handleSubmit} className="flex flex-col gap-6" noValidate>
             <Card header={<h3 className="text-base font-semibold text-text-primary">Dati personali</h3>}>
               <div className="flex flex-col gap-5">
-                <div className="flex items-center gap-4">
-                  <img
-                    src={profile.data?.avatar ?? "/brand/logo-192.png"}
-                    alt=""
-                    width={64}
-                    height={64}
-                    className="h-16 w-16 rounded-full border border-secondary/20"
-                  />
-                  <div>
-                    <p className="text-sm font-medium text-text-primary">Avatar</p>
-                    <p className="text-xs text-text-muted">
-                      L'immagine del workspace (modifica in arrivo).
-                    </p>
-                  </div>
-                </div>
-
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Input
-                    label="Nome completo"
-                    value={form.name}
-                    onChange={(event) => update("name", event.target.value)}
+                    label="Nome"
+                    value={form.firstName}
+                    onChange={(event) => update("firstName", event.target.value)}
                     leftIcon={<UserIcon className="h-4 w-4" aria-hidden="true" />}
-                    autoComplete="name"
+                    autoComplete="given-name"
                     required
+                  />
+                  <Input
+                    label="Cognome"
+                    value={form.lastName}
+                    onChange={(event) => update("lastName", event.target.value)}
+                    autoComplete="family-name"
                   />
                   <Input
                     label="Email"
                     type="email"
-                    value={form.email}
-                    onChange={(event) => update("email", event.target.value)}
+                    value={email}
+                    readOnly
+                    disabled
                     leftIcon={<Mail className="h-4 w-4" aria-hidden="true" />}
                     autoComplete="email"
-                    error={error ?? undefined}
-                    required
-                  />
-                  <Input
-                    label="Telefono"
-                    type="tel"
-                    value={form.phone}
-                    onChange={(event) => update("phone", event.target.value)}
-                    leftIcon={<Phone className="h-4 w-4" aria-hidden="true" />}
-                    autoComplete="tel"
+                    hint="L'email identifica l'identita' Console e non e' modificabile."
                   />
                   <Input
                     label="Azienda"
@@ -155,19 +191,12 @@ export default function SettingsProfile() {
                     leftIcon={<Building2 className="h-4 w-4" aria-hidden="true" />}
                     autoComplete="organization"
                   />
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <label htmlFor="profile-bio" className="text-sm font-medium text-text-secondary">
-                    Bio
-                  </label>
-                  <textarea
-                    id="profile-bio"
-                    value={form.bio}
-                    onChange={(event) => update("bio", event.target.value)}
-                    rows={3}
-                    className="w-full rounded-lg border border-secondary/20 bg-primary/60 px-3.5 py-2.5 text-base text-text-primary placeholder:text-text-muted transition-colors focus:border-secondary focus:outline-none focus:ring-1 focus:ring-secondary"
-                    placeholder="Racconta in breve chi sei…"
+                  <Input
+                    label="Ruolo"
+                    value={form.roleTitle}
+                    onChange={(event) => update("roleTitle", event.target.value)}
+                    placeholder="Es. Responsabile marketing"
+                    autoComplete="organization-title"
                   />
                 </div>
               </div>
@@ -177,9 +206,9 @@ export default function SettingsProfile() {
               <div className="grid gap-4 sm:grid-cols-2">
                 <Select
                   label="Lingua"
-                  value={form.language}
-                  onChange={(event) => update("language", event.target.value)}
-                  options={languageOptions}
+                  value={form.locale}
+                  onChange={(event) => update("locale", event.target.value)}
+                  options={LOCALE_OPTIONS}
                   leftIcon={<Globe className="h-4 w-4" aria-hidden="true" />}
                 />
                 <Select
@@ -200,6 +229,12 @@ export default function SettingsProfile() {
                 </p>
               </div>
             </Card>
+
+            {error && (
+              <p role="alert" className="text-sm text-error">
+                {error}
+              </p>
+            )}
           </form>
         )}
       </SettingsLayout>

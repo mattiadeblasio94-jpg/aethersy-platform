@@ -32,6 +32,15 @@ export const realKeys = {
   memory: ["real", "memory"] as const,
   businessCatalog: ["real", "business-catalog"] as const,
   usage: ["real", "usage"] as const,
+  profile: ["real", "profile"] as const,
+  preferences: ["real", "preferences"] as const,
+  products: ["real", "products"] as const,
+  leads: ["real", "leads"] as const,
+  integrations: ["real", "integrations"] as const,
+  builderAgents: ["real", "builder-agents"] as const,
+  builderTasks: ["real", "builder-tasks"] as const,
+  builderProjects: ["real", "builder-projects"] as const,
+  builderArtifacts: ["real", "builder-artifacts"] as const,
 };
 
 export function useBalance() {
@@ -394,5 +403,231 @@ export function useDeleteSchedule() {
       qc.invalidateQueries({ queryKey: realKeys.schedule });
       qc.invalidateQueries({ queryKey: realKeys.overview });
     },
+  });
+}
+
+// --- Profilo (schema `auth`, dati reali) -------------------------------------
+
+export function useProfile() {
+  return useQuery({
+    queryKey: realKeys.profile,
+    queryFn: () => platformApi.getProfile().then((r) => r.profile),
+  });
+}
+
+export function useUpdateProfile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Partial<{
+      firstName: string;
+      lastName: string;
+      company: string;
+      roleTitle: string;
+      timezone: string;
+      locale: string;
+    }>) => platformApi.updateProfile(body),
+    onSuccess: (data) => {
+      qc.setQueryData(realKeys.profile, data.profile);
+    },
+  });
+}
+
+// --- Preferenze di notifica ---------------------------------------------------
+
+export function usePreferences() {
+  return useQuery({
+    queryKey: realKeys.preferences,
+    queryFn: () => platformApi.getPreferences().then((r) => r.preferences),
+  });
+}
+
+export function useUpdatePreferences() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Partial<{
+      emailDigest: "off" | "daily" | "weekly";
+      runUpdates: boolean;
+      leadAlerts: boolean;
+      budgetAlerts: boolean;
+      channelEmail: boolean;
+      channelPush: boolean;
+      quietHours: boolean;
+    }>) => platformApi.updatePreferences(body),
+    onSuccess: (data) => {
+      qc.setQueryData(realKeys.preferences, data.preferences);
+    },
+  });
+}
+
+// --- Catalogo prodotti (business.product) --------------------------------------
+
+export function useProducts() {
+  return useQuery({ queryKey: realKeys.products, queryFn: () => platformApi.getProducts() });
+}
+
+export function useCreateProduct() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { name: string; kind?: string; description?: string; priceCents?: number; sku?: string }) =>
+      platformApi.createProduct(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: realKeys.products });
+      qc.invalidateQueries({ queryKey: realKeys.businessCatalog });
+    },
+  });
+}
+
+export function useUpdateProduct() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      id: string;
+      body: { name?: string; kind?: string; description?: string; priceCents?: number; status?: string };
+    }) => platformApi.updateProduct(input.id, input.body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: realKeys.products }),
+  });
+}
+
+export function useDeleteProduct() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => platformApi.deleteProduct(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: realKeys.products }),
+  });
+}
+
+// --- Lead reali (pipeline.lead) ----------------------------------------------
+
+export function useLeads() {
+  return useQuery({
+    queryKey: realKeys.leads,
+    queryFn: () => platformApi.getLeads().then((r) => r.leads),
+  });
+}
+
+export function useLeadCounts() {
+  return useQuery({
+    queryKey: [...realKeys.leads, "counts"] as const,
+    queryFn: () => platformApi.getLeads().then((r) => r.counts),
+  });
+}
+
+export function useUpdateLead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string; body: { status?: string; note?: string } }) =>
+      platformApi.updateLead(input.id, input.body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: realKeys.leads });
+      qc.invalidateQueries({ queryKey: realKeys.overview });
+    },
+  });
+}
+
+// --- Integrazioni (canali OAuth/webhook collegati) ---------------------------
+
+export function useIntegrations() {
+  return useQuery({ queryKey: realKeys.integrations, queryFn: () => platformApi.getIntegrations() });
+}
+
+// --- Agenti specialistici e task (Universal Builder Platform) ----------------
+
+export function useBuilderAgents() {
+  return useQuery({
+    queryKey: realKeys.builderAgents,
+    queryFn: () => platformApi.getBuilderAgents().then((r) => r.available),
+  });
+}
+
+export function useBuilderTasks() {
+  return useQuery({
+    queryKey: realKeys.builderTasks,
+    queryFn: () => platformApi.getBuilderTasks().then((r) => r.tasks),
+  });
+}
+
+export function useDeleteBuilderTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => platformApi.deleteBuilderTask(id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: realKeys.builderTasks });
+      void qc.invalidateQueries({ queryKey: realKeys.builderArtifacts });
+    },
+  });
+}
+
+export function useDeleteBuilderProject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => platformApi.deleteBuilderProject(id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: realKeys.builderProjects });
+      void qc.invalidateQueries({ queryKey: realKeys.builderTasks });
+      void qc.invalidateQueries({ queryKey: realKeys.builderArtifacts });
+    },
+  });
+}
+
+export function useBuilderProjects() {
+  return useQuery({
+    queryKey: realKeys.builderProjects,
+    queryFn: () => platformApi.getBuilderProjects().then((r) => r.projects),
+  });
+}
+
+/** Crea un agente specialistico: progetto (se assente) + task eseguibile. */
+export function useCreateBuilderTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      agent: string;
+      title: string;
+      description?: string;
+      type?: string;
+      projectId?: string | null;
+      priority?: number;
+    }) => {
+      let projectId = input.projectId ?? null;
+      if (!projectId) {
+        const projects = await platformApi.getBuilderProjects().then((r) => r.projects);
+        projectId = projects[0]?.id ?? null;
+      }
+      if (!projectId) {
+        const created = await platformApi.createBuilderProject({
+          name: input.title.slice(0, 120) || "Attivita' Aethersy",
+          description: input.description ?? "Progetto creato dalla piattaforma",
+          type: "other",
+        });
+        projectId = created.project.id;
+      }
+      return platformApi.createBuilderTask({
+        project_id: projectId,
+        type: input.type ?? input.agent,
+        title: input.title,
+        description: input.description,
+        spec: {
+          idea: input.description || input.title,
+          agent: input.agent,
+          project_type: "saas",
+        },
+        estimated_credits: 20,
+        priority: input.priority ?? 3,
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: realKeys.builderTasks });
+      qc.invalidateQueries({ queryKey: realKeys.builderProjects });
+      qc.invalidateQueries({ queryKey: realKeys.roster });
+    },
+  });
+}
+
+// --- Artefatti prodotti dagli agenti (builder) ---------------------------------
+
+export function useBuilderArtifacts() {
+  return useQuery({
+    queryKey: realKeys.builderArtifacts,
+    queryFn: () => platformApi.getBuilderArtifacts().then((r) => r.artifacts),
   });
 }

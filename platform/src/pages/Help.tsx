@@ -1,128 +1,156 @@
 // =============================================================================
-// Aiuto (brief §4) — rotta /help. Ricerca, griglia di categorie, FAQ
-// espandibili (>= 10), canali di contatto, link alla documentazione e stato dei
-// servizi con StatusIndicator. Interamente su dati mock tipizzati.
+// Aiuto — solo dati reali dal BFF.
+//
+// Le FAQ arrivano dal catalogo del server (GET /api/platform/faq, categorie
+// billing/subscription/usage/general). Lo stato mostrato e' quello reale:
+// piano e crediti da GET /api/platform/account, attivita' e coda da GET
+// /api/platform/overview. L'unico canale di supporto implementato e' la chat
+// della piattaforma (POST /api/platform/chat): email, community, ticketing e
+// documentazione esterna non sono esposti dal BFF e quindi non vengono
+// promessi.
 // =============================================================================
 
 import { useMemo, useState } from "react";
 import {
   BookOpen,
   CreditCard,
-  LifeBuoy,
+  Gauge,
+  Info,
   ListChecks,
-  Mail,
   MessageCircle,
-  Rocket,
   Search,
-  Share2,
+  Send,
   Sparkles,
-  Webhook,
+  Wallet,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { useToast } from "@/components/ui/Toast";
 import { Accordion } from "@/components/common/Accordion";
 import { EmptyState, PageHeader } from "@/components/common/PageElements";
-import { PageTransition, StaggerGroup, StaggerItem } from "@/components/common/Motion";
-import { StatusIndicator } from "@/components/domain/StatusIndicator";
-import {
-  useFaqItems,
-  useHelpCategories,
-  useHelpDocs,
-  useServiceStatuses,
-  useStatusUpdatedAt,
-} from "@/lib/queries";
-import type { HelpCategoryId, ServiceStatusKind } from "@/lib/types";
-import { cn, formatRelative } from "@/lib/utils";
+import { useAccount, useFaq, useOverview, useSendMessage } from "@/lib/platform-queries";
+import { cn, formatNumber } from "@/lib/utils";
 
-/** Mappa nome-icona -> componente lucide, per le categorie della knowledge base. */
-const CATEGORY_ICONS: Record<string, LucideIcon> = {
-  Rocket,
-  Share2,
-  Sparkles,
-  ListChecks,
-  CreditCard,
-  Webhook,
-  BookOpen,
+type FaqCategory = "billing" | "subscription" | "usage" | "general";
+
+const CATEGORY_LABEL: Record<FaqCategory, string> = {
+  billing: "Billing e fatturazione",
+  subscription: "Abbonamento",
+  usage: "Consumo crediti",
+  general: "Generale",
 };
 
-/** Mappa gli stati servizio sui valori riconosciuti da StatusIndicator. */
-const SERVICE_STATUS_KIND: Record<ServiceStatusKind, string> = {
-  operational: "connected",
-  degraded: "pending",
-  outage: "error",
-  maintenance: "paused",
+const CATEGORY_ICON: Record<FaqCategory, LucideIcon> = {
+  billing: CreditCard,
+  subscription: Wallet,
+  usage: Gauge,
+  general: Info,
 };
 
-const SERVICE_STATUS_LABEL: Record<ServiceStatusKind, string> = {
-  operational: "Operativo",
-  degraded: "Prestazioni ridotte",
-  outage: "Interruzione",
-  maintenance: "Manutenzione",
-};
-
-const CONTACT_CHANNELS = [
-  {
-    id: "chat",
-    title: "Chat in-app",
-    description: "Risposta media in pochi minuti, lun-ven 9:00-18:00.",
-    action: "Apri la chat",
-    icon: MessageCircle,
-  },
-  {
-    id: "email",
-    title: "Email",
-    description: "support@aethersy.online — risposta entro 24 ore.",
-    action: "Scrivi una email",
-    icon: Mail,
-  },
-  {
-    id: "community",
-    title: "Community",
-    description: "Confrontati con altri utenti e con il team Aethersy.",
-    action: "Entra nella community",
-    icon: LifeBuoy,
-  },
-];
+/** Testo esplicito della richiesta di supporto inviata all'orchestratore. */
+const SUPPORT_PROMPT =
+  "Ho bisogno di assistenza: descrivo il problema qui e voglio capire come risolverlo.";
 
 export default function Help() {
+  const { toast } = useToast();
   const [query, setQuery] = useState("");
-  const [activeCategory, setActiveCategory] = useState<HelpCategoryId | "all">("all");
+  const [activeCategory, setActiveCategory] = useState<FaqCategory | "all">("all");
+  const [question, setQuestion] = useState("");
 
-  const categories = useHelpCategories();
-  const faqs = useFaqItems();
-  const docs = useHelpDocs();
-  const statuses = useServiceStatuses();
-  const updatedAt = useStatusUpdatedAt();
+  const faqs = useFaq();
+  const account = useAccount();
+  const overview = useOverview();
+  const sendMessage = useSendMessage();
 
+  const faqRows = faqs.data?.faqs ?? [];
   const normalizedQuery = query.trim().toLowerCase();
 
-  const filteredFaqs = useMemo(() => {
-    const list = faqs.data ?? [];
-    return list.filter((faq) => {
-      const matchesCategory = activeCategory === "all" || faq.category === activeCategory;
-      const matchesQuery =
-        normalizedQuery === "" ||
-        faq.question.toLowerCase().includes(normalizedQuery) ||
-        faq.answer.toLowerCase().includes(normalizedQuery);
-      return matchesCategory && matchesQuery;
-    });
-  }, [faqs.data, activeCategory, normalizedQuery]);
+  const categories = useMemo(() => {
+    const found = new Set<FaqCategory>();
+    for (const faq of faqRows) {
+      found.add(faq.category);
+    }
+    return [...found].map((id) => ({
+      id,
+      label: CATEGORY_LABEL[id] ?? id,
+      icon: CATEGORY_ICON[id] ?? BookOpen,
+      count: faqRows.filter((faq) => faq.category === id).length,
+    }));
+  }, [faqRows]);
+
+  const filteredFaqs = useMemo(
+    () =>
+      faqRows.filter((faq) => {
+        const matchesCategory = activeCategory === "all" || faq.category === activeCategory;
+        const matchesQuery =
+          normalizedQuery === "" ||
+          faq.question.toLowerCase().includes(normalizedQuery) ||
+          faq.answer.toLowerCase().includes(normalizedQuery);
+        return matchesCategory && matchesQuery;
+      }),
+    [faqRows, activeCategory, normalizedQuery],
+  );
+
+  const counters = overview.data?.counters;
+
+  async function handleSendQuestion() {
+    const text = question.trim();
+    if (!text) return;
+    try {
+      const turn = await sendMessage.mutateAsync({ text });
+      setQuestion("");
+      toast({
+        kind: "success",
+        title: "Richiesta inviata",
+        description:
+          turn.action === "run_started"
+            ? "La richiesta e' stata avviata come esecuzione."
+            : turn.reply?.content,
+      });
+    } catch (error) {
+      toast({
+        kind: "error",
+        title: "Invio non riuscito",
+        description: error instanceof Error ? error.message : undefined,
+      });
+    }
+  }
+
+  async function handleStartHelp() {
+    try {
+      const turn = await sendMessage.mutateAsync({ text: SUPPORT_PROMPT });
+      toast({
+        kind: "success",
+        title: "Richiesta inviata",
+        description:
+          turn.action === "run_started"
+            ? "La richiesta e' stata avviata come esecuzione."
+            : turn.reply?.content,
+      });
+    } catch (error) {
+      toast({
+        kind: "error",
+        title: "Invio non riuscito",
+        description: error instanceof Error ? error.message : undefined,
+      });
+    }
+  }
 
   return (
-    <PageTransition>
+    <div className="flex flex-col gap-6">
       <PageHeader
         title="Aiuto"
-        description="Guide, domande frequenti e supporto per usare al meglio Aethersy."
+        description="Domande frequenti reali, stato del tuo abbonamento e accesso diretto al consulente."
       />
 
-      {/* Ricerca */}
       <Card>
         <Input
           type="search"
-          label="Cerca nella guida"
+          label="Cerca nelle domande frequenti"
           placeholder="Cerca una domanda, una funzione, un errore…"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
@@ -130,58 +158,60 @@ export default function Help() {
         />
       </Card>
 
-      {/* Categorie */}
-      <section aria-label="Categorie di aiuto">
-        {categories.isLoading ? (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {Array.from({ length: 6 }).map((_, index) => (
-              <Skeleton key={index} className="h-28 rounded-xl" />
-            ))}
-          </div>
+      <section aria-label="Categorie di aiuto" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {faqs.isLoading ? (
+          Array.from({ length: 4 }).map((_, index) => (
+            <Skeleton key={index} className="h-28 rounded-xl" />
+          ))
         ) : (
-          <StaggerGroup className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {(categories.data ?? []).map((category) => {
-              const Icon = CATEGORY_ICONS[category.icon] ?? BookOpen;
+          <>
+            <button
+              type="button"
+              aria-pressed={activeCategory === "all"}
+              onClick={() => setActiveCategory("all")}
+              className={cn(
+                "flex h-full flex-col gap-2 rounded-xl border p-5 text-left transition-colors",
+                activeCategory === "all"
+                  ? "border-secondary/50 bg-bg-card shadow-glow"
+                  : "border-secondary/10 bg-bg-card hover:border-secondary/40",
+              )}
+            >
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-secondary/15">
+                <ListChecks className="h-5 w-5 text-secondary" aria-hidden="true" />
+              </span>
+              <span className="text-base font-semibold text-text-primary">Tutte</span>
+              <span className="text-xs text-text-muted">{faqRows.length} domande</span>
+            </button>
+
+            {categories.map((category) => {
+              const Icon = category.icon;
               const selected = activeCategory === category.id;
               return (
-                <StaggerItem key={category.id}>
-                  <button
-                    type="button"
-                    aria-pressed={selected}
-                    onClick={() =>
-                      setActiveCategory((current) => (current === category.id ? "all" : category.id))
-                    }
-                    className={cn(
-                      "flex h-full w-full flex-col gap-3 rounded-xl border p-5 text-left transition-all duration-200",
-                      selected
-                        ? "border-secondary/50 bg-bg-card shadow-glow"
-                        : "border-secondary/10 bg-bg-card hover:border-secondary/40",
-                    )}
-                  >
-                    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-secondary/15">
-                      <Icon className="h-5 w-5 text-secondary" aria-hidden="true" />
-                    </span>
-                    <span>
-                      <span className="block text-base font-semibold text-text-primary">
-                        {category.title}
-                      </span>
-                      <span className="mt-0.5 block text-sm text-text-secondary">
-                        {category.description}
-                      </span>
-                    </span>
-                    <span className="mt-auto text-xs text-text-muted">
-                      {category.articleCount} articoli
-                    </span>
-                  </button>
-                </StaggerItem>
+                <button
+                  key={category.id}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => setActiveCategory(selected ? "all" : category.id)}
+                  className={cn(
+                    "flex h-full flex-col gap-2 rounded-xl border p-5 text-left transition-colors",
+                    selected
+                      ? "border-secondary/50 bg-bg-card shadow-glow"
+                      : "border-secondary/10 bg-bg-card hover:border-secondary/40",
+                  )}
+                >
+                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-secondary/15">
+                    <Icon className="h-5 w-5 text-secondary" aria-hidden="true" />
+                  </span>
+                  <span className="text-base font-semibold text-text-primary">{category.label}</span>
+                  <span className="text-xs text-text-muted">{category.count} domande</span>
+                </button>
               );
             })}
-          </StaggerGroup>
+          </>
         )}
       </section>
 
       <div className="grid gap-6 xl:grid-cols-[2fr_1fr]">
-        {/* FAQ */}
         <Card
           header={
             <>
@@ -196,7 +226,7 @@ export default function Help() {
             <EmptyState
               icon={<Search className="h-5 w-5" aria-hidden="true" />}
               title="Nessun risultato"
-              description="Prova con altre parole chiave o cambia categoria."
+              description="Prova con altre parole chiave oppure cambia categoria."
             />
           ) : (
             <Accordion
@@ -210,108 +240,156 @@ export default function Help() {
         </Card>
 
         <div className="flex flex-col gap-6">
-          {/* Stato servizi */}
           <Card
             header={
               <>
-                <h2 className="text-base font-semibold text-text-primary">Stato dei servizi</h2>
-                {updatedAt.data && (
-                  <span className="text-xs text-text-muted">
-                    Aggiornato {formatRelative(updatedAt.data)}
-                  </span>
+                <h2 className="text-base font-semibold text-text-primary">Il tuo abbonamento</h2>
+                {account.data?.plan && (
+                  <Badge variant="info">{account.data.plan}</Badge>
                 )}
               </>
             }
           >
-            {statuses.isLoading ? (
-              <Skeleton lines={5} />
+            {account.isLoading ? (
+              <Skeleton lines={4} />
             ) : (
-              <ul className="flex flex-col gap-3">
-                {(statuses.data ?? []).map((service) => (
-                  <li key={service.id} className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-medium text-text-primary">{service.name}</p>
-                      <p className="text-xs text-text-muted">
-                        Uptime 30gg: {service.uptime.toFixed(2).replace(".", ",")}%
-                      </p>
-                    </div>
-                    <span className="flex items-center gap-2">
-                      <StatusIndicator
-                        status={SERVICE_STATUS_KIND[service.status]}
-                        withLabel={false}
-                      />
-                      <span className="text-xs text-text-secondary">
-                        {SERVICE_STATUS_LABEL[service.status]}
-                      </span>
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              <dl className="flex flex-col gap-3 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-text-secondary">Workspace</dt>
+                  <dd className="font-medium text-text-primary">
+                    {account.data?.tenantName ?? "—"}
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-text-secondary">Crediti disponibili</dt>
+                  <dd className="font-medium text-text-primary">
+                    {formatNumber(account.data?.available ?? 0)}
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-text-secondary">Crediti riservati</dt>
+                  <dd className="font-medium text-text-primary">
+                    {formatNumber(account.data?.reserved ?? 0)}
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-text-secondary">Hard-stop a crediti esauriti</dt>
+                  <dd>
+                    <Badge variant={account.data?.hardStopOnEmpty ? "warning" : "success"}>
+                      {account.data?.hardStopOnEmpty ? "attivo" : "disattivato"}
+                    </Badge>
+                  </dd>
+                </div>
+              </dl>
             )}
           </Card>
 
-          {/* Documentazione */}
-          <Card header={<h2 className="text-base font-semibold text-text-primary">Documentazione</h2>}>
-            {docs.isLoading ? (
-              <Skeleton lines={3} />
+          <Card
+            header={
+              <>
+                <h2 className="text-base font-semibold text-text-primary">Stato dell'attivita'</h2>
+                <span className="text-xs text-text-muted">dati reali del workspace</span>
+              </>
+            }
+          >
+            {overview.isLoading ? (
+              <Skeleton lines={4} />
             ) : (
-              <ul className="flex flex-col gap-3">
-                {(docs.data ?? []).map((doc) => (
-                  <li key={doc.id}>
-                    <a
-                      href={doc.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex items-start gap-3 rounded-lg p-1 transition-colors hover:text-secondary"
-                    >
-                      <BookOpen className="mt-0.5 h-4 w-4 shrink-0 text-secondary" aria-hidden="true" />
-                      <span>
-                        <span className="block text-sm font-medium text-text-primary">{doc.title}</span>
-                        <span className="block text-xs text-text-muted">{doc.description}</span>
-                      </span>
-                    </a>
-                  </li>
-                ))}
-              </ul>
+              <dl className="flex flex-col gap-3 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-text-secondary">Task in corso</dt>
+                  <dd className="font-medium text-text-primary">
+                    {formatNumber(counters?.tasks.running ?? 0)}
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-text-secondary">Esecuzioni aperte</dt>
+                  <dd className="font-medium text-text-primary">
+                    {formatNumber(counters?.runs.open ?? 0)}
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-text-secondary">Coda attiva</dt>
+                  <dd className="font-medium text-text-primary">
+                    {formatNumber(counters?.schedule.active ?? 0)}
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-text-secondary">In attesa di una tua decisione</dt>
+                  <dd className="font-medium text-text-primary">
+                    {formatNumber(counters?.assets.inReview ?? 0)}
+                  </dd>
+                </div>
+              </dl>
             )}
           </Card>
         </div>
       </div>
 
-      {/* Contatti */}
-      <section aria-label="Canali di supporto">
-        <h2 className="mb-3 font-display text-lg font-semibold text-text-primary">
-          Hai ancora bisogno di aiuto?
-        </h2>
-        <StaggerGroup className="grid gap-4 sm:grid-cols-3">
-          {CONTACT_CHANNELS.map((channel) => {
-            const Icon = channel.icon;
-            return (
-              <StaggerItem key={channel.id}>
-                <Card interactive className="flex h-full flex-col gap-3">
-                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-secondary/15">
-                    <Icon className="h-5 w-5 text-secondary" aria-hidden="true" />
-                  </span>
-                  <div>
-                    <p className="text-base font-semibold text-text-primary">{channel.title}</p>
-                    <p className="mt-0.5 text-sm text-text-secondary">{channel.description}</p>
-                  </div>
-                  <button
-                    type="button"
-                    className="mt-auto self-start text-sm font-medium text-secondary underline-offset-2 hover:underline"
-                  >
-                    {channel.action}
-                  </button>
-                </Card>
-              </StaggerItem>
-            );
-          })}
-        </StaggerGroup>
-      </section>
+      <Card
+        header={
+          <>
+            <h2 className="text-base font-semibold text-text-primary">Parla con il consulente</h2>
+            <span className="text-xs text-text-muted">chat reale della piattaforma</span>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <label
+            htmlFor="help-question"
+            className="text-sm font-medium text-text-secondary"
+          >
+            La tua domanda
+          </label>
+          <textarea
+            id="help-question"
+            rows={3}
+            value={question}
+            onChange={(event) => setQuestion(event.target.value)}
+            placeholder="Descrivi il problema o la domanda…"
+            className="w-full rounded-lg border border-secondary/20 bg-primary/60 px-3.5 py-2.5 text-base text-text-primary placeholder:text-text-muted focus:border-secondary focus:outline-none focus:ring-1 focus:ring-secondary"
+          />
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              variant="primary"
+              leftIcon={<Send className="h-4 w-4" aria-hidden="true" />}
+              loading={sendMessage.isPending}
+              disabled={question.trim().length === 0}
+              onClick={handleSendQuestion}
+            >
+              Invia la domanda
+            </Button>
+            <Button
+              variant="secondary"
+              leftIcon={<MessageCircle className="h-4 w-4" aria-hidden="true" />}
+              loading={sendMessage.isPending}
+              onClick={() => void handleStartHelp()}
+            >
+              Chiedi come iniziare
+            </Button>
+          </div>
+        </div>
+      </Card>
 
-      <Badge variant="info" className="self-start">
-        Supporto incluso nel piano Pro
-      </Badge>
-    </PageTransition>
+      <Card header={<h2 className="text-base font-semibold text-text-primary">Non disponibili</h2>}>
+        <div className="flex flex-col gap-3">
+          <p className="flex items-start gap-2 text-sm text-text-secondary">
+            <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
+            Email di supporto, community, ticketing, uptime dei servizi e documentazione esterna non
+            sono esposti dal BFF: non esistono dati reali su questi canali, quindi non vengono
+            mostrati ne' promessi.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {["Email di supporto", "Community", "Ticketing", "Uptime servizi", "Documentazione"].map(
+              (label) => (
+                <Badge key={label} variant="warning">
+                  {label}: non disponibile
+                </Badge>
+              ),
+            )}
+          </div>
+        </div>
+      </Card>
+    </div>
   );
 }

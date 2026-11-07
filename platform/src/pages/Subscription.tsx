@@ -4,7 +4,7 @@
 // =============================================================================
 
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { CreditCard, DollarSign, AlertTriangle, HelpCircle, Users, ArrowRight, Settings, MessageSquare } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -23,6 +23,7 @@ const FAQ_CATEGORIES = [
 ] as const;
 
 export default function Subscription() {
+  const navigate = useNavigate();
   const [activeFaqCategory, setActiveFaqCategory] = useState("all");
 
   const account = useAccount();
@@ -248,10 +249,7 @@ export default function Subscription() {
               <Button
                 variant="secondary"
                 className="w-full sm:w-auto"
-                onClick={() => {
-                  const event = new CustomEvent("open-assistant");
-                  window.dispatchEvent(event);
-                }}
+                onClick={() => navigate("/studio")}
               >
                 <MessageSquare className="h-4 w-4 mr-2" aria-hidden="true" />
                 Chiedi all'assistente

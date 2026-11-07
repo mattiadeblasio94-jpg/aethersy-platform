@@ -1,3 +1,14 @@
+// =============================================================================
+// Onboarding — solo azioni reali sul BFF.
+//
+// I quattro passi scrivono dati veri: un obiettivo (POST
+// /api/platform/goals), l'attivazione dei canali social (POST
+// /api/platform/platforms/:id/connect), la creazione di un'attivita' per uno
+// degli agenti disponibili (POST /api/builder/tasks) e un riepilogo con i
+// dati reali del workspace (piano, crediti, task in corso). Nessun workspace
+// finto viene creato lato client.
+// =============================================================================
+
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -10,14 +21,28 @@ import {
   Rocket,
   Share2,
   Sparkles,
+  Target,
 } from "lucide-react";
+import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
 import { Card } from "@/components/ui/Card";
-import { usePlatforms } from "@/lib/queries";
+import { Input } from "@/components/ui/Input";
+import { Select } from "@/components/ui/Select";
+import { Skeleton } from "@/components/ui/Skeleton";
+import { useToast } from "@/components/ui/Toast";
+import {
+  useAccount,
+  useBuilderAgents,
+  useBusinessCatalog,
+  useConnectPlatform,
+  useCreateBuilderTask,
+  useCreateGoal,
+  useGoals,
+  useOverview,
+  usePlatforms,
+} from "@/lib/platform-queries";
 import { useAuthStore } from "@/store/auth";
-import { useUiStore } from "@/store/ui";
-import { cn } from "@/lib/utils";
+import { cn, formatNumber, platformLabel } from "@/lib/utils";
 
 const BUSINESS_TYPES = [
   "Agenzia digitale",
@@ -28,71 +53,120 @@ const BUSINESS_TYPES = [
   "Associazione no-profit",
 ] as const;
 
-const GOALS = [
-  "Crescere i follower",
+const OBJECTIVES = [
   "Generare contatti commerciali",
   "Pubblicare con costanza",
-  "Ridurre i costi di gestione",
   "Migliorare la presenza web",
   "Monitorare i risultati",
 ] as const;
 
+/** Canali social attivabili dal workspace. */
+const CHANNELS = ["instagram", "linkedin", "tiktok", "facebook", "x", "youtube"] as const;
+
 const STEPS = [
   { id: 1, label: "La tua attivita'" },
-  { id: 2, label: "I tuoi obiettivi" },
-  { id: 3, label: "Collega gli account" },
+  { id: 2, label: "I canali" },
+  { id: 3, label: "La prima attivita'" },
+  { id: 4, label: "Riepilogo" },
 ];
 
-/**
- * Onboarding (brief §4.4): tre passi — attivita', obiettivi, collegamento
- * account. Al termine si crea il workspace locale e si entra nella dashboard.
- * Stadio A: nessuna chiamata esterna, il collegamento e' simulato.
- */
 export default function Onboarding() {
   const navigate = useNavigate();
-  const addWorkspace = useUiStore((state) => state.addWorkspace);
+  const { toast } = useToast();
   const user = useAuthStore((state) => state.user);
-  const { data: platforms } = usePlatforms();
+
+  const platforms = usePlatforms();
+  const connectPlatform = useConnectPlatform();
+  const builderAgents = useBuilderAgents();
+  const createBuilderTask = useCreateBuilderTask();
+  const goals = useGoals();
+  const createGoal = useCreateGoal();
+  const catalog = useBusinessCatalog();
+  const account = useAccount();
+  const overview = useOverview();
 
   const [step, setStep] = useState(0);
   const [companyName, setCompanyName] = useState("");
   const [businessType, setBusinessType] = useState<string>(BUSINESS_TYPES[0]);
-  const [goals, setGoals] = useState<string[]>([]);
-  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
+  const [objective, setObjective] = useState<string>(OBJECTIVES[0]);
+  const [goalId, setGoalId] = useState<string | null>(null);
+  const [agent, setAgent] = useState("");
+  const [taskTitle, setTaskTitle] = useState("");
+  const [taskId, setTaskId] = useState<string | null>(null);
+  const [pendingChannel, setPendingChannel] = useState<string | null>(null);
 
-  const canContinue = useMemo(() => {
-    if (step === 0) return companyName.trim().length >= 2;
-    if (step === 1) return goals.length > 0;
-    return true;
-  }, [step, companyName, goals]);
+  const goalStatuses = catalog.data?.goalStatuses ?? [];
+  const goalStatus = goalStatuses[0]?.id ?? "active";
+  const agentOptions = useMemo(
+    () => (builderAgents.data ?? []).map((id) => ({ value: id, label: id })),
+    [builderAgents.data],
+  );
+  const selectedAgent = agent || agentOptions[0]?.value || "";
 
-  function toggleGoal(goal: string) {
-    setGoals((current) =>
-      current.includes(goal) ? current.filter((item) => item !== goal) : [...current, goal],
-    );
+  const connectedChannels = (platforms.data ?? [])
+    .filter((platform) => platform.connected)
+    .map((platform) => platform.provider);
+
+  const createdGoal = goals.data?.find((goal) => goal.id === goalId);
+
+  async function handleCreateGoal() {
+    const title = `${companyName.trim()} — ${objective}`;
+    try {
+      const goal = await createGoal.mutateAsync({
+        title,
+        description: `Settore: ${businessType}. Obiettivo impostato durante l'onboarding.`,
+        status: goalStatus,
+      });
+      setGoalId(goal.id);
+      toast({ kind: "success", title: "Obiettivo creato" });
+      setStep((current) => current + 1);
+    } catch (error) {
+      toast({
+        kind: "error",
+        title: "Obiettivo non creato",
+        description: error instanceof Error ? error.message : undefined,
+      });
+    }
   }
 
-  function togglePlatform(id: string) {
-    setSelectedPlatforms((current) =>
-      current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
-    );
+  async function handleConnect(provider: string) {
+    setPendingChannel(provider);
+    try {
+      await connectPlatform.mutateAsync(provider);
+      toast({
+        kind: "success",
+        title: `${platformLabel(provider)} attivato`,
+        description: "Il collegamento OAuth si completa in un secondo momento.",
+      });
+    } catch (error) {
+      toast({
+        kind: "error",
+        title: "Canale non attivato",
+        description: error instanceof Error ? error.message : undefined,
+      });
+    } finally {
+      setPendingChannel(null);
+    }
   }
 
-  function finish() {
-    // Il workspace viene creato lato client nello Stadio A e diventa attivo.
-    // Endpoint reale previsto: POST /api/workspaces
-    const slug = companyName
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/(^-|-$)/g, "");
-    addWorkspace({
-      id: `ws-${slug || "nuovo"}`,
-      name: companyName.trim() || "Nuovo workspace",
-      businessType,
-      plan: "starter",
-    });
-    navigate("/dashboard", { replace: true });
+  async function handleCreateTask() {
+    if (!selectedAgent) return;
+    try {
+      const result = await createBuilderTask.mutateAsync({
+        agent: selectedAgent,
+        title: taskTitle.trim() || `Attivita' iniziale — ${companyName.trim() || "workspace"}`,
+        description: `Attivita' creata in onboarding per ${companyName.trim() || "il workspace"}.`,
+      });
+      setTaskId(result.task.id);
+      toast({ kind: "success", title: "Attivita' creata" });
+      setStep((current) => current + 1);
+    } catch (error) {
+      toast({
+        kind: "error",
+        title: "Attivita' non creata",
+        description: error instanceof Error ? error.message : undefined,
+      });
+    }
   }
 
   return (
@@ -110,7 +184,6 @@ export default function Onboarding() {
           {STEPS[step].label}
         </h1>
 
-        {/* Indicatore di avanzamento accessibile. */}
         <ol className="mt-4 flex items-center gap-2" aria-label="Progresso onboarding">
           {STEPS.map((item, index) => (
             <li key={item.id} className="flex flex-1 items-center gap-2">
@@ -157,11 +230,11 @@ export default function Onboarding() {
               leftIcon={<Building2 className="h-4 w-4" aria-hidden="true" />}
               value={companyName}
               onChange={(event) => setCompanyName(event.target.value)}
+              hint="Serve a costruire il primo obiettivo del workspace."
             />
+
             <fieldset>
-              <legend className="mb-2 text-sm font-medium text-text-secondary">
-                Settore
-              </legend>
+              <legend className="mb-2 text-sm font-medium text-text-secondary">Settore</legend>
               <div className="flex flex-wrap gap-2">
                 {BUSINESS_TYPES.map((type) => (
                   <button
@@ -181,76 +254,164 @@ export default function Onboarding() {
                 ))}
               </div>
             </fieldset>
+
+            <fieldset>
+              <legend className="mb-2 text-sm font-medium text-text-secondary">
+                Obiettivo principale
+              </legend>
+              <div className="flex flex-wrap gap-2">
+                {OBJECTIVES.map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    aria-pressed={objective === item}
+                    onClick={() => setObjective(item)}
+                    className={cn(
+                      "rounded-full border px-3.5 py-2 text-sm transition-colors",
+                      objective === item
+                        ? "border-secondary/50 bg-secondary/15 text-secondary"
+                        : "border-secondary/15 text-text-secondary hover:bg-bg-hover",
+                    )}
+                  >
+                    {item}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+
+            <p className="text-sm text-text-muted">
+              L'obiettivo viene salvato nel workspace (stato "{goalStatus}") e resta modificabile in
+              qualsiasi momento dalla sezione Obiettivi.
+            </p>
           </Card>
         )}
 
         {step === 1 && (
           <Card className="flex flex-col gap-4">
-            <p className="text-sm text-text-secondary">
-              Seleziona uno o piu' obiettivi: gli agenti li useranno per prioritizzare il lavoro.
+            <p className="flex items-center gap-2 text-sm text-text-secondary">
+              <Share2 className="h-4 w-4 text-secondary" aria-hidden="true" />
+              Attiva i canali che ti servono. Il collegamento OAuth si completa dopo, in un secondo
+              momento.
             </p>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {GOALS.map((goal) => {
-                const active = goals.includes(goal);
-                return (
-                  <button
-                    key={goal}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => toggleGoal(goal)}
-                    className={cn(
-                      "flex items-center gap-3 rounded-lg border px-4 py-3 text-left text-sm transition-colors",
-                      active
-                        ? "border-secondary/50 bg-secondary/15 text-text-primary"
-                        : "border-secondary/15 text-text-secondary hover:bg-bg-hover",
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "flex h-5 w-5 items-center justify-center rounded-md border",
-                        active ? "border-secondary bg-secondary/20" : "border-secondary/25",
-                      )}
+
+            {platforms.isLoading ? (
+              <Skeleton lines={3} />
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {CHANNELS.map((provider) => {
+                  const connected = connectedChannels.includes(provider);
+                  return (
+                    <li
+                      key={provider}
+                      className="flex items-center justify-between gap-3 rounded-lg border border-secondary/15 px-4 py-3"
                     >
-                      {active && <Check className="h-3.5 w-3.5 text-secondary" aria-hidden="true" />}
-                    </span>
-                    {goal}
-                  </button>
-                );
-              })}
-            </div>
+                      <span className="flex items-center gap-3 text-sm text-text-primary">
+                        {connected && (
+                          <BadgeCheck className="h-4 w-4 text-success" aria-hidden="true" />
+                        )}
+                        {platformLabel(provider)}
+                      </span>
+                      {connected ? (
+                        <Badge variant="success">Collegato</Badge>
+                      ) : (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          loading={pendingChannel === provider}
+                          onClick={() => void handleConnect(provider)}
+                        >
+                          Attiva
+                        </Button>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
+            <p className="text-sm text-text-muted">
+              Puoi attivare i canali anche più tardi: nessun canale è obbligatorio.
+            </p>
           </Card>
         )}
 
         {step === 2 && (
           <Card className="flex flex-col gap-4">
             <p className="flex items-center gap-2 text-sm text-text-secondary">
-              <Share2 className="h-4 w-4 text-secondary" aria-hidden="true" />
-              Collega gli account social. Puoi farlo anche piu' tardi.
+              <Target className="h-4 w-4 text-secondary" aria-hidden="true" />
+              Avvia una prima attività con uno degli agenti disponibili nel tuo workspace.
             </p>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {(platforms ?? []).map((platform) => {
-                const active =
-                  selectedPlatforms.includes(platform.id) || platform.status === "connected";
-                return (
-                  <button
-                    key={platform.id}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => togglePlatform(platform.id)}
-                    className={cn(
-                      "flex items-center gap-3 rounded-lg border px-4 py-3 text-left text-sm transition-colors",
-                      active
-                        ? "border-secondary/50 bg-secondary/15 text-text-primary"
-                        : "border-secondary/15 text-text-secondary hover:bg-bg-hover",
-                    )}
-                  >
-                    <img src={platform.icon} alt="" width={20} height={20} className="h-5 w-5" />
-                    <span className="flex-1">{platform.name}</span>
-                    {active && <BadgeCheck className="h-4 w-4 text-success" aria-hidden="true" />}
-                  </button>
-                );
-              })}
-            </div>
+
+            {builderAgents.isLoading ? (
+              <Skeleton lines={3} />
+            ) : agentOptions.length === 0 ? (
+              <p className="text-sm text-text-muted">
+                Nessun agente disponibile al momento: puoi avviare il lavoro scrivendo la richiesta
+                dalla chat dello Studio.
+              </p>
+            ) : (
+              <>
+                <Select
+                  label="Agente"
+                  options={agentOptions}
+                  value={selectedAgent}
+                  onChange={(event) => setAgent(event.target.value)}
+                  hint="Gli agenti disponibili sono quelli registrati nel BFF."
+                />
+                <Input
+                  label="Titolo dell'attivita'"
+                  placeholder="Es. Prima bozza del sito istituzionale"
+                  value={taskTitle}
+                  onChange={(event) => setTaskTitle(event.target.value)}
+                />
+              </>
+            )}
+          </Card>
+        )}
+
+        {step === 3 && (
+          <Card className="flex flex-col gap-4">
+            <h2 className="text-base font-semibold text-text-primary">Riepilogo</h2>
+
+            <ul className="flex flex-col gap-2 text-sm">
+              <li className="flex items-center justify-between gap-3 rounded-lg border border-secondary/10 px-3 py-2">
+                <span className="text-text-secondary">Obiettivo</span>
+                <span className="font-medium text-text-primary">
+                  {createdGoal ? createdGoal.title : goalId ? "Creato" : "Non creato"}
+                </span>
+              </li>
+              <li className="flex items-center justify-between gap-3 rounded-lg border border-secondary/10 px-3 py-2">
+                <span className="text-text-secondary">Canali attivati</span>
+                <span className="font-medium text-text-primary">
+                  {connectedChannels.length > 0
+                    ? connectedChannels.map((provider) => platformLabel(provider)).join(", ")
+                    : "Nessuno"}
+                </span>
+              </li>
+              <li className="flex items-center justify-between gap-3 rounded-lg border border-secondary/10 px-3 py-2">
+                <span className="text-text-secondary">Attivita' creata</span>
+                <span className="font-medium text-text-primary">
+                  {taskId ? taskTitle || "Attivita' iniziale" : "Non creata"}
+                </span>
+              </li>
+              <li className="flex items-center justify-between gap-3 rounded-lg border border-secondary/10 px-3 py-2">
+                <span className="text-text-secondary">Crediti disponibili</span>
+                <span className="font-medium text-text-primary">
+                  {formatNumber(account.data?.available ?? 0)}
+                </span>
+              </li>
+              <li className="flex items-center justify-between gap-3 rounded-lg border border-secondary/10 px-3 py-2">
+                <span className="text-text-secondary">Task in corso</span>
+                <span className="font-medium text-text-primary">
+                  {formatNumber(overview.data?.counters.tasks.running ?? 0)}
+                </span>
+              </li>
+            </ul>
+
+            <p className="text-sm text-text-muted">
+              Tutti questi dati sono quelli registrati nel tuo workspace: puoi modificarli in
+              qualsiasi momento.
+            </p>
           </Card>
         )}
       </motion.div>
@@ -258,23 +419,46 @@ export default function Onboarding() {
       <footer className="mt-8 flex items-center justify-between gap-3">
         <Button
           variant="ghost"
-          onClick={() => (step === 0 ? navigate("/register") : setStep((s) => s - 1))}
+          onClick={() => (step === 0 ? navigate("/register") : setStep((current) => current - 1))}
           leftIcon={<ArrowLeft className="h-4 w-4" aria-hidden="true" />}
         >
           Indietro
         </Button>
 
-        {step < STEPS.length - 1 ? (
+        {step === 0 && (
           <Button
-            disabled={!canContinue}
-            onClick={() => setStep((s) => s + 1)}
+            disabled={companyName.trim().length < 2}
+            loading={createGoal.isPending}
+            onClick={() => void handleCreateGoal()}
+            rightIcon={<ArrowRight className="h-4 w-4" aria-hidden="true" />}
+          >
+            Crea l'obiettivo
+          </Button>
+        )}
+
+        {step === 1 && (
+          <Button
+            onClick={() => setStep((current) => current + 1)}
             rightIcon={<ArrowRight className="h-4 w-4" aria-hidden="true" />}
           >
             Continua
           </Button>
-        ) : (
+        )}
+
+        {step === 2 && (
           <Button
-            onClick={finish}
+            disabled={agentOptions.length === 0}
+            loading={createBuilderTask.isPending}
+            onClick={() => void handleCreateTask()}
+            rightIcon={<ArrowRight className="h-4 w-4" aria-hidden="true" />}
+          >
+            Crea l'attivita'
+          </Button>
+        )}
+
+        {step === 3 && (
+          <Button
+            onClick={() => navigate("/dashboard", { replace: true })}
             leftIcon={<Rocket className="h-4 w-4" aria-hidden="true" />}
           >
             Entra nella Dashboard
@@ -284,7 +468,7 @@ export default function Onboarding() {
 
       <p className="mt-6 flex items-center justify-center gap-2 text-xs text-text-muted">
         <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
-        Puoi modificare queste scelte in qualsiasi momento dalle Impostazioni.
+        Ogni scelta registrata qui resta modificabile dalle impostazioni del workspace.
       </p>
     </div>
   );

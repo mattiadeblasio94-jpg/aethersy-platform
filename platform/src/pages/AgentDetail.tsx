@@ -1,59 +1,94 @@
-// =============================================================================
-// Dettaglio agente (brief §3.2) — rotta /agents/:agentId. Stato, metriche,
-// configurazione, attivita' recente e link ai log.
-// =============================================================================
-
+import { useMemo } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import {
-  ArrowLeft,
-  Bot,
-  FileText,
-  Gauge,
-  Pause,
-  Pencil,
-  Play,
-  RotateCw,
-  Timer,
-} from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { ArrowLeft, Bot, FileText, Pause, Play, Target, Timer, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
-import { StatusIndicator } from "@/components/domain/StatusIndicator";
-import { EmptyState, KpiCard, PageHeader, ProgressBar } from "@/components/common/PageElements";
-import { useActivateAgent, useAgentDetail, usePauseAgent, useUpdateAgent } from "@/lib/queries";
+import { EmptyState, KpiCard, PageHeader } from "@/components/common/PageElements";
+import { platformApi } from "@/lib/platform-api";
+import { realKeys } from "@/lib/platform-queries";
 import {
-  formatDuration,
-  formatNumber,
-  formatPercent,
-  formatRelative,
-  platformLabel,
-} from "@/lib/utils";
+  useActivateAgent,
+  useBuilderTasks,
+  useDeleteBuilderTask,
+  usePauseAgent,
+  useTasks,
+} from "@/lib/platform-queries";
+import { HttpError } from "@/lib/http";
+import { formatDateTime, formatNumber, formatRelative } from "@/lib/utils";
 
-const ACTIVITY_TONE: Record<string, "success" | "info" | "warning" | "error"> = {
-  success: "success",
-  info: "info",
-  warning: "warning",
-  error: "error",
+const TASK_STATUS_VARIANT: Record<string, "default" | "success" | "warning" | "error" | "info"> = {
+  running: "info",
+  done: "success",
+  completed: "success",
+  failed: "error",
+  pending: "warning",
+  queued: "warning",
 };
+
+function errorFeedback(error: unknown): { title: string; description: string } {
+  if (error instanceof HttpError) {
+    if (error.code === "AP_TOKEN_REQUIRED") {
+      return { title: "Accesso Activepieces richiesto", description: error.message };
+    }
+    return { title: "Operazione non riuscita", description: error.message };
+  }
+  return {
+    title: "Operazione non riuscita",
+    description: error instanceof Error ? error.message : "Operazione non riuscita",
+  };
+}
 
 export default function AgentDetailPage() {
   const { agentId = "" } = useParams<{ agentId: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const detail = useAgentDetail(agentId);
+  const droid = useQuery({
+    queryKey: realKeys.droid(agentId),
+    queryFn: () => platformApi.getDroid(agentId),
+    enabled: Boolean(agentId),
+  });
+  const tasksQuery = useTasks();
+  const builderTasksQuery = useBuilderTasks();
   const activateAgent = useActivateAgent();
   const pauseAgent = usePauseAgent();
-  const updateAgent = useUpdateAgent();
+  const deleteBuilderTask = useDeleteBuilderTask();
+
+  const pipelineTasks = useMemo(
+    () => (tasksQuery.data ?? []).filter((task) => task.droid === agentId),
+    [tasksQuery.data, agentId],
+  );
+
+  const builderTasks = useMemo(
+    () =>
+      (builderTasksQuery.data ?? []).filter((task) => {
+        const specAgent = typeof task.spec?.agent === "string" ? task.spec.agent : null;
+        return specAgent === agentId || task.type === agentId;
+      }),
+    [builderTasksQuery.data, agentId],
+  );
 
   async function handleActivate() {
     try {
       await activateAgent.mutateAsync(agentId);
       toast({ kind: "success", title: "Agente attivato" });
-    } catch {
-      toast({ kind: "error", title: "Attivazione non riuscita" });
+    } catch (error) {
+      const feedback = errorFeedback(error);
+      toast({ kind: "error", title: feedback.title, description: feedback.description });
+    }
+  }
+
+  async function handleDeleteBuilderTask(taskId: string, title: string) {
+    try {
+      await deleteBuilderTask.mutateAsync(taskId);
+      toast({ kind: "success", title: "Task eliminato", description: title });
+    } catch (error) {
+      const feedback = errorFeedback(error);
+      toast({ kind: "error", title: feedback.title, description: feedback.description });
     }
   }
 
@@ -61,21 +96,13 @@ export default function AgentDetailPage() {
     try {
       await pauseAgent.mutateAsync(agentId);
       toast({ kind: "info", title: "Agente messo in pausa" });
-    } catch {
-      toast({ kind: "error", title: "Operazione non riuscita" });
+    } catch (error) {
+      const feedback = errorFeedback(error);
+      toast({ kind: "error", title: feedback.title, description: feedback.description });
     }
   }
 
-  async function handleEdit() {
-    try {
-      await updateAgent.mutateAsync(agentId);
-      toast({ kind: "success", title: "Configurazione salvata" });
-    } catch {
-      toast({ kind: "error", title: "Salvataggio non riuscito" });
-    }
-  }
-
-  if (detail.isLoading) {
+  if (droid.isLoading) {
     return (
       <div className="flex flex-col gap-6">
         <Skeleton className="h-10 w-56" />
@@ -89,14 +116,36 @@ export default function AgentDetailPage() {
     );
   }
 
-  if (!detail.data) {
+  if (droid.isError) {
+    return (
+      <div className="flex flex-col gap-6">
+        <PageHeader title="Agente non disponibile" />
+        <EmptyState
+          icon={<Bot className="h-5 w-5" aria-hidden="true" />}
+          title="Dettaglio non raggiungibile"
+          description={
+            droid.error instanceof HttpError
+              ? droid.error.message
+              : "Errore nel caricamento del roster."
+          }
+          action={
+            <Button variant="secondary" size="sm" onClick={() => droid.refetch()}>
+              Ricarica agente
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
+
+  if (!droid.data) {
     return (
       <div className="flex flex-col gap-6">
         <PageHeader title="Agente non trovato" />
         <EmptyState
           icon={<Bot className="h-5 w-5" aria-hidden="true" />}
           title="Agente inesistente"
-          description={`Nessun agente con id "${agentId}".`}
+          description={`Nessun agente con id "${agentId}" nel roster di questo tenant.`}
           action={
             <Link to="/agents" className="text-sm font-medium text-secondary hover:underline">
               Torna agli Agenti
@@ -107,9 +156,7 @@ export default function AgentDetailPage() {
     );
   }
 
-  const { agent, successRate, avgDurationMs, model, config, activity, tasksCompleted } =
-    detail.data;
-  const isActive = agent.status === "active";
+  const entry = droid.data;
 
   return (
     <div className="flex flex-col gap-6">
@@ -127,10 +174,10 @@ export default function AgentDetailPage() {
             <Bot className="h-6 w-6 text-secondary" aria-hidden="true" />
           </span>
           <div>
-            <h1 className="font-display text-2xl font-semibold text-text-primary">{agent.name}</h1>
-            <div className="mt-1.5">
-              <StatusIndicator status={agent.status} />
-            </div>
+            <h1 className="font-display text-2xl font-semibold text-text-primary">{entry.name}</h1>
+            <p className="mt-1 text-sm text-text-muted">
+              {entry.role} · {entry.department}
+            </p>
           </div>
         </div>
 
@@ -144,118 +191,181 @@ export default function AgentDetailPage() {
           </Button>
           <Button
             variant="secondary"
-            loading={updateAgent.isPending}
-            leftIcon={<Pencil className="h-4 w-4" aria-hidden="true" />}
-            onClick={handleEdit}
+            loading={pauseAgent.isPending}
+            leftIcon={<Pause className="h-4 w-4" aria-hidden="true" />}
+            onClick={handlePause}
           >
-            Modifica
+            Pausa
           </Button>
-          {isActive ? (
-            <Button
-              variant="secondary"
-              loading={pauseAgent.isPending}
-              leftIcon={<Pause className="h-4 w-4" aria-hidden="true" />}
-              onClick={handlePause}
-            >
-              Pausa
-            </Button>
-          ) : (
-            <Button
-              variant={agent.status === "error" ? "danger" : "primary"}
-              loading={activateAgent.isPending}
-              leftIcon={
-                agent.status === "error" ? (
-                  <RotateCw className="h-4 w-4" aria-hidden="true" />
-                ) : (
-                  <Play className="h-4 w-4" aria-hidden="true" />
-                )
-              }
-              onClick={handleActivate}
-            >
-              {agent.status === "error" ? "Riprova" : "Attiva"}
-            </Button>
-          )}
+          <Button
+            variant="primary"
+            loading={activateAgent.isPending}
+            leftIcon={<Play className="h-4 w-4" aria-hidden="true" />}
+            onClick={handleActivate}
+          >
+            Attiva
+          </Button>
         </div>
       </div>
 
-      <p className="max-w-3xl text-sm text-text-secondary">{agent.description}</p>
+      <p className="max-w-3xl text-sm text-text-secondary">{entry.tagline}</p>
 
       <section aria-label="Metriche agente" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard
-          label="Task completati"
-          value={formatNumber(tasksCompleted)}
+          label="Task assegnati"
+          value={formatNumber(entry.tasks)}
           icon={<Bot className="h-5 w-5 text-secondary" aria-hidden="true" />}
         />
         <KpiCard
-          label="Tasso di successo"
-          value={formatPercent(successRate, 0)}
-          icon={<Gauge className="h-5 w-5 text-secondary" aria-hidden="true" />}
-          delta="+1,4 pt"
-          trend="up"
-        />
-        <KpiCard
-          label="Tempo medio"
-          value={formatDuration(avgDurationMs)}
+          label="In esecuzione"
+          value={formatNumber(entry.running)}
           icon={<Timer className="h-5 w-5 text-secondary" aria-hidden="true" />}
         />
         <KpiCard
-          label="Ultima esecuzione"
-          value={formatRelative(agent.lastRun)}
-          icon={<Play className="h-5 w-5 text-secondary" aria-hidden="true" />}
+          label="Completati"
+          value={formatNumber(entry.done)}
+          icon={<Target className="h-5 w-5 text-secondary" aria-hidden="true" />}
+        />
+        <KpiCard
+          label="Falliti"
+          value={formatNumber(entry.failed)}
+          hint={entry.lastTaskAt ? `ultimo task ${formatRelative(entry.lastTaskAt)}` : "nessun task registrato"}
         />
       </section>
 
       <div className="grid gap-6 xl:grid-cols-2">
-        {/* Configurazione */}
-        <Card header={<h2 className="text-base font-semibold text-text-primary">Configurazione</h2>}>
+        <Card header={<h2 className="text-base font-semibold text-text-primary">Specialista</h2>}>
           <dl className="flex flex-col gap-3">
-            {config.map((item) => (
-              <div key={item.label} className="flex items-center justify-between gap-4 border-b border-secondary/5 pb-2 last:border-0">
-                <dt className="text-sm text-text-muted">{item.label}</dt>
-                <dd className="text-right text-sm font-medium text-text-primary">{item.value}</dd>
-              </div>
-            ))}
+            <div className="flex items-center justify-between gap-4 border-b border-secondary/5 pb-2">
+              <dt className="text-sm text-text-muted">Ruolo</dt>
+              <dd className="text-right text-sm font-medium text-text-primary">{entry.role}</dd>
+            </div>
+            <div className="flex items-center justify-between gap-4 border-b border-secondary/5 pb-2">
+              <dt className="text-sm text-text-muted">Dipartimento</dt>
+              <dd className="text-right text-sm font-medium text-text-primary">
+                {entry.department}
+              </dd>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <dt className="text-sm text-text-muted">Ultimo task</dt>
+              <dd className="text-right text-sm font-medium text-text-primary">
+                {entry.lastTaskAt ? formatDateTime(entry.lastTaskAt) : "—"}
+              </dd>
+            </div>
           </dl>
+
           <div className="mt-4">
-            <p className="mb-2 text-xs text-text-muted">Modello attivo</p>
-            <Badge variant="info">{model}</Badge>
+            <p className="mb-2 text-xs text-text-muted">Competenze</p>
+            <div className="flex flex-wrap gap-1.5">
+              {entry.skills.length === 0 ? (
+                <span className="text-sm text-text-muted">Nessuna competenza dichiarata</span>
+              ) : (
+                entry.skills.map((skill) => (
+                  <Badge key={skill} variant="default">
+                    {skill}
+                  </Badge>
+                ))
+              )}
+            </div>
           </div>
-          <div className="mt-4 flex flex-wrap gap-1.5">
-            {agent.targetPlatforms.map((id) => (
-              <Badge key={id} variant="default">
-                {platformLabel(id)}
-              </Badge>
-            ))}
-          </div>
-          <div className="mt-5">
-            <ProgressBar value={successRate} label="Affidabilita' complessiva" />
+
+          <div className="mt-4">
+            <p className="mb-2 text-xs text-text-muted">Fasi</p>
+            <div className="flex flex-wrap gap-1.5">
+              {entry.stages.length === 0 ? (
+                <span className="text-sm text-text-muted">Nessuna fase dichiarata</span>
+              ) : (
+                entry.stages.map((stage) => (
+                  <Badge key={stage} variant="info">
+                    {stage}
+                  </Badge>
+                ))
+              )}
+            </div>
           </div>
         </Card>
 
-        {/* Attivita' recente */}
         <Card
-          header={<h2 className="text-base font-semibold text-text-primary">Attivita' recente</h2>}
+          header={<h2 className="text-base font-semibold text-text-primary">Task pipeline</h2>}
           bodyClassName="p-0"
         >
-          {activity.length === 0 ? (
+          {tasksQuery.isLoading ? (
             <div className="p-5">
-              <EmptyState title="Nessuna attivita'" description="L'agente non ha ancora eseguito operazioni." />
+              <Skeleton lines={4} />
+            </div>
+          ) : pipelineTasks.length === 0 ? (
+            <div className="p-5">
+              <EmptyState
+                title="Nessun task in pipeline"
+                description="Non risultano task del pipeline assegnati a questo specialista."
+              />
             </div>
           ) : (
             <ul className="divide-y divide-secondary/10">
-              {activity.map((item) => (
-                <li key={item.id} className="flex items-start gap-3 px-5 py-3.5">
-                  <Badge variant={ACTIVITY_TONE[item.kind] ?? "default"}>{item.kind}</Badge>
+              {pipelineTasks.map((task) => (
+                <li key={task.id} className="flex flex-wrap items-center gap-3 px-5 py-3">
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm text-text-primary">{item.label}</p>
-                    <p className="text-xs text-text-muted">{formatRelative(item.date)}</p>
+                    <p className="truncate text-sm text-text-primary">{task.title}</p>
+                    <p className="text-xs text-text-muted">
+                      {task.runTitle} · {task.runStage}
+                      {task.startedAt ? ` · ${formatDateTime(task.startedAt)}` : ""}
+                    </p>
                   </div>
+                  <Badge variant={TASK_STATUS_VARIANT[task.status] ?? "default"}>{task.status}</Badge>
                 </li>
               ))}
             </ul>
           )}
         </Card>
       </div>
+
+      <Card
+        header={<h2 className="text-base font-semibold text-text-primary">Task Builder</h2>}
+        bodyClassName="p-0"
+      >
+        {builderTasksQuery.isLoading ? (
+          <div className="p-5">
+            <Skeleton lines={3} />
+          </div>
+        ) : builderTasks.length === 0 ? (
+          <div className="p-5">
+            <EmptyState
+              title="Nessun task Builder"
+              description="Non risultano task del Builder assegnati a questo agente."
+              action={
+                <Link to="/agents/create" className="text-sm font-medium text-secondary hover:underline">
+                  Crea un task
+                </Link>
+              }
+            />
+          </div>
+        ) : (
+          <ul className="divide-y divide-secondary/10">
+            {builderTasks.map((task) => (
+              <li key={task.id} className="flex flex-wrap items-center gap-3 px-5 py-3">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm text-text-primary">{task.title}</p>
+                  <p className="text-xs text-text-muted">
+                    {task.type} · {formatDateTime(task.created_at)} ·{" "}
+                    {formatNumber(task.cost_credits)} crediti
+                  </p>
+                </div>
+                <Badge variant={TASK_STATUS_VARIANT[task.status] ?? "default"}>{task.status}</Badge>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={`Elimina task ${task.title}`}
+                  className="h-8 w-8 text-text-muted hover:text-error"
+                  disabled={deleteBuilderTask.isPending}
+                  onClick={() => void handleDeleteBuilderTask(task.id, task.title)}
+                >
+                  <Trash2 className="h-4 w-4" aria-hidden="true" />
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
     </div>
   );
 }

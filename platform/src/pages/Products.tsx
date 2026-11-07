@@ -1,36 +1,61 @@
-// =============================================================================
-// Prodotti (brief §3.8) — rotta /products. Catalogo con vista griglia/tabella,
-// classifica best-seller, ricerca, filtro stato e creazione prodotto.
-// =============================================================================
-
-import { useMemo, useState } from "react";
-import { Boxes, Grid3x3, List, Package, Plus, Search, Star, TrendingUp } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Boxes, Grid3x3, List, Package, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
+import { Select } from "@/components/ui/Select";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
 import { EmptyState, KpiCard, PageHeader } from "@/components/common/PageElements";
-import { useCreateProduct, useProducts } from "@/lib/queries";
-import type { Product } from "@/lib/types";
-import { cn, formatCurrency, formatNumber, productStatusLabel } from "@/lib/utils";
+import {
+  useBusinessCatalog,
+  useCreateProduct,
+  useDeleteProduct,
+  useProducts,
+  useUpdateProduct,
+} from "@/lib/platform-queries";
+import type { ProductItem } from "@/lib/platform-api";
+import { cn, formatCurrency, formatNumber } from "@/lib/utils";
 
-const STATUS_VARIANT: Record<Product["status"], "success" | "warning" | "default"> = {
+const STATUS_VARIANT: Record<string, "success" | "warning" | "default"> = {
   active: "success",
   draft: "warning",
   archived: "default",
 };
 
-const STATUS_FILTERS = [
-  { value: "all", label: "Tutti" },
-  { value: "active", label: "Attivi" },
-  { value: "draft", label: "Bozze" },
-  { value: "archived", label: "Archiviati" },
-];
-
 type ViewMode = "grid" | "table";
+
+interface ProductForm {
+  name: string;
+  kind: string;
+  sku: string;
+  description: string;
+  price: string;
+  status: string;
+}
+
+const EMPTY_FORM: ProductForm = {
+  name: "",
+  kind: "",
+  sku: "",
+  description: "",
+  price: "",
+  status: "draft",
+};
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : "Operazione non riuscita";
+}
+
+function parsePrice(value: string): number | null {
+  const normalized = value.trim().replace(",", ".");
+  if (normalized === "") return null;
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed) || parsed < 0) return null;
+  return Math.round(parsed * 100);
+}
 
 export default function Products() {
   const { toast } = useToast();
@@ -38,72 +63,133 @@ export default function Products() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [query, setQuery] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [price, setPrice] = useState("");
-  const [description, setDescription] = useState("");
+  const [editing, setEditing] = useState<ProductItem | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ProductItem | null>(null);
+  const [form, setForm] = useState<ProductForm>(EMPTY_FORM);
+  const [formError, setFormError] = useState<string | null>(null);
 
-  const products = useProducts();
+  const productsQuery = useProducts();
+  const catalogQuery = useBusinessCatalog();
   const createProduct = useCreateProduct();
+  const updateProduct = useUpdateProduct();
+  const deleteProduct = useDeleteProduct();
 
-  const list = products.data ?? [];
+  const list = productsQuery.data ?? [];
+  const kindOptions = (catalogQuery.data?.productKinds ?? []).map((item) => ({
+    value: item.id,
+    label: item.label,
+  }));
+  const statusOptions = (catalogQuery.data?.productStatuses ?? []).map((item) => ({
+    value: item.id,
+    label: item.label,
+  }));
 
-  const filtered = useMemo(
-    () =>
-      list.filter((product) => {
-        const matchesStatus = statusFilter === "all" || product.status === statusFilter;
-        const matchesQuery =
-          query.trim() === "" ||
-          product.name.toLowerCase().includes(query.trim().toLowerCase()) ||
-          product.description.toLowerCase().includes(query.trim().toLowerCase());
-        return matchesStatus && matchesQuery;
-      }),
-    [list, statusFilter, query],
-  );
+  useEffect(() => {
+    if (kindOptions.length > 0 && form.kind === "") {
+      setForm((current) => ({ ...current, kind: kindOptions[0].value }));
+    }
+  }, [form.kind, kindOptions]);
 
-  const bestSellers = useMemo(
-    () => [...list].sort((a, b) => (b.sold ?? 0) - (a.sold ?? 0)).slice(0, 5),
-    [list],
-  );
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return list.filter((product) => {
+      const matchesStatus = statusFilter === "all" || product.status === statusFilter;
+      const matchesQuery =
+        needle === "" ||
+        product.name.toLowerCase().includes(needle) ||
+        product.description.toLowerCase().includes(needle) ||
+        product.sku.toLowerCase().includes(needle);
+      return matchesStatus && matchesQuery;
+    });
+  }, [list, statusFilter, query]);
 
   const stats = useMemo(() => {
     const active = list.filter((product) => product.status === "active").length;
-    const sold = list.reduce((sum, product) => sum + (product.sold ?? 0), 0);
-    const revenue = list.reduce((sum, product) => sum + (product.sold ?? 0) * product.price, 0);
-    return { total: list.length, active, sold, revenue };
+    const draft = list.filter((product) => product.status === "draft").length;
+    const catalogValue = list.reduce((sum, product) => sum + product.priceCents, 0) / 100;
+    return { total: list.length, active, draft, catalogValue };
   }, [list]);
 
-  async function handleCreate() {
+  function openCreate() {
+    setEditing(null);
+    setForm({ ...EMPTY_FORM, kind: kindOptions[0]?.value ?? "" });
+    setFormError(null);
+    setModalOpen(true);
+  }
+
+  function openEdit(product: ProductItem) {
+    setEditing(product);
+    setForm({
+      name: product.name,
+      kind: product.kind,
+      sku: product.sku,
+      description: product.description,
+      price: product.priceCents > 0 ? (product.priceCents / 100).toFixed(2).replace(".", ",") : "",
+      status: product.status,
+    });
+    setFormError(null);
+    setModalOpen(true);
+  }
+
+  async function handleSave() {
+    if (form.name.trim().length < 3) {
+      setFormError("Il nome del prodotto e' obbligatorio.");
+      return;
+    }
+    const priceCents = parsePrice(form.price);
+    if (priceCents === null) {
+      setFormError("Inserisci un prezzo valido.");
+      return;
+    }
+    setFormError(null);
     try {
-      await createProduct.mutateAsync({ name: name.trim() || "Nuovo prodotto" });
-      toast({
-        kind: "success",
-        title: "Prodotto creato",
-        description: `${name.trim() || "Nuovo prodotto"} aggiunto al catalogo.`,
-      });
+      if (editing) {
+        await updateProduct.mutateAsync({
+          id: editing.id,
+          body: {
+            name: form.name.trim(),
+            kind: form.kind,
+            description: form.description.trim(),
+            priceCents,
+            status: form.status,
+          },
+        });
+        toast({ kind: "success", title: "Prodotto aggiornato", description: form.name.trim() });
+      } else {
+        await createProduct.mutateAsync({
+          name: form.name.trim(),
+          kind: form.kind || undefined,
+          sku: form.sku.trim() || undefined,
+          description: form.description.trim() || undefined,
+          priceCents,
+        });
+        toast({ kind: "success", title: "Prodotto creato", description: form.name.trim() });
+      }
       setModalOpen(false);
-      setName("");
-      setPrice("");
-      setDescription("");
-    } catch {
-      toast({ kind: "error", title: "Creazione non riuscita" });
+      setEditing(null);
+    } catch (error) {
+      toast({ kind: "error", title: "Salvataggio non riuscito", description: errorText(error) });
     }
   }
 
-  function handleAction(productName: string, action: string) {
-    toast({ kind: "info", title: action, description: `${productName}: azione registrata (mock).` });
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    try {
+      await deleteProduct.mutateAsync(deleteTarget.id);
+      toast({ kind: "info", title: "Prodotto eliminato", description: deleteTarget.name });
+      setDeleteTarget(null);
+    } catch (error) {
+      toast({ kind: "error", title: "Eliminazione non riuscita", description: errorText(error) });
+    }
   }
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Prodotti"
-        description="Catalogo di prodotti e servizi, con vendite e performance."
+        description="Catalogo di prodotti e servizi del tenant: prezzi, stato e descrizioni salvati sul server."
         actions={
-          <Button
-            variant="primary"
-            leftIcon={<Plus className="h-4 w-4" aria-hidden="true" />}
-            onClick={() => setModalOpen(true)}
-          >
+          <Button variant="primary" leftIcon={<Plus className="h-4 w-4" aria-hidden="true" />} onClick={openCreate}>
             Nuovo Prodotto
           </Button>
         }
@@ -120,26 +206,18 @@ export default function Products() {
           value={formatNumber(stats.active)}
           icon={<Package className="h-5 w-5 text-success" aria-hidden="true" />}
         />
+        <KpiCard label="Bozze" value={formatNumber(stats.draft)} />
         <KpiCard
-          label="Unita' vendute"
-          value={formatNumber(stats.sold)}
-          icon={<TrendingUp className="h-5 w-5 text-secondary" aria-hidden="true" />}
-          delta="+7,3%"
-          trend="up"
-        />
-        <KpiCard
-          label="Fatturato stimato"
-          value={formatCurrency(stats.revenue)}
-          icon={<TrendingUp className="h-5 w-5 text-secondary" aria-hidden="true" />}
-          delta="+9,1%"
-          trend="up"
+          label="Valore di listino"
+          value={formatCurrency(stats.catalogValue)}
+          hint="Somma dei prezzi di catalogo, non vendite."
         />
       </section>
 
       <Card>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap gap-2">
-            {STATUS_FILTERS.map((filter) => (
+            {[{ value: "all", label: "Tutti" }, ...statusOptions].map((filter) => (
               <button
                 key={filter.value}
                 type="button"
@@ -200,15 +278,33 @@ export default function Products() {
         </div>
       </Card>
 
-      {products.isLoading ? (
+      {productsQuery.isLoading ? (
         <Card bodyClassName="p-5">
           <Skeleton lines={6} />
+        </Card>
+      ) : productsQuery.isError ? (
+        <Card bodyClassName="p-5">
+          <EmptyState
+            icon={<Package className="h-5 w-5" aria-hidden="true" />}
+            title="Catalogo non disponibile"
+            description={errorText(productsQuery.error)}
+            action={
+              <Button variant="secondary" size="sm" onClick={() => productsQuery.refetch()}>
+                Ricarica catalogo
+              </Button>
+            }
+          />
         </Card>
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={<Package className="h-5 w-5" aria-hidden="true" />}
           title="Nessun prodotto"
           description="Nessun prodotto corrisponde ai filtri selezionati."
+          action={
+            <Button variant="secondary" size="sm" onClick={openCreate}>
+              Crea il primo prodotto
+            </Button>
+          }
         />
       ) : view === "grid" ? (
         <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -216,37 +312,32 @@ export default function Products() {
             <li key={product.id}>
               <Card className="flex h-full flex-col gap-3">
                 <div className="flex items-start justify-between gap-3">
-                  <div>
+                  <div className="min-w-0">
                     <h3 className="text-base font-semibold text-text-primary">{product.name}</h3>
-                    <p className="mt-0.5 text-xs text-text-muted">{product.category}</p>
+                    <p className="mt-0.5 text-xs text-text-muted">
+                      {product.kind}
+                      {product.sku ? ` · ${product.sku}` : ""}
+                    </p>
                   </div>
-                  <Badge variant={STATUS_VARIANT[product.status]}>
-                    {productStatusLabel(product.status)}
-                  </Badge>
+                  <Badge variant={STATUS_VARIANT[product.status] ?? "default"}>{product.status}</Badge>
                 </div>
-                <p className="flex-1 text-sm text-text-secondary">{product.description}</p>
+                <p className="flex-1 text-sm text-text-secondary">{product.description || "—"}</p>
                 <div className="flex items-center justify-between gap-3">
                   <span className="font-display text-lg font-semibold text-text-primary">
-                    {formatCurrency(product.price, product.currency)}
+                    {formatCurrency(product.priceCents / 100, product.currency)}
                   </span>
-                  <div className="flex items-center gap-3 text-xs text-text-muted">
-                    {typeof product.rating === "number" && product.rating > 0 && (
-                      <span className="inline-flex items-center gap-1">
-                        <Star className="h-3.5 w-3.5 text-warning" aria-hidden="true" />
-                        {product.rating.toFixed(1).replace(".", ",")}
-                      </span>
-                    )}
-                    <span>{formatNumber(product.sold ?? 0)} venduti</span>
-                  </div>
                 </div>
                 <div className="flex gap-2">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    fullWidth
-                    onClick={() => handleAction(product.name, "Modifica")}
-                  >
+                  <Button variant="secondary" size="sm" fullWidth onClick={() => openEdit(product)}>
                     Modifica
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={`Elimina ${product.name}`}
+                    onClick={() => setDeleteTarget(product)}
+                  >
+                    <Trash2 className="h-4 w-4 text-error" aria-hidden="true" />
                   </Button>
                 </div>
               </Card>
@@ -261,29 +352,46 @@ export default function Products() {
               <thead>
                 <tr className="border-b border-secondary/10 text-left text-xs text-text-muted">
                   <th scope="col" className="py-2 pl-5 pr-4 font-medium">Prodotto</th>
-                  <th scope="col" className="py-2 pr-4 font-medium">Categoria</th>
+                  <th scope="col" className="py-2 pr-4 font-medium">Tipo</th>
+                  <th scope="col" className="py-2 pr-4 font-medium">SKU</th>
                   <th scope="col" className="py-2 pr-4 font-medium">Prezzo</th>
-                  <th scope="col" className="py-2 pr-4 font-medium">Magazzino</th>
-                  <th scope="col" className="py-2 pr-4 font-medium">Venduti</th>
-                  <th scope="col" className="py-2 pr-5 font-medium text-right">Stato</th>
+                  <th scope="col" className="py-2 pr-4 font-medium">Stato</th>
+                  <th scope="col" className="py-2 pr-5 font-medium text-right">Azioni</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((product) => (
                   <tr key={product.id} className="border-b border-secondary/5">
                     <td className="py-3 pl-5 pr-4 text-text-primary">{product.name}</td>
-                    <td className="py-3 pr-4 text-text-secondary">{product.category}</td>
+                    <td className="py-3 pr-4 text-text-secondary">{product.kind}</td>
+                    <td className="py-3 pr-4 text-text-secondary">{product.sku || "—"}</td>
                     <td className="py-3 pr-4 text-text-secondary">
-                      {formatCurrency(product.price, product.currency)}
+                      {formatCurrency(product.priceCents / 100, product.currency)}
                     </td>
-                    <td className="py-3 pr-4 text-text-secondary">{formatNumber(product.stock)}</td>
-                    <td className="py-3 pr-4 text-text-secondary">
-                      {formatNumber(product.sold ?? 0)}
+                    <td className="py-3 pr-4">
+                      <Badge variant={STATUS_VARIANT[product.status] ?? "default"}>
+                        {product.status}
+                      </Badge>
                     </td>
                     <td className="py-3 pr-5 text-right">
-                      <Badge variant={STATUS_VARIANT[product.status]}>
-                        {productStatusLabel(product.status)}
-                      </Badge>
+                      <div className="inline-flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`Modifica ${product.name}`}
+                          onClick={() => openEdit(product)}
+                        >
+                          <Pencil className="h-4 w-4" aria-hidden="true" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`Elimina ${product.name}`}
+                          onClick={() => setDeleteTarget(product)}
+                        >
+                          <Trash2 className="h-4 w-4 text-error" aria-hidden="true" />
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -293,38 +401,15 @@ export default function Products() {
         </Card>
       )}
 
-      {/* Best-seller */}
-      <Card header={<h2 className="text-base font-semibold text-text-primary">Best-seller</h2>}>
-        {products.isLoading ? (
-          <Skeleton lines={5} />
-        ) : (
-          <ol className="flex flex-col gap-3">
-            {bestSellers.map((product, index) => (
-              <li key={product.id} className="flex items-center gap-3">
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-bg-hover text-xs font-semibold text-text-secondary">
-                  {index + 1}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-sm text-text-primary">
-                  {product.name}
-                </span>
-                <span className="text-sm text-text-secondary">
-                  {formatNumber(product.sold ?? 0)} venduti
-                </span>
-                <span className="w-32 shrink-0 text-right text-xs text-text-muted">
-                  {formatCurrency((product.sold ?? 0) * product.price)}
-                </span>
-              </li>
-            ))}
-          </ol>
-        )}
-      </Card>
-
-      {/* Modale nuovo prodotto */}
       <Modal
         open={modalOpen}
         onOpenChange={setModalOpen}
-        title="Nuovo prodotto"
-        description="Aggiungi un prodotto o servizio al catalogo."
+        title={editing ? "Modifica prodotto" : "Nuovo prodotto"}
+        description={
+          editing
+            ? "Le modifiche vengono salvate sul catalogo del tenant."
+            : "Aggiungi un prodotto o servizio al catalogo."
+        }
         footer={
           <>
             <Button variant="ghost" onClick={() => setModalOpen(false)}>
@@ -332,11 +417,11 @@ export default function Products() {
             </Button>
             <Button
               variant="primary"
-              loading={createProduct.isPending}
-              disabled={name.trim().length < 3}
-              onClick={handleCreate}
+              loading={createProduct.isPending || updateProduct.isPending}
+              disabled={form.name.trim().length < 3}
+              onClick={handleSave}
             >
-              Aggiungi prodotto
+              {editing ? "Salva modifiche" : "Aggiungi prodotto"}
             </Button>
           </>
         }
@@ -345,17 +430,47 @@ export default function Products() {
           <Input
             label="Nome prodotto"
             placeholder="Es. Kit Analytics Avanzato"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
+            value={form.name}
+            onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+            required
           />
-          <Input
-            label="Prezzo (EUR)"
-            type="number"
-            min={0}
-            placeholder="99"
-            value={price}
-            onChange={(event) => setPrice(event.target.value)}
-          />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Select
+              label="Tipo"
+              value={form.kind}
+              onChange={(event) => setForm((current) => ({ ...current, kind: event.target.value }))}
+              options={kindOptions}
+            />
+            <Input
+              label="SKU"
+              value={form.sku}
+              onChange={(event) => setForm((current) => ({ ...current, sku: event.target.value }))}
+              readOnly={Boolean(editing)}
+              hint={editing ? "Lo SKU non e' modificabile dopo la creazione." : undefined}
+            />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Input
+              label="Prezzo (EUR)"
+              type="number"
+              min={0}
+              step="0.01"
+              placeholder="99"
+              value={form.price}
+              onChange={(event) => setForm((current) => ({ ...current, price: event.target.value }))}
+              error={formError ?? undefined}
+            />
+            {editing && (
+              <Select
+                label="Stato"
+                value={form.status}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, status: event.target.value }))
+                }
+                options={statusOptions}
+              />
+            )}
+          </div>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="product-description" className="text-sm font-medium text-text-secondary">
               Descrizione
@@ -363,13 +478,39 @@ export default function Products() {
             <textarea
               id="product-description"
               rows={3}
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
+              value={form.description}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, description: event.target.value }))
+              }
               placeholder="Descrivi brevemente il prodotto."
               className="w-full rounded-lg border border-secondary/20 bg-primary/60 px-3.5 py-2.5 text-base text-text-primary placeholder:text-text-muted focus:border-secondary focus:outline-none focus:ring-1 focus:ring-secondary"
             />
           </div>
         </div>
+      </Modal>
+
+      <Modal
+        open={Boolean(deleteTarget)}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        title="Eliminare il prodotto?"
+        description="L'operazione rimuove l'elemento dal catalogo del tenant."
+        size="sm"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDeleteTarget(null)}>
+              Annulla
+            </Button>
+            <Button variant="danger" loading={deleteProduct.isPending} onClick={handleDelete}>
+              Elimina
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-text-secondary">
+          Prodotto: <span className="font-medium text-text-primary">{deleteTarget?.name}</span>
+        </p>
       </Modal>
     </div>
   );

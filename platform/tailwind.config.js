@@ -46,6 +46,7 @@ export default {
         orbit: "orbit 12s linear infinite",
         "fade-in": "fadeIn 0.3s ease-out",
         "slide-in-left": "slideInLeft 0.25s ease-out",
+        scanline: "scanline 5s linear infinite",
       },
       keyframes: {
         pulseGlow: {
@@ -68,6 +69,10 @@ export default {
         slideInLeft: {
           from: { transform: "translateX(-100%)" },
           to: { transform: "translateX(0)" },
+        },
+        scanline: {
+          "0%": { transform: "translateY(-100%)" },
+          "100%": { transform: "translateY(400%)" },
         },
       },
       boxShadow: {

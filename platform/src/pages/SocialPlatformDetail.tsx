@@ -1,53 +1,37 @@
-// =============================================================================
-// Dettaglio piattaforma social (brief §3.4) — rotta /social-media/:platform.
-// Intestazione con avatar e stato, KPI, grafico crescita follower, tabella post
-// filtrabile e prossime pubblicazioni.
-// =============================================================================
-
 import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import {
-  ArrowLeft,
-  CalendarClock,
-  Eye,
-  MessageCircle,
-  Plus,
-  Share2,
-  TrendingUp,
-  Users,
-} from "lucide-react";
+import { ArrowLeft, CalendarClock, FileText, Share2, Users } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Tabs } from "@/components/ui/Tabs";
-import { useToast } from "@/components/ui/Toast";
-import { LineChart } from "@/components/charts/Charts";
-import { EmptyState, KpiCard, PageHeader, ProgressBar } from "@/components/common/PageElements";
-import { StatusIndicator } from "@/components/domain/StatusIndicator";
+import { EmptyState, KpiCard, PageHeader } from "@/components/common/PageElements";
 import {
-  useFollowerSeries,
   usePlatforms,
-  usePosts,
-  useScheduledPosts,
-} from "@/lib/queries";
-import type { PlatformId, PostStatus } from "@/lib/types";
+  useSocialPosts,
+  useSocialScheduledPosts,
+  useSocialSummary,
+} from "@/lib/platform-queries";
 import {
-  formatCompactNumber,
   formatDateTime,
   formatNumber,
-  formatPercent,
   formatRelative,
   platformLabel,
   postKindLabel,
   postStatusLabel,
 } from "@/lib/utils";
 
-const POST_STATUS_VARIANT: Record<string, "success" | "info" | "default"> = {
+const POST_STATUS_VARIANT: Record<
+  string,
+  "default" | "success" | "warning" | "error" | "info" | "accent"
+> = {
   published: "success",
   scheduled: "info",
-  draft: "default",
+  draft: "warning",
+  queued: "accent",
+  failed: "error",
 };
 
 const FILTERS: { value: string; label: string }[] = [
@@ -57,56 +41,52 @@ const FILTERS: { value: string; label: string }[] = [
   { value: "draft", label: "Bozze" },
 ];
 
-export default function SocialPlatformDetail() {
-  const { platform: platformParam } = useParams<{ platform: string }>();
-  const platformId = (platformParam ?? "") as PlatformId;
-  const { toast } = useToast();
+function postPlatform(meta: Record<string, unknown>): string | null {
+  for (const key of ["platform", "channel", "provider"]) {
+    const value = meta?.[key];
+    if (typeof value === "string" && value.trim() !== "") return value;
+  }
+  return null;
+}
 
+export default function SocialPlatformDetail() {
+  const { platform: platformParam = "" } = useParams<{ platform: string }>();
   const [statusFilter, setStatusFilter] = useState("all");
   const [query, setQuery] = useState("");
 
-  const platforms = usePlatforms();
-  const series = useFollowerSeries(platformId);
-  const posts = usePosts(platformId);
-  const scheduled = useScheduledPosts(platformId);
+  const platformsQuery = usePlatforms();
+  const postsQuery = useSocialPosts();
+  const scheduledQuery = useSocialScheduledPosts();
+  const summaryQuery = useSocialSummary();
 
-  const platform = (platforms.data ?? []).find((item) => item.id === platformId);
+  const platforms = platformsQuery.data ?? [];
+  const connection =
+    platforms.find((item) => item.provider === platformParam) ??
+    platforms.find((item) => item.id === platformParam) ??
+    null;
 
-  const points = useMemo(
-    () => (series.data ?? []).map((point) => ({ label: point.label, value: point.value })),
-    [series.data],
+  const posts = postsQuery.data ?? [];
+  const taggedPosts = useMemo(
+    () => posts.filter((post) => postPlatform(post.meta ?? {}) !== null),
+    [posts],
   );
+  const scopedPosts = useMemo(() => {
+    if (taggedPosts.length === 0) return posts;
+    return taggedPosts.filter((post) => postPlatform(post.meta ?? {}) === platformParam);
+  }, [taggedPosts, posts, platformParam]);
 
   const filteredPosts = useMemo(() => {
-    const list = posts.data ?? [];
-    return list.filter((post) => {
-      const matchesStatus = statusFilter === "all" || post.status === (statusFilter as PostStatus);
-      const matchesQuery =
-        query.trim() === "" || post.text.toLowerCase().includes(query.trim().toLowerCase());
+    const needle = query.trim().toLowerCase();
+    return scopedPosts.filter((post) => {
+      const matchesStatus = statusFilter === "all" || post.status === statusFilter;
+      const matchesQuery = needle === "" || post.name.toLowerCase().includes(needle);
       return matchesStatus && matchesQuery;
     });
-  }, [posts.data, statusFilter, query]);
+  }, [scopedPosts, statusFilter, query]);
 
-  const growth = useMemo(() => {
-    const values = series.data ?? [];
-    if (values.length < 2) return 0;
-    const first = values[0].value;
-    const last = values[values.length - 1].value;
-    if (first === 0) return 0;
-    return ((last - first) / first) * 100;
-  }, [series.data]);
+  const scheduled = scheduledQuery.data ?? [];
 
-  const totalEngagement = useMemo(
-    () =>
-      (posts.data ?? []).reduce(
-        (sum, post) =>
-          sum + post.engagement.likes + post.engagement.comments + post.engagement.shares,
-        0,
-      ),
-    [posts.data],
-  );
-
-  if (platforms.isLoading) {
+  if (platformsQuery.isLoading) {
     return (
       <div className="flex flex-col gap-6">
         <Skeleton className="h-10 w-56" />
@@ -120,14 +100,32 @@ export default function SocialPlatformDetail() {
     );
   }
 
-  if (!platform) {
+  if (platformsQuery.isError) {
+    return (
+      <div className="flex flex-col gap-6">
+        <PageHeader title="Canale non disponibile" />
+        <EmptyState
+          icon={<Share2 className="h-5 w-5" aria-hidden="true" />}
+          title="Canali non raggiungibili"
+          description="Il BFF non ha risposto sulla lista dei canali social collegati."
+          action={
+            <Button variant="secondary" size="sm" onClick={() => platformsQuery.refetch()}>
+              Ricarica canali
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
+
+  if (!connection) {
     return (
       <div className="flex flex-col gap-6">
         <PageHeader title="Piattaforma non trovata" />
         <EmptyState
           icon={<Share2 className="h-5 w-5" aria-hidden="true" />}
-          title="Piattaforma sconosciuta"
-          description={`Nessuna piattaforma con id "${platformId}".`}
+          title="Canale sconosciuto"
+          description={`Nessun canale con id "${platformParam}" e' registrato su questo tenant.`}
           action={
             <Link to="/social-media" className="text-sm font-medium text-secondary hover:underline">
               Torna a Social Media
@@ -138,209 +136,128 @@ export default function SocialPlatformDetail() {
     );
   }
 
+  const label = platformLabel(connection.provider);
+
   return (
     <div className="flex flex-col gap-6">
-      {/* Intestazione */}
-      <div className="flex flex-col gap-4">
-        <Link
-          to="/social-media"
-          className="inline-flex w-fit items-center gap-1.5 text-sm text-text-muted transition-colors hover:text-text-primary"
-        >
-          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-          Social Media
-        </Link>
+      <Link
+        to="/social-media"
+        className="inline-flex w-fit items-center gap-1.5 text-sm text-text-muted transition-colors hover:text-text-primary"
+      >
+        <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+        Social Media
+      </Link>
 
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-4">
-            <span
-              className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-secondary/15 bg-primary/60"
-              style={{ boxShadow: `0 0 24px ${platform.color}33` }}
-            >
-              <img src={platform.icon} alt="" width={28} height={28} className="h-7 w-7" />
-            </span>
-            <div>
-              <h1 className="font-display text-2xl font-semibold text-text-primary">
-                {platform.name}
-              </h1>
-              <p className="text-sm text-text-secondary">
-                {platform.accountName ?? "Nessun account collegato"}
-              </p>
-              <div className="mt-1.5">
-                <StatusIndicator status={platform.status} />
-              </div>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-4">
+          <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-secondary/15 bg-primary/60">
+            <Share2 className="h-6 w-6 text-secondary" aria-hidden="true" />
+          </span>
+          <div>
+            <h1 className="font-display text-2xl font-semibold text-text-primary">{label}</h1>
+            <p className="mt-1 text-sm text-text-secondary">
+              {connection.kind}
+              {connection.label && connection.label !== connection.provider
+                ? ` · ${connection.label}`
+                : ""}
+            </p>
+            <div className="mt-1.5">
+              <Badge variant={connection.connected ? "success" : "warning"}>
+                {connection.status}
+              </Badge>
             </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="secondary"
-              leftIcon={<CalendarClock className="h-4 w-4" aria-hidden="true" />}
-              onClick={() =>
-                toast({ kind: "info", title: "Programma", description: "Pianificazione contenuti." })
-              }
-            >
-              Programma
-            </Button>
-            <Button
-              variant="primary"
-              leftIcon={<Plus className="h-4 w-4" aria-hidden="true" />}
-              onClick={() =>
-                toast({ kind: "success", title: "Nuovo post", description: "Editor contenuti aperto." })
-              }
-            >
-              Nuovo Post
-            </Button>
           </div>
         </div>
       </div>
 
-      {/* KPI */}
-      <section aria-label="KPI piattaforma" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <section aria-label="KPI canale" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard
-          label="Follower"
-          value={formatCompactNumber(platform.stats.followers)}
-          icon={<Users className="h-5 w-5 text-secondary" aria-hidden="true" />}
-          delta={`${growth >= 0 ? "+" : ""}${formatPercent(growth)}`}
-          trend={growth >= 0 ? "up" : "down"}
+          label="Contenuti del canale"
+          value={formatNumber(scopedPosts.length)}
+          icon={<FileText className="h-5 w-5 text-secondary" aria-hidden="true" />}
         />
         <KpiCard
-          label="Post pubblicati"
-          value={formatNumber(platform.stats.posts)}
+          label="Pubblicazioni pianificate"
+          value={formatNumber(scheduled.length)}
+          icon={<CalendarClock className="h-5 w-5 text-secondary" aria-hidden="true" />}
+        />
+        <KpiCard
+          label="Ultimo contenuto"
+          value={summaryQuery.data?.lastPostAt ? formatRelative(summaryQuery.data.lastPostAt) : "—"}
           icon={<Share2 className="h-5 w-5 text-secondary" aria-hidden="true" />}
         />
         <KpiCard
-          label="Engagement totale"
-          value={formatCompactNumber(totalEngagement)}
-          icon={<MessageCircle className="h-5 w-5 text-secondary" aria-hidden="true" />}
-          delta="+8,4%"
-          trend="up"
-        />
-        <KpiCard
-          label="Reach (30 giorni)"
-          value={formatCompactNumber((series.data ?? []).reduce((sum, point) => sum + point.value, 0))}
-          icon={<Eye className="h-5 w-5 text-secondary" aria-hidden="true" />}
-          delta="-1,2%"
-          trend="down"
+          label="Follower"
+          value="Non disponibile"
+          icon={<Users className="h-5 w-5 text-secondary" aria-hidden="true" />}
+          hint="Il BFF non espone metriche per canale."
         />
       </section>
 
       <div className="grid gap-6 xl:grid-cols-3">
-        {/* Grafico crescita */}
         <Card
           className="xl:col-span-2"
           header={
             <>
-              <h2 className="text-base font-semibold text-text-primary">Crescita follower</h2>
-              <span className="inline-flex items-center gap-1 text-xs text-success">
-                <TrendingUp className="h-3.5 w-3.5" aria-hidden="true" />
-                {`${growth >= 0 ? "+" : ""}${formatPercent(growth)} (30 giorni)`}
+              <h2 className="text-base font-semibold text-text-primary">Contenuti</h2>
+              <span className="text-xs text-text-muted">
+                {filteredPosts.length} di {scopedPosts.length}
               </span>
             </>
           }
         >
-          {series.isLoading ? (
-            <Skeleton className="h-56 w-full rounded-xl" />
-          ) : (
-            <LineChart
-              data={points}
-              area
-              color={platform.color === "#FFFFFF" ? "#00D4FF" : platform.color}
-              ariaLabel={`Crescita follower su ${platform.name}`}
-              valueFormatter={(value) => formatCompactNumber(value)}
-            />
-          )}
-        </Card>
-
-        {/* Programmazioni */}
-        <Card
-          header={<h2 className="text-base font-semibold text-text-primary">In programma</h2>}
-          bodyClassName="p-0"
-        >
-          {scheduled.isLoading ? (
-            <ul className="divide-y divide-secondary/10">
-              {Array.from({ length: 3 }).map((_, index) => (
-                <li key={index} className="px-5 py-4">
-                  <Skeleton lines={2} />
-                </li>
-              ))}
-            </ul>
-          ) : (scheduled.data ?? []).length === 0 ? (
-            <div className="p-5">
-              <EmptyState
-                icon={<CalendarClock className="h-5 w-5" aria-hidden="true" />}
-                title="Nessuna programmazione"
-                description="Non ci sono contenuti pianificati."
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <Tabs
+                items={FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+                value={statusFilter}
+                onValueChange={setStatusFilter}
+              />
+              <Input
+                type="search"
+                placeholder="Cerca contenuto…"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                className="sm:max-w-xs"
               />
             </div>
-          ) : (
-            <ul className="divide-y divide-secondary/10">
-              {(scheduled.data ?? []).map((item) => (
-                <li key={item.id} className="px-5 py-4">
-                  <p className="text-sm font-medium text-text-primary">{item.title}</p>
-                  <p className="mt-0.5 text-xs text-text-muted">{formatDateTime(item.date)}</p>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-      </div>
 
-      {/* Tabella post */}
-      <Card
-        header={
-          <>
-            <h2 className="text-base font-semibold text-text-primary">Contenuti</h2>
-            <span className="text-xs text-text-muted">
-              {filteredPosts.length} di {(posts.data ?? []).length}
-            </span>
-          </>
-        }
-      >
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <Tabs
-              items={FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-              value={statusFilter}
-              onValueChange={setStatusFilter}
-            />
-            <Input
-              type="search"
-              placeholder="Cerca contenuto…"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              className="sm:max-w-xs"
-            />
-          </div>
-
-          {posts.isLoading ? (
-            <Skeleton lines={4} />
-          ) : filteredPosts.length === 0 ? (
-            <EmptyState
-              icon={<Share2 className="h-5 w-5" aria-hidden="true" />}
-              title="Nessun contenuto"
-              description="Nessun contenuto corrisponde ai filtri selezionati."
-            />
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] border-collapse text-sm">
-                <caption className="sr-only">Contenuti della piattaforma {platform.name}</caption>
-                <thead>
-                  <tr className="border-b border-secondary/10 text-left text-xs text-text-muted">
-                    <th scope="col" className="py-2 pr-4 font-medium">Contenuto</th>
-                    <th scope="col" className="py-2 pr-4 font-medium">Tipo</th>
-                    <th scope="col" className="py-2 pr-4 font-medium">Stato</th>
-                    <th scope="col" className="py-2 pr-4 font-medium">Data</th>
-                    <th scope="col" className="py-2 pr-4 font-medium text-right">Interazioni</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredPosts.map((post) => {
-                    const interactions =
-                      post.engagement.likes + post.engagement.comments + post.engagement.shares;
-                    return (
+            {postsQuery.isLoading ? (
+              <Skeleton lines={4} />
+            ) : postsQuery.isError ? (
+              <EmptyState
+                icon={<FileText className="h-5 w-5" aria-hidden="true" />}
+                title="Contenuti non disponibili"
+                description="Impossibile leggere i contenuti social del tenant."
+                action={
+                  <Button variant="secondary" size="sm" onClick={() => postsQuery.refetch()}>
+                    Ricarica contenuti
+                  </Button>
+                }
+              />
+            ) : filteredPosts.length === 0 ? (
+              <EmptyState
+                icon={<Share2 className="h-5 w-5" aria-hidden="true" />}
+                title="Nessun contenuto"
+                description="Nessun contenuto corrisponde ai filtri selezionati."
+              />
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[560px] border-collapse text-sm">
+                  <caption className="sr-only">Contenuti social del canale {label}</caption>
+                  <thead>
+                    <tr className="border-b border-secondary/10 text-left text-xs text-text-muted">
+                      <th scope="col" className="py-2 pl-5 pr-4 font-medium">Contenuto</th>
+                      <th scope="col" className="py-2 pr-4 font-medium">Tipo</th>
+                      <th scope="col" className="py-2 pr-4 font-medium">Stato</th>
+                      <th scope="col" className="py-2 pr-5 font-medium">Data</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredPosts.map((post) => (
                       <tr key={post.id} className="border-b border-secondary/5">
-                        <td className="max-w-xs py-3 pr-4">
-                          <span className="line-clamp-1 text-text-primary">{post.text}</span>
+                        <td className="max-w-xs py-3 pl-5 pr-4">
+                          <span className="line-clamp-1 text-text-primary">{post.name}</span>
                         </td>
                         <td className="py-3 pr-4 text-text-secondary">{postKindLabel(post.kind)}</td>
                         <td className="py-3 pr-4">
@@ -348,29 +265,76 @@ export default function SocialPlatformDetail() {
                             {postStatusLabel(post.status)}
                           </Badge>
                         </td>
-                        <td className="py-3 pr-4 text-text-muted">{formatRelative(post.date)}</td>
-                        <td className="py-3 pr-4 text-right text-text-secondary">
-                          {formatCompactNumber(interactions)}
-                        </td>
+                        <td className="py-3 pr-5 text-text-muted">{formatRelative(post.createdAt)}</td>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
-          <ProgressBar
-            value={platform.stats.posts}
-            max={Math.max(platform.stats.posts, 150)}
-            label={`Obiettivo mensile contenuti (${platform.stats.posts}/150)`}
-          />
+            {taggedPosts.length === 0 && posts.length > 0 && (
+              <p className="text-xs text-text-muted">
+                I deliverable social non registrano il canale di pubblicazione: l'elenco mostra tutti
+                i contenuti social del tenant.
+              </p>
+            )}
+          </div>
+        </Card>
+
+        <div className="flex flex-col gap-6">
+          <Card
+            header={<h2 className="text-base font-semibold text-text-primary">In programma</h2>}
+            bodyClassName="p-0"
+          >
+            {scheduledQuery.isLoading ? (
+              <div className="p-5">
+                <Skeleton lines={3} />
+              </div>
+            ) : scheduledQuery.isError ? (
+              <div className="p-5">
+                <EmptyState
+                  icon={<CalendarClock className="h-5 w-5" aria-hidden="true" />}
+                  title="Programmazione non disponibile"
+                  description="Impossibile leggere le pubblicazioni social pianificate."
+                  action={
+                    <Button variant="secondary" size="sm" onClick={() => scheduledQuery.refetch()}>
+                      Ricarica programmazione
+                    </Button>
+                  }
+                />
+              </div>
+            ) : scheduled.length === 0 ? (
+              <div className="p-5">
+                <EmptyState
+                  icon={<CalendarClock className="h-5 w-5" aria-hidden="true" />}
+                  title="Nessuna programmazione"
+                  description="Non ci sono contenuti social pianificati sul tenant."
+                />
+              </div>
+            ) : (
+              <ul className="divide-y divide-secondary/10">
+                {scheduled.map((item) => (
+                  <li key={item.id} className="px-5 py-4">
+                    <p className="text-sm font-medium text-text-primary">{item.title}</p>
+                    <p className="mt-0.5 text-xs text-text-muted">
+                      {item.runAt ? formatDateTime(item.runAt) : (item.cron ?? "—")} · {item.timezone}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+
+          <Card header={<h2 className="text-base font-semibold text-text-primary">Metriche</h2>}>
+            <EmptyState
+              icon={<Users className="h-5 w-5" aria-hidden="true" />}
+              title="Metriche per canale non disponibili"
+              description="Il BFF espone solo il riepilogo aggregato del tenant: follower, reach e engagement per canale non sono disponibili."
+            />
+          </Card>
         </div>
-      </Card>
-
-      <p className="text-xs text-text-muted">
-        Piattaforma: {platformLabel(platform.id)} · dati aggiornati {formatRelative(new Date().toISOString())}
-      </p>
+      </div>
     </div>
   );
 }

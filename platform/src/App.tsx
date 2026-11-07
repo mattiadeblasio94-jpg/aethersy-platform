@@ -48,7 +48,7 @@ export default function App() {
           </Protected>
         }
       >
-        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/overview" element={<Dashboard />} />
 
         <Route path="/settings" element={<Navigate to="/settings/profile" replace />} />
 

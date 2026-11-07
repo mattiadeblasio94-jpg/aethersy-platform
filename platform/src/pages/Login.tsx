@@ -60,8 +60,9 @@ export default function Login() {
 
   async function handleSocialLogin(provider: "google" | "github") {
     setError(null);
-    // Redirect al BFF per avviare il flusso OAuth del provider.
-    window.location.href = `/api/auth/social/${provider}`;
+    // Redirect al BFF per avviare il flusso OAuth del provider. `target` dice al
+    // BFF dove tornare dopo il login (allowlist: platform | console).
+    window.location.href = `/api/auth/social/${provider}?target=platform`;
   }
 
   return (
