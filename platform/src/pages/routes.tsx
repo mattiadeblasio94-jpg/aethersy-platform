@@ -27,6 +27,7 @@ const Analytics = lazy(() => import("./Analytics"));
 const SettingsProfile = lazy(() => import("./SettingsProfile"));
 const SettingsBilling = lazy(() => import("./SettingsBilling"));
 const SettingsIntegrations = lazy(() => import("./SettingsIntegrations"));
+const Notifications = lazy(() => import("./Notifications"));
 const SettingsNotifications = lazy(() => import("./SettingsNotifications"));
 const Help = lazy(() => import("./Help"));
 const Opportunities = lazy(() => import("./Opportunities"));
@@ -155,6 +156,12 @@ export const APP_ROUTES: RouteSpec[] = [
     title: "Analisi",
     description: "KPI unificati, crescita follower e performance dei contenuti per canale.",
     component: Analytics,
+  },
+  {
+    path: "notifications",
+    title: "Notifiche",
+    description: "Eventi reali: deploy, lead, run consegnate.",
+    component: Notifications,
   },
   {
     path: "settings/profile",

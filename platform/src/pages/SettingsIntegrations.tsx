@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { KeyRound, Link2, Share2, Webhook as WebhookIcon } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -9,10 +9,13 @@ import { SettingsLayout } from "@/components/settings/SettingsLayout";
 import { EmptyState } from "@/components/common/PageElements";
 import { PageTransition } from "@/components/common/Motion";
 import {
-  useConnectPlatform,
   useDisconnectPlatform,
   useIntegrations,
   usePlatforms,
+  useRevokeIntegration,
+  useSaveIntegration,
+  useSaveWebhook,
+  useTestIntegration,
 } from "@/lib/platform-queries";
 import { formatDate, platformLabel } from "@/lib/utils";
 
@@ -24,8 +27,121 @@ export default function SettingsIntegrations() {
   const { toast } = useToast();
   const platforms = usePlatforms();
   const integrations = useIntegrations();
-  const connectPlatform = useConnectPlatform();
   const disconnectPlatform = useDisconnectPlatform();
+  const saveIntegration = useSaveIntegration();
+  const testIntegration = useTestIntegration();
+  const revokeIntegration = useRevokeIntegration();
+  const [slackUrl, setSlackUrl] = useState("");
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [webhookSecret, setWebhookSecret] = useState("");
+  const saveWebhook = useSaveWebhook();
+
+  const webhookRows = (integrations.data ?? []).filter(
+    (item) => item.provider === "webhook" && item.status !== "revoked",
+  );
+
+  async function handleSaveWebhook() {
+    const url = webhookUrl.trim();
+    if (!url) {
+      toast({
+        kind: "error",
+        title: "URL mancante",
+        description: "Inserisci l'endpoint https che riceve gli eventi.",
+      });
+      return;
+    }
+    try {
+      await saveWebhook.mutateAsync({ url, signingSecret: webhookSecret.trim() || undefined });
+      setWebhookUrl("");
+      setWebhookSecret("");
+      toast({
+        kind: "success",
+        title: "Webhook salvato",
+        description: "Gli eventi della pipeline verranno consegnati a questo endpoint.",
+      });
+    } catch (error) {
+      toast({ kind: "error", title: "Salvataggio non riuscito", description: errorText(error) });
+    }
+  }
+
+  async function handleTest(id: string, message: string) {
+    try {
+      await testIntegration.mutateAsync({ id, message });
+      toast({
+        kind: "success",
+        title: "Evento di prova inviato",
+        description: "L'endpoint ha risposto 200.",
+      });
+    } catch (error) {
+      toast({ kind: "error", title: "Test non riuscito", description: errorText(error) });
+    }
+  }
+
+  async function handleRevoke(id: string, label: string) {
+    try {
+      await revokeIntegration.mutateAsync(id);
+      toast({ kind: "info", title: `${label} revocato`, description: "Il canale non e' piu' usato." });
+    } catch (error) {
+      toast({ kind: "error", title: "Revoca non riuscita", description: errorText(error) });
+    }
+  }
+
+  const slackCredential = (integrations.data ?? []).find(
+    (item) => item.provider === "slack" && item.status !== "revoked",
+  );
+
+  async function handleSaveSlack() {
+    const url = slackUrl.trim();
+    if (!url) {
+      toast({
+        kind: "error",
+        title: "URL mancante",
+        description: "Incolla l'URL del webhook Incoming Webhook di Slack.",
+      });
+      return;
+    }
+    try {
+      await saveIntegration.mutateAsync({
+        provider: "slack",
+        kind: "webhook",
+        label: "Slack",
+        secret: url,
+        scopes: ["lead.created", "run.delivered"],
+      });
+      setSlackUrl("");
+      toast({
+        kind: "success",
+        title: "Slack salvato",
+        description: "Il webhook e' cifrato lato server: da qui in poi i lead arrivano sul canale.",
+      });
+    } catch (error) {
+      toast({ kind: "error", title: "Salvataggio non riuscito", description: errorText(error) });
+    }
+  }
+
+  async function handleTestSlack() {
+    if (!slackCredential) return;
+    try {
+      await testIntegration.mutateAsync({ id: slackCredential.id });
+      toast({
+        kind: "success",
+        title: "Messaggio di prova inviato",
+        description: "Slack ha risposto 200: il canale e' operativo.",
+      });
+    } catch (error) {
+      toast({ kind: "error", title: "Test non riuscito", description: errorText(error) });
+    }
+  }
+
+  async function handleRevokeSlack() {
+    if (!slackCredential) return;
+    try {
+      await revokeIntegration.mutateAsync(slackCredential.id);
+      toast({ kind: "info", title: "Slack revocato", description: "Il webhook del tenant non e' piu' usato." });
+    } catch (error) {
+      toast({ kind: "error", title: "Revoca non riuscita", description: errorText(error) });
+    }
+  }
 
   const detailsById = useMemo(() => {
     const map = new Map<string, { scopes: string[]; createdAt: string; meta: Record<string, unknown> }>();
@@ -37,19 +153,6 @@ export default function SettingsIntegrations() {
 
   const rows = platforms.data ?? [];
   const activeCount = rows.filter((row) => row.connected).length;
-
-  async function handleConnect(provider: string) {
-    try {
-      await connectPlatform.mutateAsync(provider);
-      toast({
-        kind: "success",
-        title: "Canale collegato",
-        description: `${platformLabel(provider)} e' ora attivo sul tenant.`,
-      });
-    } catch (error) {
-      toast({ kind: "error", title: "Collegamento non riuscito", description: errorText(error) });
-    }
-  }
 
   async function handleDisconnect(id: string, label: string) {
     try {
@@ -70,8 +173,73 @@ export default function SettingsIntegrations() {
           header={
             <>
               <h3 className="flex items-center gap-2 text-base font-semibold text-text-primary">
+                <WebhookIcon className="h-4 w-4 text-secondary" aria-hidden="true" />
+                Slack: notifiche lead e consegne
+              </h3>
+              <Badge variant={slackCredential ? "success" : "warning"}>
+                {slackCredential ? slackCredential.status : "non configurato"}
+              </Badge>
+            </>
+          }
+        >
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-text-secondary">
+              Incolla l&apos;URL del webhook Incoming Webhook di Slack: viene cifrato lato server
+              (AES-256-GCM) e da qui in poi ogni lead del sito e ogni run consegnato arrivano sul
+              canale. Il segreto non viene mai restituito al browser.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="url"
+                value={slackUrl}
+                onChange={(event) => setSlackUrl(event.target.value)}
+                placeholder="https://hooks.slack.com/services/..."
+                aria-label="URL webhook Slack"
+                className="min-w-[280px] flex-1 rounded-lg border border-secondary/20 bg-bg-hover px-3 py-2 text-sm text-text-primary outline-none focus:border-secondary/40"
+              />
+              <Button size="sm" loading={saveIntegration.isPending} onClick={handleSaveSlack}>
+                Salva webhook
+              </Button>
+              {slackCredential ? (
+                <>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    loading={testIntegration.isPending}
+                    onClick={handleTestSlack}
+                  >
+                    Invia test
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    loading={revokeIntegration.isPending}
+                    onClick={handleRevokeSlack}
+                  >
+                    Revoca
+                  </Button>
+                </>
+              ) : null}
+            </div>
+            {slackCredential ? (
+              <p className="text-xs text-text-muted">
+                Configurato il {formatDate(slackCredential.createdAt)} · permessi:{" "}
+                {(slackCredential.scopes ?? []).join(", ") || "nessuno"}
+              </p>
+            ) : (
+              <p className="text-xs text-text-muted">
+                Senza webhook del tenant le notifiche usano il canale di stack, se configurato.
+              </p>
+            )}
+          </div>
+        </Card>
+
+        <Card
+          header={
+            <>
+              <h3 className="flex items-center gap-2 text-base font-semibold text-text-primary">
                 <Share2 className="h-4 w-4 text-secondary" aria-hidden="true" />
-                Canali social
+                Canali registrati
               </h3>
               <span className="text-xs text-text-muted">{activeCount} attivi</span>
             </>
@@ -107,7 +275,7 @@ export default function SettingsIntegrations() {
               <EmptyState
                 icon={<Share2 className="h-5 w-5" aria-hidden="true" />}
                 title="Nessun canale registrato"
-                description="Il BFF espone solo i canali gia' registrati sul tenant: la creazione di una nuova connessione avviene dal pipeline."
+                description="I canali social richiedono le credenziali dell'app del provider: senza OAuth configurato non viene creata una connessione fittizia. Il canale operativo e' Slack, configurabile qui sopra."
                 action={
                   <Button variant="secondary" size="sm" onClick={() => platforms.refetch()}>
                     Ricarca canali
@@ -157,18 +325,7 @@ export default function SettingsIntegrations() {
                       >
                         Disconnetti
                       </Button>
-                    ) : (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        loading={
-                          connectPlatform.isPending && connectPlatform.variables === row.provider
-                        }
-                        onClick={() => handleConnect(row.provider)}
-                      >
-                        Collega
-                      </Button>
-                    )}
+                    ) : null}
                   </li>
                 );
               })}
@@ -193,17 +350,78 @@ export default function SettingsIntegrations() {
 
         <Card
           header={
-            <h3 className="flex items-center gap-2 text-base font-semibold text-text-primary">
-              <WebhookIcon className="h-4 w-4 text-secondary" aria-hidden="true" />
-              Webhook
-            </h3>
+            <>
+              <h3 className="flex items-center gap-2 text-base font-semibold text-text-primary">
+                <WebhookIcon className="h-4 w-4 text-secondary" aria-hidden="true" />
+                Webhook in uscita
+              </h3>
+              <span className="text-xs text-text-muted">{webhookRows.length} registrati</span>
+            </>
           }
         >
-          <EmptyState
-            icon={<WebhookIcon className="h-5 w-5" aria-hidden="true" />}
-            title="Webhook non disponibili"
-            description="Non esiste un endpoint di gestione webhook: gli eventi interni restano consultabili dai log di run e task."
-          />
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-text-secondary">
+              Punto di ricezione per gli eventi della pipeline: ogni lead del sito e ogni run
+              consegnato arrivano come POST JSON con <code>X-Aethersy-Event</code> e firma
+              <code> X-Aethersy-Signature</code> (HMAC-SHA256). URL e secret sono cifrati lato
+              server.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="url"
+                value={webhookUrl}
+                onChange={(event) => setWebhookUrl(event.target.value)}
+                placeholder="https://hook.example.com/aethersy"
+                aria-label="URL webhook in uscita"
+                className="min-w-[260px] flex-1 rounded-lg border border-secondary/20 bg-bg-hover px-3 py-2 text-sm text-text-primary outline-none focus:border-secondary/40"
+              />
+              <input
+                type="password"
+                value={webhookSecret}
+                onChange={(event) => setWebhookSecret(event.target.value)}
+                placeholder="secret di firma (opzionale)"
+                aria-label="Secret di firma del webhook"
+                className="min-w-[200px] flex-1 rounded-lg border border-secondary/20 bg-bg-hover px-3 py-2 text-sm text-text-primary outline-none focus:border-secondary/40"
+              />
+              <Button size="sm" loading={saveWebhook.isPending} onClick={handleSaveWebhook}>
+                Salva webhook
+              </Button>
+            </div>
+            {webhookRows.length > 0 ? (
+              <ul className="divide-y divide-secondary/10 rounded-lg border border-secondary/15">
+                {webhookRows.map((row) => (
+                  <li key={row.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
+                    <span className="min-w-0 flex-1 truncate text-sm text-text-primary">
+                      {typeof row.meta?.host === "string" && row.meta.host
+                        ? row.meta.host
+                        : row.label || "webhook"}
+                    </span>
+                    <Badge variant={row.status === "active" ? "success" : "warning"}>{row.status}</Badge>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      loading={testIntegration.isPending && testIntegration.variables?.id === row.id}
+                      onClick={() => handleTest(row.id, "Aethersy - evento di prova")}
+                    >
+                      Invia test
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      loading={revokeIntegration.isPending && revokeIntegration.variables === row.id}
+                      onClick={() => handleRevoke(row.id, "Webhook")}
+                    >
+                      Revoca
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs text-text-muted">
+                Nessun webhook registrato: gli eventi restano consultabili in piattaforma.
+              </p>
+            )}
+          </div>
         </Card>
 
         <Card

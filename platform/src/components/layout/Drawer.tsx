@@ -26,6 +26,7 @@ import {
   LayoutDashboard,
   X,
   Zap,
+  Bell,
 } from "lucide-react";
 import { useUiStore } from "@/store/ui";
 import { useAuthStore } from "@/store/auth";
@@ -104,6 +105,7 @@ export const Drawer = memo(function Drawer({ variant }: DrawerProps) {
         title: "Controllo",
         items: [
           { to: "/goals", label: "Obiettivi", icon: Target },
+          { to: "/notifications", label: "Notifiche", icon: Bell },
           { to: "/scheduled-tasks", label: "Attività", icon: CalendarClock },
           { to: "/content-calendar", label: "Calendario", icon: CalendarDays },
           { to: "/inbox", label: "Inbox", icon: MessageSquare },

@@ -716,6 +716,24 @@ export async function listIntegrationCredentials(
   return rows;
 }
 
+/**
+ * Credenziale singola **con** il segreto cifrato: serve solo al server che
+ * deve contattare il provider (test del canale, invio di notifiche).
+ */
+export async function getIntegrationCredential(
+  tenantId: string,
+  id: string,
+): Promise<IntegrationRow | null> {
+  const { rows } = await withTx((client) =>
+    client.query<IntegrationRow>(
+      `SELECT * FROM pipeline.integration_credential
+        WHERE id = $1 AND tenant_id = $2`,
+      [id, tenantId],
+    ),
+  );
+  return rows[0] ?? null;
+}
+
 export async function revokeIntegrationCredential(
   tenantId: string,
   id: string,

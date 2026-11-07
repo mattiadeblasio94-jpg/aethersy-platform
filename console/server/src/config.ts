@@ -107,6 +107,15 @@ export const config = {
   // `pipeline.integration_credential`. Se assente, le notifiche sono no-op.
   slackWebhookUrl: process.env.SLACK_WEBHOOK_URL ?? "",
 
+  // Versione e commit del deploy in corso: finiscono nella notifica di
+  // deploy che il BFF registra all'avvio e inoltra ai canali configurati.
+  appVersion: process.env.APP_VERSION ?? "dev",
+  deployCommit: process.env.DEPLOY_COMMIT ?? "",
+
+  // Token del hook di deploy: il processo di deploy chiama il BFF per
+  // registrare la notifica di deploy. Se assente, il hook e' disabilitato.
+  deployHookToken: process.env.DEPLOY_HOOK_TOKEN ?? "",
+
   // Chiave per cifrare a riposo i segreti delle integrazioni (AES-256-GCM).
   // Deve essere una stringa esadecimale di 64 caratteri (32 byte): `openssl rand -hex 32`.
   // Fallback su AP_ENCRYPTION_KEY (stessa chiave dello stack Activepieces) per

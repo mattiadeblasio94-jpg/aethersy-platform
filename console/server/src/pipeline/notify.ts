@@ -55,7 +55,7 @@ async function resolveSlackWebhook(tenantId: string): Promise<{ url: string; cha
 }
 
 /** Invia un payload a un webhook Slack con timeout e nessun retry. */
-async function postSlack(url: string, text: string): Promise<void> {
+export async function postSlack(url: string, text: string): Promise<void> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
@@ -119,4 +119,133 @@ export async function notifyRunDelivered(
     .filter(Boolean)
     .join("\n");
   return notifyText(tenantId, text);
+}
+
+/**
+ * Webhook in uscita generico (firma HMAC-SHA256).
+ *
+ * Il tenant registra un endpoint (CRM, automazione, Zapier, n8n): ogni evento
+ * della pipeline viene consegnato come POST JSON con le intestazioni
+ * `X-Aethersy-Event` e `X-Aethersy-Signature` (HMAC-SHA256 del corpo con il
+ * segreto condiviso). Il segreto non viene mai esposto al client.
+ */
+const GENERIC_PROVIDER = "webhook";
+
+async function resolveGenericWebhooks(
+  tenantId: string,
+): Promise<{ id: string; url: string; secret: string }[]> {
+  const { listIntegrationCredentials, getIntegrationCredential } = await import("./repo.js");
+  const creds = await listIntegrationCredentials(tenantId);
+  const out: { id: string; url: string; secret: string }[] = [];
+  for (const cred of creds) {
+    if (cred.provider !== GENERIC_PROVIDER || cred.status !== "active") continue;
+    try {
+      const full = await getIntegrationCredential(tenantId, cred.id);
+      if (!full) continue;
+      const raw = decryptSecret(full.secret_enc).trim();
+      if (!raw) continue;
+      // Il segreto cifrato del webhook e' un JSON {"url", "signingSecret"}.
+      let url = raw;
+      let secret = "";
+      if (raw.startsWith("{")) {
+        try {
+          const parsed = JSON.parse(raw) as { url?: string; signingSecret?: string };
+          url = (parsed.url ?? "").trim();
+          secret = parsed.signingSecret ?? "";
+        } catch {
+          continue;
+        }
+      }
+      if (!url) continue;
+      out.push({ id: cred.id, url, secret });
+    } catch {
+      // Segreto illeggibile: il canale viene scartato senza fermare gli altri.
+    }
+  }
+  return out;
+}
+
+async function postSigned(
+  url: string,
+  secret: string,
+  event: string,
+  payload: unknown,
+): Promise<void> {
+  const body = JSON.stringify({ event, payload, sent_at: new Date().toISOString() });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "X-Aethersy-Event": event,
+    };
+    if (secret) {
+      const key = await import("node:crypto");
+      const signature = key.createHmac("sha256", secret).update(body).digest("hex");
+      headers["X-Aethersy-Signature"] = `sha256=${signature}`;
+    }
+    const res = await fetch(url, { method: "POST", headers, body, signal: controller.signal });
+    if (!res.ok) throw new Error(`webhook ha risposto ${res.status}`);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Consegna un evento a tutti i webhook in uscita del tenant (best-effort). */
+export async function notifyWebhookEvent(
+  tenantId: string,
+  event: string,
+  payload: unknown,
+): Promise<NotifyResult> {
+  const targets = await resolveGenericWebhooks(tenantId);
+  if (targets.length === 0) return { sent: false, channel: null };
+  let sent = false;
+  let lastError: string | undefined;
+  for (const target of targets) {
+    try {
+      await postSigned(target.url, target.secret, event, payload);
+      sent = true;
+    } catch (error) {
+      lastError = (error as Error).message;
+    }
+  }
+  return { sent, channel: sent ? "tenant" : "tenant", error: lastError };
+}
+
+/** Host del webhook, senza percorso ne' query: dato mostrabile in UI. */
+export function safeHost(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return "";
+  }
+}
+
+/** Invia un evento di prova a un webhook in uscita (secret cifrato JSON). */
+export async function postWebhookTest(encryptedPayload: string, message: string): Promise<void> {
+  const raw = decryptSecret(encryptedPayload).trim();
+  let url = raw;
+  let secret = "";
+  if (raw.startsWith("{")) {
+    const parsed = JSON.parse(raw) as { url?: string; signingSecret?: string };
+    url = (parsed.url ?? "").trim();
+    secret = parsed.signingSecret ?? "";
+  }
+  if (!url) throw new Error("URL del webhook mancante");
+  await postSigned(url, secret, "test", { message, sent_at: new Date().toISOString() });
+}
+
+/**
+ * Canale di stack per le notizie di piattaforma (deploy): usa il webhook
+ * Slack dell'ambiente, cosi' l'operatore riceve una sola notifica anche se
+ * i tenant hanno canali propri.
+ */
+export async function notifyStackChannel(text: string): Promise<NotifyResult> {
+  if (!config.slackWebhookUrl) return { sent: false, channel: null };
+  try {
+    await postSlack(config.slackWebhookUrl, text);
+    return { sent: true, channel: "env" };
+  } catch (err) {
+    return { sent: false, channel: "env", error: (err as Error).message };
+  }
 }

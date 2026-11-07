@@ -519,8 +519,32 @@ export const platformApi = {
   updateLead: (id: string, body: { status?: string; note?: string }) =>
     http.patch<LeadItem>(`/api/pipeline/leads/${encodeURIComponent(id)}`, body),
 
-  // --- Integrazioni (canali OAuth collegati) --------------------------------
+  // --- Notifiche in-app ------------------------------------------------------
+  getNotifications: () =>
+    http.get<{ notifications: NotificationItem[]; unread: number }>("/api/platform/notifications"),
+  markNotificationRead: (id: string) =>
+    http.post<{ ok: boolean }>(`/api/platform/notifications/${encodeURIComponent(id)}/read`, {}),
+  markAllNotificationsRead: () =>
+    http.post<{ ok: boolean; updated: number }>("/api/platform/notifications/read-all", {}),
+
+  // --- Integrazioni (canali configurati sul tenant) -------------------------
   getIntegrations: () => http.get<IntegrationItem[]>("/api/pipeline/integrations"),
+  saveIntegration: (body: {
+    provider: string;
+    kind?: "oauth" | "webhook" | "api_key";
+    label?: string;
+    secret?: string;
+    scopes?: string[];
+  }) => http.post<IntegrationItem>("/api/pipeline/integrations", body),
+  testIntegration: (id: string, message?: string) =>
+    http.post<{ ok: boolean; provider: string; status: number }>(
+      `/api/pipeline/integrations/${encodeURIComponent(id)}/test`,
+      message ? { message } : {},
+    ),
+  revokeIntegration: (id: string) =>
+    http.post<{ ok: boolean }>(`/api/pipeline/integrations/${encodeURIComponent(id)}/revoke`, {}),
+  saveWebhook: (body: { url: string; signingSecret?: string; label?: string }) =>
+    http.post<IntegrationItem>("/api/pipeline/webhooks", body),
 
   // --- Agenti specialistici e task (Universal Builder Platform) --------------
   getBuilderAgents: () => http.get<{ available: string[] }>("/api/builder/agents/available"),
@@ -660,6 +684,20 @@ export interface LeadItem {
   meta: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface NotificationItem {
+  id: string;
+  scope: "tenant" | "platform";
+  kind: string;
+  severity: "info" | "success" | "warning" | "critical";
+  title: string;
+  body: string;
+  link: string | null;
+  meta: Record<string, unknown>;
+  read: boolean;
+  readAt: string | null;
+  createdAt: string;
 }
 
 export interface IntegrationItem {

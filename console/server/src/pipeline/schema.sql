@@ -178,3 +178,29 @@ CREATE INDEX IF NOT EXISTS schedule_tenant_status
   ON pipeline.schedule(tenant_id, status, run_at);
 CREATE INDEX IF NOT EXISTS schedule_tenant_time
   ON pipeline.schedule(tenant_id, created_at DESC);
+
+-- Notifiche in-app (P0.8) ------------------------------------------------------
+-- Eventi reali mostrati in piattaforma: lead, consegne, deploy, errori.
+-- `scope = 'platform'` sono notizie di piattaforma (es. deploy) visibili a
+-- tutti i tenant; `scope = 'tenant'` sono notizie del singolo tenant.
+CREATE TABLE IF NOT EXISTS pipeline.notification (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id  uuid REFERENCES metering.tenant(id) ON DELETE CASCADE,
+  scope      text NOT NULL DEFAULT 'tenant',
+  kind       text NOT NULL,
+  severity   text NOT NULL DEFAULT 'info',
+  title      text NOT NULL,
+  body       text NOT NULL DEFAULT '',
+  link       text,
+  meta       jsonb NOT NULL DEFAULT '{}'::jsonb,
+  read_at    timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT notification_scope CHECK (scope IN ('tenant', 'platform')),
+  CONSTRAINT notification_severity CHECK (severity IN ('info', 'success', 'warning', 'critical'))
+);
+CREATE INDEX IF NOT EXISTS notification_tenant_time
+  ON pipeline.notification(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS notification_scope_time
+  ON pipeline.notification(scope, created_at DESC);
+CREATE INDEX IF NOT EXISTS notification_unread
+  ON pipeline.notification(created_at DESC) WHERE read_at IS NULL;

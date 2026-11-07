@@ -37,6 +37,7 @@ export const realKeys = {
   products: ["real", "products"] as const,
   leads: ["real", "leads"] as const,
   integrations: ["real", "integrations"] as const,
+  notifications: ["real", "notifications"] as const,
   builderAgents: ["real", "builder-agents"] as const,
   builderTasks: ["real", "builder-tasks"] as const,
   builderProjects: ["real", "builder-projects"] as const,
@@ -526,8 +527,70 @@ export function useUpdateLead() {
 
 // --- Integrazioni (canali OAuth/webhook collegati) ---------------------------
 
+export function useNotifications() {
+  return useQuery({
+    queryKey: realKeys.notifications,
+    queryFn: () => platformApi.getNotifications(),
+  });
+}
+
+export function useMarkNotificationRead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => platformApi.markNotificationRead(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: realKeys.notifications }),
+  });
+}
+
+export function useMarkAllNotificationsRead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => platformApi.markAllNotificationsRead(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: realKeys.notifications }),
+  });
+}
+
 export function useIntegrations() {
   return useQuery({ queryKey: realKeys.integrations, queryFn: () => platformApi.getIntegrations() });
+}
+
+export function useSaveIntegration() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      provider: string;
+      kind?: "oauth" | "webhook" | "api_key";
+      label?: string;
+      secret?: string;
+      scopes?: string[];
+    }) => platformApi.saveIntegration(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: realKeys.integrations }),
+  });
+}
+
+export function useSaveWebhook() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { url: string; signingSecret?: string; label?: string }) =>
+      platformApi.saveWebhook(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: realKeys.integrations }),
+  });
+}
+
+export function useTestIntegration() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string; message?: string }) => platformApi.testIntegration(input.id, input.message),
+    onSuccess: () => qc.invalidateQueries({ queryKey: realKeys.integrations }),
+  });
+}
+
+export function useRevokeIntegration() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => platformApi.revokeIntegration(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: realKeys.integrations }),
+  });
 }
 
 // --- Agenti specialistici e task (Universal Builder Platform) ----------------

@@ -171,6 +171,12 @@ services:
       - AP_ENCRYPTION_KEY=${AP_ENCRYPTION_KEY}
       - BUILDER_SANDBOX_IMAGE=${BUILDER_SANDBOX_IMAGE:-aethersy/builder-sandbox:0.1.0}
       - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
+      # Notifica di deploy: versione e commit finiscono nella notifica in-app
+      # e nel messaggio Slack generati all'avvio del BFF.
+      - APP_VERSION=${APP_VERSION:-dev}
+      - DEPLOY_COMMIT=${DEPLOY_COMMIT:-}
+      - DEPLOY_SERVICES=${DEPLOY_SERVICES:-console, platform}
+      - DEPLOY_HOOK_TOKEN=${DEPLOY_HOOK_TOKEN:-}
     # Il builder esegue i task degli agenti in container isolati: serve il socket
     # Docker per crearli (vedi console/server/src/builder/agents/sandbox.ts).
     volumes:

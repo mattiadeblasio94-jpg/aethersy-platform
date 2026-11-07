@@ -315,6 +315,28 @@ export async function registerPlatformRoutes(app: FastifyInstance): Promise<void
       if (!created) {
         return reply.code(404).send({ code: "NOT_FOUND", message: "Sito non trovato" });
       }
+      const { publishNotification } = await import("../pipeline/notifications.js");
+      const { notifyWebhookEvent } = await import("../pipeline/notify.js");
+      await publishNotification({
+        tenantId: created.tenantId,
+        kind: "lead.created",
+        severity: "success",
+        title: `Nuovo lead dal sito: ${typeof body.name === "string" && body.name ? body.name : typeof body.email === "string" ? body.email : "senza nome"}`,
+        body:
+          typeof body.message === "string" && body.message
+            ? body.message.slice(0, 300)
+            : "Richiesta dal modulo contatti del sito pubblicato.",
+        link: "/website",
+        meta: { runId: request.params.runId, email: body.email ?? null },
+      }).catch(() => undefined);
+      await notifyWebhookEvent(created.tenantId, "lead.created", {
+        id: created.id,
+        source: "website",
+        name: typeof body.name === "string" ? body.name : null,
+        email: typeof body.email === "string" ? body.email : null,
+        message: typeof body.message === "string" ? body.message : null,
+        site_url: `/api/platform/sites/${request.params.runId}`,
+      }).catch(() => undefined);
       return reply.code(201).send({
         id: created.id,
         message: "Richiesta inviata. Rispondiamo entro 24 ore.",
@@ -324,6 +346,60 @@ export async function registerPlatformRoutes(app: FastifyInstance): Promise<void
       request.log.warn({ error: message }, "lead dal sito rifiutato");
       return reply.code(400).send({ code: "BAD_REQUEST", message });
     }
+  });
+
+  // ------------------------------------------------------------ Notifiche --
+  // Notifiche in-app reali: eventi di pipeline, lead e deploy. La lista
+  // contiene le notifiche del tenant piu' quelle di piattaforma.
+
+  app.get("/api/platform/notifications", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+    const { listNotifications, unreadNotificationCount } = await import(
+      "../pipeline/notifications.js"
+    );
+    const query = (request.query ?? {}) as { limit?: string };
+    const limit = query.limit ? Math.min(Number.parseInt(query.limit, 10) || 50, 200) : 50;
+    const [notifications, unread] = await Promise.all([
+      listNotifications(tenant.tenantId, limit),
+      unreadNotificationCount(tenant.tenantId),
+    ]);
+    return {
+      notifications: notifications.map((item) => ({
+        id: item.id,
+        scope: item.scope,
+        kind: item.kind,
+        severity: item.severity,
+        title: item.title,
+        body: item.body,
+        link: item.link,
+        meta: item.meta,
+        read: item.read_at !== null,
+        readAt: item.read_at,
+        createdAt: item.created_at,
+      })),
+      unread,
+    };
+  });
+
+  app.post("/api/platform/notifications/:id/read", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+    const { id } = request.params as { id: string };
+    const { markNotificationRead } = await import("../pipeline/notifications.js");
+    const ok = await markNotificationRead(tenant.tenantId, id);
+    if (!ok) {
+      return reply.code(404).send({ code: "NOT_FOUND", message: "Notifica non trovata" });
+    }
+    return { ok: true };
+  });
+
+  app.post("/api/platform/notifications/read-all", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+    const { markAllNotificationsRead } = await import("../pipeline/notifications.js");
+    const updated = await markAllNotificationsRead(tenant.tenantId);
+    return { ok: true, updated };
   });
 
   // ------------------------------------------------------- account/FAQ ----

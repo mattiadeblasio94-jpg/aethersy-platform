@@ -1,9 +1,9 @@
 import { memo, useMemo } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Bell, CreditCard, LogOut, Menu, User, ChevronDown } from "lucide-react";
+import { Bell, CalendarClock, CreditCard, LogOut, Menu, User, ChevronDown } from "lucide-react";
 import { useUiStore } from "@/store/ui";
 import { useAuthStore } from "@/store/auth";
-import { useBalance, useSchedule } from "@/lib/platform-queries";
+import { useBalance, useNotifications, useSchedule } from "@/lib/platform-queries";
 import { ThemeToggle } from "@/components/common/ThemeToggle";
 import { Button } from "@/components/ui/Button";
 import { Dropdown, DropdownItem } from "@/components/ui/Dropdown";
@@ -26,6 +26,9 @@ export const Header = memo(function Header() {
     () => (schedule.data ?? []).filter((item) => item.status === "scheduled").length,
     [schedule.data],
   );
+  // Notifiche in-app: badge reale sulle notifiche non lette.
+  const notifications = useNotifications();
+  const unread = notifications.data?.unread ?? 0;
   const isMarketing = location.pathname === "/landing";
 
   const pageTitle = useMemo(() => {
@@ -40,6 +43,7 @@ export const Header = memo(function Header() {
     if (path.startsWith("/ads")) return "Annunci";
     if (path.startsWith("/products")) return "Prodotti";
     if (path.startsWith("/analytics")) return "Analisi";
+    if (path === "/notifications") return "Notifiche";
     if (path.startsWith("/settings")) return "Impostazioni";
     if (path === "/help") return "Aiuto";
     if (path === "/opportunities") return "Opportunità";
@@ -144,14 +148,29 @@ export const Header = memo(function Header() {
         <ThemeToggle />
 
         <Link
-          to="/scheduled-tasks"
-          aria-label={
-            pending > 0 ? `Attività pianificate, ${pending} da eseguire` : "Attività pianificate"
-          }
-          className="relative inline-flex h-11 w-11 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary lg:hidden"
+          to="/notifications"
+          aria-label={unread > 0 ? `Notifiche, ${unread} non lette` : "Notifiche"}
+          className="relative inline-flex h-11 w-11 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
         >
           <Bell className="h-5 w-5" aria-hidden="true" />
-          {pending > 0 && (
+          {unread > 0 && (
+            <span
+              className={cn(
+                "absolute right-2 top-2 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-tertiary px-1 text-[10px] font-bold text-accent-foreground",
+              )}
+            >
+              {unread > 9 ? "9+" : unread}
+            </span>
+          )}
+        </Link>
+
+        {pending > 0 ? (
+          <Link
+            to="/scheduled-tasks"
+            aria-label={`Attività pianificate, ${pending} da eseguire`}
+            className="relative inline-flex h-11 w-11 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary lg:hidden"
+          >
+            <CalendarClock className="h-5 w-5" aria-hidden="true" />
             <span
               className={cn(
                 "absolute right-2 top-2 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-tertiary px-1 text-[10px] font-bold text-accent-foreground",
@@ -159,8 +178,8 @@ export const Header = memo(function Header() {
             >
               {pending > 9 ? "9+" : pending}
             </span>
-          )}
-        </Link>
+          </Link>
+        ) : null}
 
         {user && (
           <Dropdown

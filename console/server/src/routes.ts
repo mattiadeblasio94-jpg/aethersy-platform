@@ -1159,7 +1159,23 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(409).send({ code: "INVALID_TRANSITION", message: "Consegna non ammessa" });
     }
     // Canale outbound (P0.6): notifica best-effort, non blocca la consegna.
-    const { notifyRunDelivered } = await import("./pipeline/notify.js");
+    const { publishNotification } = await import("./pipeline/notifications.js");
+    const { notifyRunDelivered, notifyWebhookEvent } = await import("./pipeline/notify.js");
+    await publishNotification({
+      tenantId: tenant.tenantId,
+      kind: "run.delivered",
+      severity: "success",
+      title: `Run consegnata: ${run.title || run.stage}`,
+      body: `Stadio ${run.stage}: i deliverable sono disponibili in Libreria.`,
+      link: "/website",
+      meta: { runId: run.id, stage: run.stage },
+    }).catch(() => undefined);
+    await notifyWebhookEvent(tenant.tenantId, "run.delivered", {
+      id: run.id,
+      stage: run.stage,
+      title: run.title,
+      site_url: `/api/platform/sites/${run.id}`,
+    }).catch(() => undefined);
     const fallback: NotifyResult = { sent: false, channel: null };
     const notified = await notifyRunDelivered(tenant.tenantId, run).catch(() => fallback);
     if (!notified.sent && notified.error) {
@@ -1316,7 +1332,14 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       payload: body,
     });
     // Canale outbound (P0.6): inoltro best-effort del lead, non blocca la 201.
-    const { notifyLeadCreated } = await import("./pipeline/notify.js");
+    const { notifyLeadCreated, notifyWebhookEvent } = await import("./pipeline/notify.js");
+    await notifyWebhookEvent(tenant.tenantId, "lead.created", {
+      id: created.id,
+      source: body.source ?? "website",
+      name: body.name ?? null,
+      email: body.email ?? null,
+      message: body.message ?? null,
+    }).catch(() => undefined);
     const lead = await getLead(tenant.tenantId, created.id);
     if (lead) {
       const fallback: NotifyResult = { sent: false, channel: null };
@@ -1378,7 +1401,79 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     const tenant = await pipelineTenant(request, reply);
     if (!tenant) return;
     const { listIntegrationCredentials } = await import("./pipeline/repo.js");
-    return listIntegrationCredentials(tenant.tenantId);
+    const creds = await listIntegrationCredentials(tenant.tenantId);
+    // Contratto camelCase come le altre rotte platform (niente segreto).
+    return creds.map((c) => ({
+      id: c.id,
+      provider: c.provider,
+      kind: c.kind,
+      label: c.label,
+      scopes: c.scopes,
+      status: c.status,
+      meta: c.meta,
+      createdAt: c.created_at,
+      updatedAt: c.updated_at,
+    }));
+  });
+
+  /**
+   * Un webhook in uscita deve essere https. Sono ammessi http solo su host
+   * privati o di loopback (endpoint interni del tenant o del cluster).
+   */
+  function isAllowedWebhookUrl(raw: string): boolean {
+    let parsed: URL;
+    try {
+      parsed = new URL(raw);
+    } catch {
+      return false;
+    }
+    if (parsed.protocol === "https:") return true;
+    if (parsed.protocol !== "http:") return false;
+    const host = parsed.hostname;
+    if (host === "localhost" || host === "127.0.0.1" || host === "::1") return true;
+    if (/^10\./.test(host)) return true;
+    if (/^192\.168\./.test(host)) return true;
+    if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
+    return false;
+  }
+
+  /**
+   * POST /api/pipeline/webhooks -> registra un webhook in uscita del tenant.
+   * URL e secret di firma sono cifrati insieme (AES-256-GCM) e non tornano
+   * mai al client.
+   */
+  app.post("/api/pipeline/webhooks", async (request, reply) => {
+    const tenant = await pipelineTenant(request, reply);
+    if (!tenant) return;
+    const body = (request.body ?? {}) as { url?: string; signingSecret?: string; label?: string };
+    const url = (body.url ?? "").trim();
+    if (!isAllowedWebhookUrl(url)) {
+      return reply.code(400).send({
+        code: "BAD_REQUEST",
+        message: "URL non ammesso: serve https, oppure http su host privati o di loopback.",
+      });
+    }
+    const { hasSecretsKey, encryptSecret } = await import("./pipeline/secrets.js");
+    if (!hasSecretsKey()) {
+      return reply.code(503).send({
+        code: "SECRETS_KEY_MISSING",
+        message: "CONSOLE_SECRETS_KEY non configurata: impossibile cifrare il segreto",
+      });
+    }
+    const { saveIntegrationCredential } = await import("./pipeline/repo.js");
+    const { safeHost } = await import("./pipeline/notify.js");
+    const secret = JSON.stringify({ url, signingSecret: body.signingSecret ?? "" });
+    const saved = await saveIntegrationCredential({
+      tenantId: tenant.tenantId,
+      provider: "webhook",
+      kind: "webhook",
+      label: body.label ?? "Webhook",
+      secretEnc: encryptSecret(secret),
+      scopes: ["lead.created", "run.delivered"],
+      meta: { host: safeHost(url) },
+    });
+    const { secret_enc: _omit, created_at, updated_at, ...rest } = saved;
+    return reply.code(201).send({ ...rest, createdAt: created_at, updatedAt: updated_at });
   });
 
   app.post("/api/pipeline/integrations", async (request, reply) => {
@@ -1412,8 +1507,73 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       scopes: body.scopes,
       meta: body.meta,
     });
-    const { secret_enc: _omit, ...safe } = saved;
-    return reply.code(201).send(safe);
+    const { secret_enc: _omit, created_at, updated_at, ...rest } = saved;
+    return reply.code(201).send({
+      ...rest,
+      createdAt: created_at,
+      updatedAt: updated_at,
+    });
+  });
+
+  /**
+   * POST /api/pipeline/integrations/:id/test -> invia un messaggio di prova
+   * sul canale configurato. Il segreto non torna mai al client: si decifra
+   * lato server, si contatta il provider e si restituisce solo l'esito.
+   */
+  app.post("/api/pipeline/integrations/:id/test", async (request, reply) => {
+    const tenant = await pipelineTenant(request, reply);
+    if (!tenant) return;
+    const { id } = request.params as { id: string };
+    const { getIntegrationCredential } = await import("./pipeline/repo.js");
+    const { decryptSecret } = await import("./pipeline/secrets.js");
+    const cred = await getIntegrationCredential(tenant.tenantId, id);
+    if (!cred) {
+      return reply.code(404).send({ code: "NOT_FOUND", message: "Integrazione non trovata" });
+    }
+    let secret: string;
+    try {
+      secret = decryptSecret(cred.secret_enc).trim();
+    } catch (error) {
+      request.log.warn({ error: (error as Error).message }, "segreto integrazione illeggibile");
+      return reply
+        .code(409)
+        .send({ code: "SECRET_UNREADABLE", message: "Il segreto salvato non e' decifrabile: reinseriscilo." });
+    }
+    if (!secret) {
+      return reply.code(409).send({
+        code: "SECRET_MISSING",
+        message: "L'integrazione non ha un segreto: salvane uno prima di testare.",
+      });
+    }
+    const body = (request.body ?? {}) as { message?: string };
+    const message = (body.message ?? "").trim() || ":satellite: Test Aethersy: integrazione Slack attiva.";
+    if (cred.provider === "slack") {
+      const { postSlack } = await import("./pipeline/notify.js");
+      try {
+        await postSlack(secret, message);
+        return { ok: true, provider: cred.provider, status: 200 };
+      } catch (error) {
+        return reply
+          .code(502)
+          .send({ code: "PROVIDER_ERROR", message: (error as Error).message });
+      }
+    }
+    if (cred.provider === "webhook") {
+      const { postWebhookTest } = await import("./pipeline/notify.js");
+      try {
+        // Al test passa il blob cifrato: la decifratura avviene dentro.
+        await postWebhookTest(cred.secret_enc, message || "Aethersy - evento di prova");
+        return { ok: true, provider: cred.provider, status: 200 };
+      } catch (error) {
+        return reply
+          .code(502)
+          .send({ code: "PROVIDER_ERROR", message: (error as Error).message });
+      }
+    }
+    return reply.code(400).send({
+      code: "UNSUPPORTED_PROVIDER",
+      message: `Provider ${cred.provider}: test non supportato.`,
+    });
   });
 
   app.post("/api/pipeline/integrations/:id/revoke", async (request, reply) => {
@@ -1424,6 +1584,65 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     const ok = await revokeIntegrationCredential(tenant.tenantId, id);
     if (!ok) return reply.code(404).send({ code: "NOT_FOUND", message: "Integrazione inesistente" });
     return { ok: true };
+  });
+
+  /**
+   * POST /api/internal/deploys — hook di deploy.
+   *
+   * Chiamato dal processo di deploy dopo il riavvio dei container: registra
+   * in piattaforma la notifica di deploy e la inoltra ai canali configurati
+   * (Slack di stack, webhook in uscita dei tenant). Il token vive solo
+   * nell'env del VPS.
+   */
+  app.post("/api/internal/deploys", async (request, reply) => {
+    const { config } = await import("./config.js");
+    if (!config.deployHookToken) {
+      return reply
+        .code(503)
+        .send({ code: "DEPLOY_HOOK_DISABLED", message: "DEPLOY_HOOK_TOKEN non configurato" });
+    }
+    const provided = request.headers["x-deploy-token"];
+    const token = typeof provided === "string" ? provided : "";
+    const crypto = await import("node:crypto");
+    const a = Buffer.from(token);
+    const b = Buffer.from(config.deployHookToken);
+    const valid = a.length === b.length && crypto.timingSafeEqual(a, b);
+    if (!valid) {
+      return reply.code(401).send({ code: "UNAUTHORIZED", message: "Token deploy non valido" });
+    }
+    const body = (request.body ?? {}) as {
+      version?: string;
+      commit?: string;
+      services?: string;
+      note?: string;
+    };
+    const version = (body.version ?? config.appVersion ?? "dev").trim();
+    const commit = (body.commit ?? config.deployCommit ?? "").trim();
+    const services = (body.services ?? "console, platform").trim();
+    const details = [
+      `Servizi: ${services}`,
+      commit ? `Commit: ${commit}` : null,
+      body.note ? `Nota: ${body.note}` : null,
+      `Quando: ${new Date().toISOString()}`,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    const { publishNotification } = await import("./pipeline/notifications.js");
+    const { notification, outbound } = await publishNotification({
+      scope: "platform",
+      kind: "deploy",
+      severity: "info",
+      title: `Deploy Aethersy ${version}`,
+      body: details,
+      link: "/notifications",
+      meta: { version, commit, services, note: body.note ?? null },
+    });
+    return reply.code(201).send({
+      id: notification.id,
+      title: notification.title,
+      body: notification.body,
+      outbound,
+    });
   });
 
   // ------------------------------------------ Piattaforme / Social (P1.2) ----
