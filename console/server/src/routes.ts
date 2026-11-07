@@ -10,6 +10,14 @@ import { selectGenModel } from "./ai-gen/select.js";
 import { registerPlatformRoutes } from "./platform/routes.js";
 import { requireMeteredTenant } from "./platform/guard.js";
 import { registerBusinessRoutes } from "./business/routes.js";
+import {
+  createOAuthState,
+  OAUTH_STATE_COOKIE,
+  oauthTargetUrl,
+  verifyOAuthState,
+  type OAuthTarget,
+} from "./auth/oauth-state.js";
+import { loadIdentityCredential, saveIdentityCredential } from "./auth/identity-store.js";
 import type { NotifyResult } from "./pipeline/notify.js";
 
 // Rotte BFF:
@@ -35,6 +43,22 @@ function requireSession(request: FastifyRequest, reply: FastifyReply): Session |
     return null;
   }
   return session;
+}
+
+/**
+ * Token Activepieces della sessione. Le rotte che parlano con Activepieces
+ * (/api/ap/*, attiva/pausa agente) non possono funzionare con una sessione
+ * social aperta su un account di cui il BFF non conosce la password: in quel
+ * caso rispondono 401 con un messaggio che dice come recuperare l'accesso.
+ */
+function requireApToken(session: Session, reply: FastifyReply): string | null {
+  if (session.token) return session.token;
+  reply.code(401).send({
+    code: "AP_TOKEN_REQUIRED",
+    message:
+      "Le funzioni Activepieces richiedono l'accesso con email e password: accedi con la password per uscirne.",
+  });
+  return null;
 }
 
 /**
@@ -124,6 +148,9 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
           newsLetter: false,
         }),
       });
+      // La password e' archiviata cifrata: serve per rientrare come l'utente
+      // quando questi accede con Google/GitHub (e ottenere il token AP).
+      await saveIdentityCredential(email, password, "email", created?.id ?? null);
       return { ok: true, id: created?.id ?? null, email };
     } catch (err) {
       if (err instanceof ApError) {
@@ -134,11 +161,95 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ------------------------------------------------ OAuth social login -----
-  app.get("/api/auth/social/google", async (_request, reply) => {
+
+  /**
+   * Account Activepieces per un accesso social.
+   *
+   * Ordine delle prove:
+   *  1. credenziale archiviata (l'utente si era registrato dal BFF): sign-in
+   *     con la password nota -> token Activepieces completo;
+   *  2. account inesistente: sign-up con password casuale -> la risposta
+   *     contiene gia' il token, che viene archiviato cifrato per i prossimi
+   *     accessi;
+   *  3. account gia' esistente senza credenziale archiviata: si apre comunque
+   *     la sessione (senza token Activepieces). La piattaforma funziona
+   *     (tenant risolto via email); le rotte /api/ap/* risponderanno 401.
+   */
+  async function resolveSocialAccount(params: {
+    email: string;
+    firstName: string;
+    lastName: string;
+    provider: "google" | "github";
+  }): Promise<{ token: string | null; apUserId: string | null; apResponse: any }> {
+    const { email, firstName, lastName, provider } = params;
+
+    const stored = await loadIdentityCredential(email);
+    if (stored?.password) {
+      try {
+        const signedIn = await apFetch<any>("/api/v1/authentication/sign-in", {
+          method: "POST",
+          body: JSON.stringify({ email, password: stored.password }),
+        });
+        if (signedIn?.token) {
+          await saveIdentityCredential(email, null, provider, signedIn.id ?? stored.apUserId);
+          return { token: signedIn.token, apUserId: signedIn.id ?? stored.apUserId, apResponse: signedIn };
+        }
+      } catch {
+        // Password archiviata non piu' valida (es. cambiata nella UI
+        // Activepieces): si prosegue con sign-up o sessione senza token.
+      }
+    }
+
+    const randomPassword = `Aa1${crypto.randomUUID().replace(/-/g, "")}`;
+    try {
+      const created = await apFetch<any>("/api/v1/authentication/sign-up", {
+        method: "POST",
+        body: JSON.stringify({
+          email,
+          password: randomPassword,
+          firstName,
+          lastName,
+          trackEvents: false,
+          newsLetter: false,
+        }),
+      });
+      if (created?.token) {
+        await saveIdentityCredential(email, randomPassword, provider, created.id ?? null);
+        return { token: created.token, apUserId: created.id ?? null, apResponse: created };
+      }
+      return { token: null, apUserId: created?.id ?? null, apResponse: created };
+    } catch (err) {
+      if (err instanceof ApError && err.status === 400) {
+        // Account gia' esistente: senza password nota non c'e' token, ma la
+        // sessione della piattaforma resta valida.
+        return { token: null, apUserId: stored?.apUserId ?? null, apResponse: null };
+      }
+      throw err;
+    }
+  }
+
+  /** Cookie di stato OAuth: breve durata, httpOnly, path limitato. */
+  function setOAuthStateCookie(reply: FastifyReply, nonce: string): void {
+    reply.setCookie(OAUTH_STATE_COOKIE, nonce, {
+      path: "/api/auth/social",
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 600,
+      ...(config.cookieDomain ? { domain: config.cookieDomain } : {}),
+    });
+  }
+
+  app.get("/api/auth/social/google", async (request, reply) => {
     const { googleClientId, googleRedirectUri } = config;
     if (!googleClientId) {
       return reply.code(503).send({ code: "OAUTH_NOT_CONFIGURED", message: "Google OAuth non configurato" });
     }
+
+    const requested = (request.query as { target?: string } | undefined)?.target;
+    const target: OAuthTarget = requested === "console" ? "console" : "platform";
+    const { state, nonce } = createOAuthState(target);
+    setOAuthStateCookie(reply, nonce);
 
     const params = new URLSearchParams({
       client_id: googleClientId,
@@ -147,6 +258,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       scope: "openid email profile",
       access_type: "offline",
       prompt: "consent",
+      state,
     });
 
     return reply.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
@@ -158,12 +270,25 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(503).send({ code: "OAUTH_NOT_CONFIGURED", message: "Google OAuth non configurato" });
     }
 
-    const { code, error } = (request.query ?? {}) as { code?: string; error?: string };
+    const { code, error, state } = (request.query ?? {}) as {
+      code?: string;
+      error?: string;
+      state?: string;
+    };
     if (error) {
       return reply.code(400).send({ code: "OAUTH_ERROR", message: `Google OAuth: ${error}` });
     }
     if (!code) {
       return reply.code(400).send({ code: "BAD_REQUEST", message: "Codice autorizzazione mancante" });
+    }
+
+    // Verifica anti-CSRF: lo state firmato deve combaciare con il cookie.
+    const target = verifyOAuthState(state, request.cookies[OAUTH_STATE_COOKIE]);
+    if (!target) {
+      return reply.code(400).send({
+        code: "OAUTH_STATE_INVALID",
+        message: "Sessione OAuth non valida o scaduta: riavvia il login.",
+      });
     }
 
     // 1. Scambia il codice per i token
@@ -213,75 +338,61 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ code: "NO_EMAIL", message: "Nessuna email associata all'account Google" });
     }
 
-    // 3. Prova il login su Activepieces con l'email (se l'utente esiste già)
-    let apResponse: any;
+    // 3. Risolve l'account Activepieces (token completo o sessione senza token).
+    let account: { token: string | null; apUserId: string | null; apResponse: any };
     try {
-      apResponse = await apFetch<any>("/api/v1/authentication/sign-in", {
-        method: "POST",
-        body: JSON.stringify({ email, password: "" }),
+      account = await resolveSocialAccount({
+        email,
+        firstName,
+        lastName,
+        provider: "google",
       });
     } catch (err) {
-      // Se le credenziali non esistono, registra l'utente su Activepieces
-      if (err instanceof ApError && err.status === 401) {
-        try {
-          const created = await apFetch<any>("/api/v1/authentication/sign-up", {
-            method: "POST",
-            body: JSON.stringify({
-              email,
-              password: crypto.randomUUID(),
-              firstName,
-              lastName,
-              trackEvents: false,
-              newsLetter: false,
-            }),
-          });
-          apResponse = await apFetch<any>("/api/v1/authentication/sign-in", {
-            method: "POST",
-            body: JSON.stringify({ email, password: "" }),
-          });
-        } catch (err2) {
-          return reply.code(502).send({ code: "SIGN_UP_FAILED", message: (err2 as Error).message });
-        }
-      } else {
-        return reply.code(502).send({ code: "SIGN_IN_FAILED", message: (err as Error).message });
-      }
+      return reply.code(502).send({ code: "SIGN_UP_FAILED", message: (err as Error).message });
     }
 
-    if (!apResponse?.token) {
-      return reply.code(502).send({ code: "BAD_GATEWAY", message: "Risposta di sign-in inattesa" });
-    }
-
+    const apResponse = account.apResponse;
     const session: Session = {
-      token: apResponse.token,
+      token: account.token,
       user: {
-        id: apResponse.id,
-        email: apResponse.email,
-        firstName: apResponse.firstName ?? firstName,
-        lastName: apResponse.lastName ?? lastName,
-        platformRole: apResponse.platformRole,
-        verified: apResponse.verified,
-        projectId: apResponse.projectId ?? null,
+        id: apResponse?.id ?? account.apUserId ?? email,
+        email: apResponse?.email ?? email,
+        firstName: apResponse?.firstName ?? firstName,
+        lastName: apResponse?.lastName ?? lastName,
+        platformRole: apResponse?.platformRole ?? "MEMBER",
+        verified: apResponse?.verified ?? true,
+        projectId: apResponse?.projectId ?? null,
       },
       exp: Math.floor(Date.now() / 1000) + config.cookieMaxAgeSec,
     };
     setSessionCookie(reply, session);
+    reply.clearCookie(OAUTH_STATE_COOKIE, {
+      path: "/api/auth/social",
+      ...(config.cookieDomain ? { domain: config.cookieDomain } : {}),
+    });
 
-    // Redirect al frontend (dashboard Platform o Console)
-    return reply.redirect("/");
+    // Redirect al frontend richiesto (allowlist chiusa: platform | console).
+    return reply.redirect(oauthTargetUrl(target));
   });
 
   // ------------------------------------------------ OAuth GitHub login -----
-  app.get("/api/auth/social/github", async (_request, reply) => {
+  app.get("/api/auth/social/github", async (request, reply) => {
     const { githubClientId, githubRedirectUri } = config;
     if (!githubClientId) {
       return reply.code(503).send({ code: "OAUTH_NOT_CONFIGURED", message: "GitHub OAuth non configurato" });
     }
+
+    const requested = (request.query as { target?: string } | undefined)?.target;
+    const target: OAuthTarget = requested === "console" ? "console" : "platform";
+    const { state, nonce } = createOAuthState(target);
+    setOAuthStateCookie(reply, nonce);
 
     const params = new URLSearchParams({
       client_id: githubClientId,
       redirect_uri: githubRedirectUri,
       scope: "read:user user:email",
       allow_signup: "true",
+      state,
     });
 
     return reply.redirect(`https://github.com/login/oauth/authorize?${params.toString()}`);
@@ -293,12 +404,25 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(503).send({ code: "OAUTH_NOT_CONFIGURED", message: "GitHub OAuth non configurato" });
     }
 
-    const { code, error } = (request.query ?? {}) as { code?: string; error?: string };
+    const { code, error, state } = (request.query ?? {}) as {
+      code?: string;
+      error?: string;
+      state?: string;
+    };
     if (error) {
       return reply.code(400).send({ code: "OAUTH_ERROR", message: `GitHub OAuth: ${error}` });
     }
     if (!code) {
       return reply.code(400).send({ code: "BAD_REQUEST", message: "Codice autorizzazione mancante" });
+    }
+
+    // Verifica anti-CSRF: lo state firmato deve combaciare con il cookie.
+    const target = verifyOAuthState(state, request.cookies[OAUTH_STATE_COOKIE]);
+    if (!target) {
+      return reply.code(400).send({
+        code: "OAUTH_STATE_INVALID",
+        message: "Sessione OAuth non valida o scaduta: riavvia il login.",
+      });
     }
 
     // 1. Scambia il codice per un access token
@@ -361,59 +485,40 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     const lastName = profile.name ? profile.name.split(" ").slice(1).join(" ") : profile.login ?? "";
     const picture = profile.avatar_url as string | undefined;
 
-    // 4. Prova il login su Activepieces con l'email
-    let apResponse: any;
+    // 4. Risolve l'account Activepieces (token completo o sessione senza token).
+    let account: { token: string | null; apUserId: string | null; apResponse: any };
     try {
-      apResponse = await apFetch<any>("/api/v1/authentication/sign-in", {
-        method: "POST",
-        body: JSON.stringify({ email, password: "" }),
+      account = await resolveSocialAccount({
+        email,
+        firstName,
+        lastName,
+        provider: "github",
       });
     } catch (err) {
-      if (err instanceof ApError && err.status === 401) {
-        try {
-          const created = await apFetch<any>("/api/v1/authentication/sign-up", {
-            method: "POST",
-            body: JSON.stringify({
-              email,
-              password: crypto.randomUUID(),
-              firstName,
-              lastName,
-              trackEvents: false,
-              newsLetter: false,
-            }),
-          });
-          apResponse = await apFetch<any>("/api/v1/authentication/sign-in", {
-            method: "POST",
-            body: JSON.stringify({ email, password: "" }),
-          });
-        } catch (err2) {
-          return reply.code(502).send({ code: "SIGN_UP_FAILED", message: (err2 as Error).message });
-        }
-      } else {
-        return reply.code(502).send({ code: "SIGN_IN_FAILED", message: (err as Error).message });
-      }
+      return reply.code(502).send({ code: "SIGN_UP_FAILED", message: (err as Error).message });
     }
 
-    if (!apResponse?.token) {
-      return reply.code(502).send({ code: "BAD_GATEWAY", message: "Risposta di sign-in inattesa" });
-    }
-
+    const apResponse = account.apResponse;
     const session: Session = {
-      token: apResponse.token,
+      token: account.token,
       user: {
-        id: apResponse.id,
-        email: apResponse.email,
-        firstName: apResponse.firstName ?? firstName,
-        lastName: apResponse.lastName ?? lastName,
-        platformRole: apResponse.platformRole,
-        verified: apResponse.verified,
-        projectId: apResponse.projectId ?? null,
+        id: apResponse?.id ?? account.apUserId ?? email,
+        email: apResponse?.email ?? email,
+        firstName: apResponse?.firstName ?? firstName,
+        lastName: apResponse?.lastName ?? lastName,
+        platformRole: apResponse?.platformRole ?? "MEMBER",
+        verified: apResponse?.verified ?? true,
+        projectId: apResponse?.projectId ?? null,
       },
       exp: Math.floor(Date.now() / 1000) + config.cookieMaxAgeSec,
     };
     setSessionCookie(reply, session);
+    reply.clearCookie(OAUTH_STATE_COOKIE, {
+      path: "/api/auth/social",
+      ...(config.cookieDomain ? { domain: config.cookieDomain } : {}),
+    });
 
-    return reply.redirect("/");
+    return reply.redirect(oauthTargetUrl(target));
   });
 
   app.post("/api/auth/logout", async (_request, reply) => {
@@ -431,7 +536,9 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   app.get("/api/ap/projects", async (request, reply) => {
     const session = requireSession(request, reply);
     if (!session) return;
-    return apFetch<any[]>("/api/v1/projects", { token: session.token });
+    const token = requireApToken(session, reply);
+    if (!token) return;
+    return apFetch<any[]>("/api/v1/projects", { token });
   });
 
   app.get("/api/ap/flows", async (request, reply) => {
@@ -439,8 +546,10 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     if (!session) return;
     const { projectId } = request.query as { projectId?: string };
     if (!projectId) return reply.code(400).send({ code: "BAD_REQUEST", message: "projectId richiesto" });
+    const token = requireApToken(session, reply);
+    if (!token) return;
     const flows = await apFetch<any[]>(`/api/v1/flows?projectId=${encodeURIComponent(projectId)}`, {
-      token: session.token,
+      token,
     });
     return flows.map(toFlowView);
   });
@@ -455,9 +564,11 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     if (!projectId || !displayName) {
       return reply.code(400).send({ code: "BAD_REQUEST", message: "projectId e displayName richiesti" });
     }
+    const token = requireApToken(session, reply);
+    if (!token) return;
     const flow = await apFetch<any>("/api/v1/flows", {
       method: "POST",
-      token: session.token,
+      token,
       body: JSON.stringify({ projectId, displayName }),
     });
     return toFlowView(flow);
@@ -469,12 +580,15 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     const { projectId } = request.query as { projectId?: string };
     if (!projectId) return reply.code(400).send({ code: "BAD_REQUEST", message: "projectId richiesto" });
 
+    const token = requireApToken(session, reply);
+    if (!token) return;
+
     const [runs, flows] = await Promise.all([
       apFetch<any[]>(`/api/v1/flow-runs?projectId=${encodeURIComponent(projectId)}`, {
-        token: session.token,
+        token,
       }),
       apFetch<any[]>(`/api/v1/flows?projectId=${encodeURIComponent(projectId)}`, {
-        token: session.token,
+        token,
       }).catch(() => []),
     ]);
     const names = new Map<string, string>(flows.map((f) => [f.id, f.displayName ?? "(senza nome)"]));
@@ -486,8 +600,10 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     if (!session) return;
     const { projectId } = request.query as { projectId?: string };
     if (!projectId) return reply.code(400).send({ code: "BAD_REQUEST", message: "projectId richiesto" });
+    const token = requireApToken(session, reply);
+    if (!token) return;
     return apFetch<any[]>(`/api/v1/flow-runs/count-by-status?projectId=${encodeURIComponent(projectId)}`, {
-      token: session.token,
+      token,
     }).catch(() => []);
   });
 
@@ -496,8 +612,10 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     if (!session) return;
     const { projectId } = request.query as { projectId?: string };
     if (!projectId) return reply.code(400).send({ code: "BAD_REQUEST", message: "projectId richiesto" });
+    const token = requireApToken(session, reply);
+    if (!token) return;
     const conns = await apFetch<any[]>(`/api/v1/app-connections?projectId=${encodeURIComponent(projectId)}`, {
-      token: session.token,
+      token,
     });
     return conns.map((c) => ({
       id: c.id,
@@ -1483,9 +1601,11 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     if (!session) return;
     const { id } = request.params as { id: string };
     try {
+      const token = requireApToken(session, reply);
+      if (!token) return;
       return await apFetch<any>(`/api/v1/flows/${encodeURIComponent(id)}/enable`, {
         method: "POST",
-        token: session.token,
+        token,
       });
     } catch (err) {
       if (err instanceof ApError) {
@@ -1501,9 +1621,11 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     if (!session) return;
     const { id } = request.params as { id: string };
     try {
+      const token = requireApToken(session, reply);
+      if (!token) return;
       return await apFetch<any>(`/api/v1/flows/${encodeURIComponent(id)}/disable`, {
         method: "POST",
-        token: session.token,
+        token,
       });
     } catch (err) {
       if (err instanceof ApError) {
@@ -1518,6 +1640,10 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   // /api/platform/* e legge le entita' reali della pipeline (nessun nuovo schema
   // oltre a `pipeline.schedule`).
   await registerPlatformRoutes(app);
+  // Profilo e preferenze dell'identita' (schema `auth`): dati reali salvati,
+  // niente valori di esempio.
+  const { registerIdentityRoutes } = await import("./auth/routes.js");
+  await registerIdentityRoutes(app);
   // Substrato aziendale (P1.1): obiettivi, memoria, prodotti/servizi. Vive
   // sotto /api/platform/* accanto a Business Pulse (schema `business`).
   await registerBusinessRoutes(app);

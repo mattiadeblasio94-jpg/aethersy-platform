@@ -16,7 +16,13 @@ export interface SessionUser {
 }
 
 export interface Session {
-  token: string;
+  /**
+   * Token Activepieces. `null` quando la sessione e' stata aperta con un login
+   * social su un account gia' esistente di cui il BFF non conosce la password:
+   * la piattaforma funziona comunque (il tenant e' risolto via email), ma le
+   * rotte /api/ap/* rispondono 401 finche' l'utente non entra con la password.
+   */
+  token: string | null;
   user: SessionUser;
   exp: number;
 }

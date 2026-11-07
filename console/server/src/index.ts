@@ -91,6 +91,16 @@ try {
   app.log.error({ err }, "migrazione builder fallita: builder inerte");
 }
 
+// Migrazione idempotente dello schema `auth` (credenziali cifrate delle
+// identita' social). Non dipende dal metering: serve al login Google/GitHub.
+try {
+  const { migrateAuth } = await import("./auth/migrate.js");
+  const res = await migrateAuth();
+  if (res.applied) app.log.info("schema auth applicato");
+} catch (err) {
+  app.log.error({ err }, "migrazione auth fallita: i login social useranno la sessione senza token Activepieces");
+}
+
 // Avvia lo scheduler per lo snapshot automatico dei listini (price_book + fx_usd_eur).
 // Cron: "0 */6 * * *" (ogni 6h, minuto 0) in timezone Europe/Rome.
 try {

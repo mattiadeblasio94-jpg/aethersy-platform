@@ -83,6 +83,16 @@ export const config = {
   signupCredits: Number(process.env.METERING_SIGNUP_CREDITS ?? 0),
 
   // --- OAuth social login ----------------------------------------------------
+  // URL pubblici dei due frontend: servono al redirect finale del login social
+  // (allowlist chiusa: platform | console, mai un URL fornito dal client).
+  platformPublicUrl: (process.env.PLATFORM_PUBLIC_URL ?? "https://platform.aethersy.online").replace(
+    /\/$/,
+    "",
+  ),
+  consolePublicUrl: (process.env.CONSOLE_PUBLIC_URL ?? "https://console.aethersy.online").replace(
+    /\/$/,
+    "",
+  ),
   googleClientId: process.env.GOOGLE_CLIENT_ID ?? "",
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
   googleRedirectUri:
