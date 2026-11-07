@@ -15,6 +15,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircle2,
+  ExternalLink,
   Globe,
   Inbox,
   Rocket,
@@ -384,14 +385,25 @@ export default function Website() {
             ) : (
               <ul className="divide-y divide-secondary/10">
                 {runRows.map((run) => (
-                  <li key={run.id} className="flex flex-col gap-1 px-5 py-3">
+                  <li key={run.id} className="flex flex-col gap-2 px-5 py-3">
                     <div className="flex items-center justify-between gap-3">
                       <span className="min-w-0 truncate text-sm font-medium text-text-primary">
                         {run.title}
                       </span>
-                      <Badge variant={RUN_STATUS_VARIANT[run.status] ?? "default"}>
-                        {RUN_STATUS_LABEL[run.status] ?? run.status}
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={RUN_STATUS_VARIANT[run.status] ?? "default"}>
+                          {RUN_STATUS_LABEL[run.status] ?? run.status}
+                        </Badge>
+                        <a
+                          href={`/api/platform/sites/${run.id}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-secondary/20 px-2.5 py-1 text-xs font-medium text-secondary transition-colors hover:bg-secondary/10"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                          Apri sito
+                        </a>
+                      </div>
                     </div>
                     <span className="text-xs text-text-muted">
                       aggiornata {formatDate(run.updated_at)}

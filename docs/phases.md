@@ -3,7 +3,7 @@
 > Aggiornare dopo **ogni** fase con: data/ora, esito, comandi di verifica, note.
 > Stati ammessi: `DONE`, `BLOCKED: input #N`, `NOTE`.
 >
-> Ultima revisione: 2026-11-07 (fasi 0–12 `DONE`; **fasi 13–20** implementate e deployate: CI, IA nel platform, **platform a dati reali senza mock + UI cyber + agenti builder eseguibili**; restano azioni utente per la rotazione credenziali e Stripe)
+> Ultima revisione: 2026-11-07 (fasi 0–12 `DONE`; **fasi 13–20** implementate e deployate: CI, IA nel platform, **platform a dati reali senza mock + UI cyber + agenti builder eseguibili + sito pubblicabile dal run pipeline**; restano azioni utente per la rotazione credenziali e Stripe)
 
 ## Stato sintetico
 
@@ -944,3 +944,37 @@ builder eseguono task reali con crediti addebitati e artefatti persistiti. Resta
 dal codice: rotazione delle chiavi provider, saldo Stripe (0 EUR e sender
 `metering.billing_outbox` → Stripe assente), crediti z.ai/Venice, fatture/metodi di pagamento
 e metriche per canale non esposti dal BFF, e la decisione su `console.aethersy.online`.
+
+### Fase 20 — Sito pubblicabile dal run pipeline (07/11/2026)
+
+**Contesto.** I deliverable dello stadio `website` erano solo documenti di lavoro
+consultabili in `/library`: nessun sito raggiungibile, quindi nessun output vendibile.
+Il passo richiesto e' trasformare i testi reali prodotti dal modello (copy, sitemap,
+SEO) in una pagina web pubblica servita dal BFF.
+
+**Implementazione.**
+- `console/server/src/platform/site.ts`: parser dei deliverable (`Titolo H1:`, `Sottotitolo:`,
+  `Call to Action (CTA):`, elenchi numerati, voci sitemap, Title Tag e Meta Description)
+  e renderer HTML autonomo (CSS inline, nessuna dipendenza esterna) con header, navigazione,
+  hero, griglia servizi, sezioni di pagina e contatti.
+- `console/server/src/platform/routes.ts`: `GET /api/platform/sites/:runId` → `200` con
+  `text/html; charset=utf-8`. La rotta e' **pubblica** (il sito e' il deliverable che il
+  cliente riceve via link; la chiave e' il UUID del run, non enumerabile) e pubblica solo i
+  documenti di copy, sitemap e SEO.
+- `platform/src/pages/Website.tsx`: bottone **"Apri sito"** su ogni esecuzione dello stadio
+  `website`, con link diretto alla pagina pubblica.
+
+**Verifica (07/11/2026).**
+- `GET /api/platform/sites/0b7390c8-ea63-45f5-bf35-89e86eb179f1` → **200**, 5.410 byte,
+  `text/html`, **senza cookie di sessione** (visita anonima come un cliente).
+- Contenuto reale verificato: `title` "Sistemi Growth & Marketing Aethersy | Traffico
+  Qualificato", `h1` "L'Infrastruttura Digitale del Futuro.", CTA "Scopri le Soluzioni /
+  Richiedi una Consulenza", sezioni `home`, `servizi`, `chi-siamo`, `contatti-lead-form`,
+  `contatti`.
+- QA browser (CDP, Chrome headless): titolo e `h1` corretti, 5 link interni, **0 errori di
+  console**, screenshot del sito pubblico.
+
+**Stato.** La pipeline produce ora un sito pubblicabile e raggiungibile via URL stabile.
+Resta da rendere monetizzabile il percorso di contatto (form sul sito pubblicato → lead
+reale in piattaforma e notifica) e la fatturazione (Stripe bloccata dai fondi).
+

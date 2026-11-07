@@ -272,6 +272,23 @@ export async function registerPlatformRoutes(app: FastifyInstance): Promise<void
     };
   });
 
+  // Sito pubblico del run "website": HTML reale servito dal BFF, ricavato dai
+  // deliverable prodotti dal modello. URL stabile: /api/platform/sites/:runId.
+  app.get<{ Params: { runId: string } }>("/api/platform/sites/:runId", async (request, reply) => {
+    // Pubblico: il sito e' il deliverable che il cliente riceve via link.
+    const { renderSitePage } = await import("./site.js");
+    const site = await renderSitePage(request.params.runId);
+    if (!site) {
+      return reply
+        .code(404)
+        .send({ code: "NOT_FOUND", message: "Sito non disponibile per questo run" });
+    }
+    return reply
+      .header("content-type", "text/html; charset=utf-8")
+      .header("cache-control", "public, max-age=60")
+      .send(site.html);
+  });
+
   // ------------------------------------------------------- account/FAQ ----
   app.get("/api/platform/account", async (request, reply) => {
     const tenant = await requireMeteredTenant(request, reply);
