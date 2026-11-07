@@ -224,6 +224,54 @@ export async function registerPlatformRoutes(app: FastifyInstance): Promise<void
     return libraryData(tenant.tenantId);
   });
 
+  // Contenuto di una risorsa della libreria (asset di pipeline, tenant scoped).
+  app.get<{ Params: { assetId: string } }>("/api/platform/library/:assetId", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+    const { withTx } = await import("../metering/db.js");
+    const { rows } = await withTx((client) =>
+      client.query<{
+        id: string;
+        kind: string;
+        name: string;
+        mime: string | null;
+        storage_key: string;
+        status: string;
+        run_id: string | null;
+        version: number;
+        meta: unknown;
+        created_at: Date;
+      }>(
+        `SELECT id, kind, name, mime, storage_key, status, run_id, version, meta, created_at
+           FROM pipeline.asset
+          WHERE id = $1 AND tenant_id = $2`,
+        [request.params.assetId, tenant.tenantId],
+      ),
+    );
+    const asset = rows[0];
+    if (!asset) {
+      return reply.code(404).send({ code: "NOT_FOUND", message: "Risorsa non trovata" });
+    }
+
+    const meta = (asset.meta ?? {}) as Record<string, unknown>;
+    const content = typeof meta.content === "string" ? meta.content : null;
+    return {
+      asset: {
+        id: asset.id,
+        kind: asset.kind,
+        name: asset.name,
+        mime: asset.mime,
+        storageKey: asset.storage_key,
+        status: asset.status,
+        runId: asset.run_id,
+        version: asset.version,
+        createdAt: asset.created_at,
+      },
+      content,
+      meta,
+    };
+  });
+
   // ------------------------------------------------------- account/FAQ ----
   app.get("/api/platform/account", async (request, reply) => {
     const tenant = await requireMeteredTenant(request, reply);

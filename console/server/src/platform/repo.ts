@@ -552,6 +552,7 @@ export interface LibraryResource {
   status: string;
   storage_key: string;
   mime: string | null;
+  size_bytes: string | null;
   version: number;
   created_at: Date;
   run_id: string | null;
@@ -601,7 +602,7 @@ export async function libraryData(tenantId: string): Promise<LibraryData> {
   // Risorse = asset di pipeline (deliverable generati)
   const assets = await withTx((client) =>
     client.query<LibraryResource>(
-      `SELECT id, kind, name, status, storage_key, mime, version, run_id, created_at
+      `SELECT id, kind, name, status, storage_key, mime, size_bytes, version, run_id, created_at
          FROM pipeline.asset
         WHERE tenant_id = $1
         ORDER BY created_at DESC
