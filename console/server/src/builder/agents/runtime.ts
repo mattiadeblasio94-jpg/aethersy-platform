@@ -78,6 +78,9 @@ export class AgentRuntime {
 
         // Store artifacts in DB
         for (const artifact of result.artifacts) {
+          const content =
+            typeof artifact.content === "string" ? artifact.content : Buffer.from(artifact.content).toString("base64");
+          const isText = typeof artifact.content === "string";
           await taskStore.createArtifact({
             task_id: task.id,
             project_id: task.project_id,
@@ -86,7 +89,13 @@ export class AgentRuntime {
             name: artifact.name,
             description: artifact.metadata?.description as string,
             uri: artifact.metadata?.uri as string ?? `sandbox://${task.project_id}/${artifact.name}`,
-            metadata: artifact.metadata ?? {},
+            metadata: {
+              ...(artifact.metadata ?? {}),
+              encoding: isText ? "utf-8" : "base64",
+              size: content.length,
+              content: content.slice(0, 65536),
+              content_truncated: content.length > 65536,
+            },
             version: 1,
           });
         }

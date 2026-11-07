@@ -11,6 +11,7 @@ import type {
   Task,
   TaskStatus,
   Project,
+  Artifact as BuilderArtifact,
   ArtifactKind,
   ProjectType,
 } from "../builder/types.js";
@@ -147,6 +148,13 @@ export async function builderRoutes(app: FastifyInstance) {
     return { project };
   });
 
+  // Delete project (cascade: tasks, steps, artifacts)
+  app.delete<{ Params: IdParams }>("/api/builder/projects/:id", async (request, reply) => {
+    const deleted = await taskStore.deleteProject(request.params.id, request.tenant.tenantId);
+    if (!deleted) return reply.code(404).send({ error: "Progetto non trovato" });
+    return { ok: true };
+  });
+
   // ============ TASKS ============
 
   // Get all tasks for tenant
@@ -159,6 +167,9 @@ export async function builderRoutes(app: FastifyInstance) {
   app.get<{ Params: IdParams }>("/api/builder/tasks/:id", async (request, reply) => {
     const task = await taskStore.getTask(request.params.id);
     if (!task) return reply.code(404).send({ error: "Task non trovato" });
+    if (task.tenant_id !== request.tenant.tenantId) {
+      return reply.code(404).send({ error: "Task non trovato" });
+    }
 
     const [steps, artifacts] = await Promise.all([
       taskStore.getStepsByTask(request.params.id),
@@ -168,9 +179,35 @@ export async function builderRoutes(app: FastifyInstance) {
     return { task, steps, artifacts };
   });
 
+  // Delete task (cascade: steps, artifacts)
+  app.delete<{ Params: IdParams }>("/api/builder/tasks/:id", async (request, reply) => {
+    const deleted = await taskStore.deleteTask(request.params.id, request.tenant.tenantId);
+    if (!deleted) return reply.code(404).send({ error: "Task non trovato" });
+    return { ok: true };
+  });
+
   // Create new task
   app.post("/api/builder/tasks", async (request, reply) => {
-    const task = await taskEngine.createTask(request.body as Omit<Task, "id" | "created_at" | "updated_at">);
+    const body = (request.body ?? {}) as Partial<Task>;
+    if (!body.project_id || !body.type || !body.title) {
+      return reply.code(400).send({ error: "project_id, type e title sono obbligatori" });
+    }
+
+    const project = await taskStore.getProject(body.project_id);
+    if (!project || project.tenant_id !== request.tenant.tenantId) {
+      return reply.code(404).send({ error: "Progetto non trovato" });
+    }
+
+    // Il tenant non arriva dal client: viene sempre risolto dalla sessione.
+    const task = await taskEngine.createTask({
+      ...body,
+      project_id: project.id,
+      tenant_id: request.tenant.tenantId,
+      status: body.status ?? "pending",
+      spec: body.spec ?? {},
+      cost_credits: body.cost_credits ?? 0,
+      priority: body.priority ?? 0,
+    } as Omit<Task, "id" | "created_at" | "updated_at">);
     return { task };
   });
 
@@ -246,18 +283,55 @@ export async function builderRoutes(app: FastifyInstance) {
 
   // Create artifact
   app.post("/api/builder/artifacts", async (request, reply) => {
-    const artifact = await taskStore.createArtifact(request.body as any);
+    const body = (request.body ?? {}) as Partial<BuilderArtifact>;
+    if (!body.task_id || !body.project_id || !body.kind || !body.name || !body.uri) {
+      return reply.code(400).send({ error: "task_id, project_id, kind, name e uri sono obbligatori" });
+    }
+
+    const project = await taskStore.getProject(body.project_id);
+    if (!project || project.tenant_id !== request.tenant.tenantId) {
+      return reply.code(404).send({ error: "Progetto non trovato" });
+    }
+
+    const artifact = await taskStore.createArtifact({
+      task_id: body.task_id,
+      project_id: project.id,
+      tenant_id: request.tenant.tenantId,
+      kind: body.kind,
+      name: body.name,
+      description: body.description,
+      uri: body.uri,
+      metadata: body.metadata ?? {},
+      version: body.version ?? 1,
+    });
     return { artifact };
+  });
+
+  // Artefatti del tenant (libreria del workspace)
+  app.get("/api/builder/artifacts", async (request, reply) => {
+    const query = request.query as { kind?: string; projectId?: string };
+    const artifacts = query.projectId
+      ? await taskStore.getArtifactsByProject(query.projectId)
+      : await taskStore.getArtifactsByTenant(request.tenant.tenantId, query.kind as never);
+    return { artifacts };
   });
 
   // Get artifacts by task
   app.get<{ Params: TaskIdParams }>("/api/builder/artifacts/task/:taskId", async (request, reply) => {
+    const task = await taskStore.getTask(request.params.taskId);
+    if (!task || task.tenant_id !== request.tenant.tenantId) {
+      return reply.code(404).send({ error: "Task non trovato" });
+    }
     const artifacts = await taskStore.getArtifactsByTask(request.params.taskId);
     return { artifacts };
   });
 
   // Get artifacts by project
   app.get<{ Params: ProjectIdParams }>("/api/builder/artifacts/project/:projectId", async (request, reply) => {
+    const project = await taskStore.getProject(request.params.projectId);
+    if (!project || project.tenant_id !== request.tenant.tenantId) {
+      return reply.code(404).send({ error: "Progetto non trovato" });
+    }
     const artifacts = await taskStore.getArtifactsByProject(request.params.projectId);
     return { artifacts };
   });

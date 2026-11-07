@@ -1,6 +1,6 @@
 // builder/agents/planner.ts — Hierarchical Planner Agent
 
-import type { PlannerAgent, PlannerInput, PlannerOutput, ProjectSpec, TaskGraph, TaskNode, TaskEdge, TechStack, Feature, PageSpec, ApiEndpoint, AuthConfig } from "./types.js";
+import type { PlannerAgent, PlannerInput, PlannerOutput, ProjectSpec, TaskNode } from "./types.js";
 
 // System prompt for the planner
 const PLANNER_SYSTEM_PROMPT = `Sei l'Architetto Planner di Aethersy Builder. Il tuo compito è trasformare un'idea imprenditoriale in una specifica tecnica completa e un grafo di task eseguibili.
@@ -33,197 +33,39 @@ AGENTI DISPONIBILI:
 - qa: test, lint, typecheck, security scan`;
 
 async function callLLM(prompt: string, systemPrompt: string): Promise<string> {
-  // In production, this would call the AI Router (OpenRouter/Venice)
-  // For now, return a structured mock response based on the input
-  // TODO: Integrate with actual LLM via AI Router
-  
-  // This is a simplified implementation - in production, use the AI Router
-  return JSON.stringify(generateMockPlan(prompt), null, 2);
+  const { chat } = await import("../../ai-router.js");
+  const result = await chat({
+    capability: "text",
+    prompt: `${systemPrompt}
+
+${prompt}`,
+  });
+  return extractJson(result.answer);
 }
 
-function generateMockPlan(idea: string): PlannerOutput {
-  // Mock planner output - replace with actual LLM call
-  const projectName = idea.split(' ').slice(0, 3).join(' ').replace(/[^a-zA-Z0-9]/g, '');
-  
-  return {
-    spec: {
-      name: projectName || 'Aethersy Project',
-      description: idea,
-      type: 'saas',
-      tech_stack: {
-        frontend: 'nextjs',
-        backend: 'fastify',
-        database: 'postgresql',
-        orm: 'prisma',
-        auth: 'better-auth',
-        styling: 'tailwind',
-        ui_library: 'shadcn',
-        testing: 'vitest',
-        ci_cd: 'github-actions',
-      },
-      features: [
-        { id: 'auth', name: 'Authentication', description: 'Email/password + OAuth (Google, GitHub)', priority: 'high', tasks: ['backend', 'frontend'] },
-        { id: 'dashboard', name: 'User Dashboard', description: 'Main dashboard with metrics', priority: 'high', tasks: ['frontend', 'backend'] },
-        { id: 'billing', name: 'Billing/Subscriptions', description: 'Stripe integration for subscriptions', priority: 'high', tasks: ['backend', 'frontend', 'devops'] },
-        { id: 'api', name: 'REST API', description: 'CRUD API for core entities', priority: 'medium', tasks: ['backend'] },
-      ],
-      pages: [
-        { route: '/', name: 'Landing', description: 'Marketing landing page', components: ['Hero', 'Features', 'Pricing', 'Footer'] },
-        { route: '/login', name: 'Login', description: 'Authentication page', components: ['LoginForm', 'OAuthButtons'] },
-        { route: '/register', name: 'Register', description: 'Registration page', components: ['RegisterForm'] },
-        { route: '/dashboard', name: 'Dashboard', description: 'Main user dashboard', components: ['Sidebar', 'Metrics', 'ActivityFeed'] },
-        { route: '/settings', name: 'Settings', description: 'User settings and billing', components: ['ProfileForm', 'BillingPortal'] },
-      ],
-      api_endpoints: [
-        { method: 'POST', path: '/api/auth/register', description: 'User registration', auth_required: false },
-        { method: 'POST', path: '/api/auth/login', description: 'User login', auth_required: false },
-        { method: 'GET', path: '/api/user/me', description: 'Current user profile', auth_required: true },
-        { method: 'GET', path: '/api/projects', description: 'List user projects', auth_required: true },
-        { method: 'POST', path: '/api/projects', description: 'Create project', auth_required: true },
-      ],
-      auth_config: {
-        provider: 'email',
-        oauth_providers: ['google', 'github'],
-        mfa: true,
-        roles: ['user', 'admin'],
-      },
-      deploy_config: {
-        vercel: { framework_preset: 'nextjs', build_command: 'pnpm build', output_directory: '.next' },
-        railway: { service_name: 'api', dockerfile_path: 'apps/api/Dockerfile' },
-        supabase: { region: 'eu-west-1' },
-      },
-    },
-    task_graph: {
-      nodes: [
-        {
-          id: 'task-brand',
-          type: 'brand',
-          title: 'Brand Identity & Design System',
-          description: 'Create logo, color palette, typography, and UI component library',
-          agent: 'brand',
-          estimated_credits: 15,
-          estimated_duration_minutes: 10,
-          spec_template: { action: 'create_brand_kit', project_name: projectName },
-        },
-        {
-          id: 'task-architect',
-          type: 'architect',
-          title: 'Technical Architecture & Database Schema',
-          description: 'Define database schema, API contracts, and project structure',
-          agent: 'architect',
-          estimated_credits: 20,
-          estimated_duration_minutes: 15,
-          depends_on: ['task-brand'],
-          spec_template: { action: 'create_architecture', tech_stack: 'nextjs+fastify+prisma' },
-        },
-        {
-          id: 'task-backend-auth',
-          type: 'backend',
-          title: 'Backend: Authentication & User Management',
-          description: 'Implement auth endpoints, JWT, OAuth, password reset',
-          agent: 'backend',
-          estimated_credits: 30,
-          estimated_duration_minutes: 20,
-          depends_on: ['task-architect'],
-          spec_template: { action: 'implement_auth', provider: 'better-auth' },
-        },
-        {
-          id: 'task-backend-api',
-          type: 'backend',
-          title: 'Backend: Core API & Business Logic',
-          description: 'Implement CRUD APIs, validation, error handling',
-          agent: 'backend',
-          estimated_credits: 40,
-          estimated_duration_minutes: 25,
-          depends_on: ['task-backend-auth'],
-          spec_template: { action: 'implement_api', endpoints: ['projects', 'users', 'billing'] },
-        },
-        {
-          id: 'task-frontend-auth',
-          type: 'frontend',
-          title: 'Frontend: Auth Pages & State',
-          description: 'Build login/register pages, auth context, protected routes',
-          agent: 'frontend',
-          estimated_credits: 25,
-          estimated_duration_minutes: 15,
-          depends_on: ['task-brand', 'task-backend-auth'],
-          spec_template: { action: 'implement_auth_ui', pages: ['login', 'register', 'forgot-password'] },
-        },
-        {
-          id: 'task-frontend-dashboard',
-          type: 'frontend',
-          title: 'Frontend: Dashboard & Core Pages',
-          description: 'Build dashboard layout, sidebar, main pages, data fetching',
-          agent: 'frontend',
-          estimated_credits: 35,
-          estimated_duration_minutes: 20,
-          depends_on: ['task-frontend-auth', 'task-backend-api'],
-          spec_template: { action: 'implement_dashboard', pages: ['dashboard', 'settings', 'projects'] },
-        },
-        {
-          id: 'task-copy',
-          type: 'copy',
-          title: 'Marketing Copy & Content',
-          description: 'Write landing page copy, email sequences, onboarding flows',
-          agent: 'copy',
-          estimated_credits: 15,
-          estimated_duration_minutes: 10,
-          depends_on: ['task-brand'],
-          spec_template: { action: 'write_copy', pages: ['landing', 'pricing', 'features'] },
-        },
-        {
-          id: 'task-devops',
-          type: 'devops',
-          title: 'DevOps: CI/CD & Deploy',
-          description: 'Setup GitHub Actions, Vercel, Railway, Supabase deployments',
-          agent: 'devops',
-          estimated_credits: 20,
-          estimated_duration_minutes: 15,
-          depends_on: ['task-backend-api', 'task-frontend-dashboard'],
-          spec_template: { action: 'setup_deploy', targets: ['vercel', 'railway', 'supabase'] },
-        },
-        {
-          id: 'task-qa',
-          type: 'qa',
-          title: 'QA: Testing & Quality Gates',
-          description: 'Run unit tests, integration tests, lint, typecheck, security scan',
-          agent: 'qa',
-          estimated_credits: 10,
-          estimated_duration_minutes: 10,
-          depends_on: ['task-devops'],
-          spec_template: { action: 'run_qa', suite: 'full' },
-        },
-        {
-          id: 'task-growth',
-          type: 'growth',
-          title: 'Growth: Analytics & Launch Prep',
-          description: 'Setup analytics, error tracking, launch checklist',
-          agent: 'growth',
-          estimated_credits: 10,
-          estimated_duration_minutes: 10,
-          depends_on: ['task-devops'],
-          spec_template: { action: 'setup_analytics', tools: ['posthog', 'sentry'] },
-        },
-      ],
-      edges: [
-        { from: 'task-brand', to: 'task-architect' },
-        { from: 'task-brand', to: 'task-copy' },
-        { from: 'task-brand', to: 'task-frontend-auth' },
-        { from: 'task-architect', to: 'task-backend-auth' },
-        { from: 'task-backend-auth', to: 'task-backend-api' },
-        { from: 'task-backend-auth', to: 'task-frontend-auth' },
-        { from: 'task-backend-api', to: 'task-frontend-dashboard' },
-        { from: 'task-frontend-auth', to: 'task-frontend-dashboard' },
-        { from: 'task-backend-api', to: 'task-devops' },
-        { from: 'task-frontend-dashboard', to: 'task-devops' },
-        { from: 'task-devops', to: 'task-qa' },
-        { from: 'task-devops', to: 'task-growth' },
-      ],
-    },
-    estimated_credits: 220,
-    estimated_duration_minutes: 150,
-  };
+/** Estrae l'oggetto JSON dalla risposta del modello (ignora fence markdown). */
+function extractJson(answer: string): string {
+  const fenced = answer.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const raw = fenced ? fenced[1] : answer;
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) {
+    throw new Error("Il planner non ha restituito un JSON valido");
+  }
+  return raw.slice(start, end + 1);
 }
+
+/** Azioni implementate dagli agenti specializzati: il piano usa solo queste. */
+const AGENT_ACTIONS: Record<string, string[]> = {
+  architect: ["create_architecture", "define_db_schema", "define_api_contracts"],
+  backend: ["implement_auth", "implement_api", "setup_database"],
+  frontend: ["implement_auth_ui", "implement_dashboard"],
+  brand: ["create_brand_kit", "create_placeholder_logo"],
+  copy: ["write_copy", "write_landing_copy"],
+  devops: ["setup_ci", "create_dockerfile", "create_docker_compose", "configure_env", "deploy_prepare"],
+  growth: ["setup_analytics", "setup_error_tracking", "launch_checklist"],
+  qa: ["run_lint", "run_typecheck", "run_tests", "run_security_scan", "run_full_qa"],
+};
 
 export const plannerAgent: PlannerAgent = {
   async plan(input: PlannerInput): Promise<PlannerOutput> {
@@ -232,15 +74,163 @@ PROJECT TYPE: ${input.project_type ?? 'auto'}
 CONSTRAINTS: ${JSON.stringify(input.constraints ?? {})}
 CONTEXT: ${JSON.stringify(input.context ?? {})}
 
-Genera il piano completo in JSON.`;
+Genera il piano completo in JSON. Le azioni ammesse per ogni agente sono:
+${Object.entries(AGENT_ACTIONS)
+  .map(([agent, actions]) => `- ${agent}: ${actions.join(", ")}`)
+  .join("\n")}`;
 
     const response = await callLLM(prompt, PLANNER_SYSTEM_PROMPT);
-    
+
+    let parsed: PlannerOutput | null = null;
     try {
-      return JSON.parse(response);
-    } catch {
-      // Fallback to mock if parsing fails
-      return generateMockPlan(input.idea);
+      parsed = JSON.parse(response) as PlannerOutput;
+    } catch (err) {
+      console.warn(`[planner] JSON non valido: ${(err as Error).message}`);
     }
+
+    return sanitizePlan(parsed, input.idea);
   },
 };
+
+/**
+ * Rende il piano eseguibile: scarta i nodi con agente sconosciuto, allinea le
+ * azioni a quelle implementate dagli agenti, riallinea le dipendenze sui nodi
+ * rimasti e ricalcola i crediti stimati.
+ */
+function sanitizePlan(plan: PlannerOutput | null, idea: string): PlannerOutput {
+  const rawNodes = plan?.task_graph?.nodes ?? [];
+
+  const mapped: (TaskNode | null)[] = rawNodes
+    .map((node): TaskNode | null => {
+      const agent = String(node.agent ?? node.type ?? "");
+      const actions = AGENT_ACTIONS[agent];
+      if (!actions) return null;
+
+      const requested = String((node.spec_template ?? {}).action ?? "");
+      const action = actions.includes(requested) ? requested : actions[0];
+      const spec = { ...(node.spec_template ?? {}) } as Record<string, unknown>;
+      spec.action = action;
+      if (requested && requested !== action) spec.requested_action = requested;
+
+      return {
+        id: String(node.id ?? `task-${agent}`),
+        type: String(node.type ?? agent),
+        title: String(node.title ?? agent),
+        description: node.description,
+        agent: agent as TaskNode["agent"],
+        estimated_credits: Number(node.estimated_credits ?? 10),
+        estimated_duration_minutes: Number(node.estimated_duration_minutes ?? 10),
+        depends_on: node.depends_on ?? [],
+        spec_template: spec,
+      };
+    });
+
+  const normalized = mapped.filter((node): node is TaskNode => node !== null);
+
+  const nodes = normalized.length > 0 ? normalized : defaultNodes(idea);
+  const keptIds = new Set(nodes.map((n) => n.id));
+
+  const withDeps = nodes.map((node) => ({
+    ...node,
+    depends_on: (node.depends_on ?? []).filter((id) => keptIds.has(id)),
+  }));
+
+  const edges = (plan?.task_graph?.edges ?? []).filter(
+    (edge) => keptIds.has(edge.from) && keptIds.has(edge.to),
+  );
+
+  return {
+    spec: plan?.spec ?? defaultSpec(idea),
+    task_graph: { nodes: withDeps, edges },
+    estimated_credits:
+      plan?.estimated_credits ?? withDeps.reduce((sum, n) => sum + n.estimated_credits, 0),
+    estimated_duration_minutes:
+      plan?.estimated_duration_minutes ??
+      withDeps.reduce((sum, n) => sum + n.estimated_duration_minutes, 0),
+  };
+}
+
+/** Catena minima eseguibile quando il modello non propone un piano utilizzabile. */
+function defaultNodes(idea: string): TaskNode[] {
+  return [
+    {
+      id: "task-brand",
+      type: "brand",
+      title: "Brand Identity & Design System",
+      description: `Identita' visiva per: ${idea}`,
+      agent: "brand",
+      estimated_credits: 15,
+      estimated_duration_minutes: 10,
+      depends_on: [],
+      spec_template: { action: "create_brand_kit", idea },
+    },
+    {
+      id: "task-architect",
+      type: "architect",
+      title: "Architettura e schema dati",
+      description: `Architettura tecnica per: ${idea}`,
+      agent: "architect",
+      estimated_credits: 20,
+      estimated_duration_minutes: 15,
+      depends_on: ["task-brand"],
+      spec_template: { action: "create_architecture", idea },
+    },
+    {
+      id: "task-backend",
+      type: "backend",
+      title: "API e business logic",
+      description: `Implementazione backend per: ${idea}`,
+      agent: "backend",
+      estimated_credits: 25,
+      estimated_duration_minutes: 20,
+      depends_on: ["task-architect"],
+      spec_template: { action: "implement_api", idea },
+    },
+    {
+      id: "task-frontend",
+      type: "frontend",
+      title: "Dashboard e pagine UI",
+      description: `Interfaccia utente per: ${idea}`,
+      agent: "frontend",
+      estimated_credits: 25,
+      estimated_duration_minutes: 20,
+      depends_on: ["task-architect"],
+      spec_template: { action: "implement_dashboard", idea },
+    },
+    {
+      id: "task-qa",
+      type: "qa",
+      title: "QA: lint, typecheck e test",
+      description: `Controlli di qualita' su: ${idea}`,
+      agent: "qa",
+      estimated_credits: 10,
+      estimated_duration_minutes: 10,
+      depends_on: ["task-backend", "task-frontend"],
+      spec_template: { action: "run_full_qa", idea },
+    },
+  ];
+}
+
+function defaultSpec(idea: string): ProjectSpec {
+  return {
+    name: idea.slice(0, 60),
+    description: idea,
+    type: "other",
+    tech_stack: {
+      frontend: "nextjs",
+      backend: "fastify",
+      database: "postgresql",
+      orm: "prisma",
+      auth: "better-auth",
+      styling: "tailwind",
+      ui_library: "shadcn",
+      testing: "vitest",
+      ci_cd: "github-actions",
+    },
+    features: [],
+    pages: [],
+    api_endpoints: [],
+    auth_config: { provider: "email" },
+    deploy_config: {},
+  };
+}

@@ -6,7 +6,7 @@ import Docker from 'dockerode';
 import type { SandboxProvider, SandboxExecRequest, SandboxExecResult, SandboxContainer } from "./types.js";
 
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
-const SANDBOX_IMAGE = 'aethersy/builder-sandbox:latest'; // Custom image with node, pnpm, git, claude-code
+const SANDBOX_IMAGE = process.env.BUILDER_SANDBOX_IMAGE || 'aethersy/builder-sandbox:0.1.0';
 const CONTAINER_TTL_MS = 30 * 60 * 1000; // 30 min idle timeout
 const MAX_CONTAINERS = 10;
 
@@ -136,11 +136,15 @@ export class DockerSandboxProvider implements SandboxProvider {
 
     const container = docker.getContainer(containerId);
     const startTime = Date.now();
+    const workdir = req.workdir ?? '/workspace';
 
     try {
+      // La working dir del progetto non esiste nel container appena creato.
+      await this.ensureWorkdir(container, workdir);
+
       // Write files if provided
       if (req.files && Object.keys(req.files).length > 0) {
-        await this.writeFiles(container, req.files, req.workdir ?? '/workspace');
+        await this.writeFiles(container, req.files, workdir);
       }
 
       // Build command
@@ -150,7 +154,7 @@ export class DockerSandboxProvider implements SandboxProvider {
 
       const exec = await container.exec({
         Cmd: cmd,
-        WorkingDir: req.workdir ?? '/workspace',
+        WorkingDir: workdir,
         Env: req.env ? Object.entries(req.env).map(([k, v]) => `${k}=${v}`) : undefined,
         AttachStdout: true,
         AttachStderr: true,
@@ -217,6 +221,29 @@ export class DockerSandboxProvider implements SandboxProvider {
     // Create a tar archive with the files
     const tar = await this.createTarArchive(files, workdir);
     await container.putArchive(tar, { path: workdir });
+  }
+
+  /** Crea la working dir del progetto se il container e' nuovo. */
+  private async ensureWorkdir(container: any, workdir: string): Promise<void> {
+    const exec = await container.exec({
+      Cmd: ['sh', '-c', `mkdir -p ${workdir}`],
+      WorkingDir: '/',
+      AttachStdout: true,
+      AttachStderr: true,
+      Tty: false,
+    });
+    const stream = await exec.start({ hijack: true, stdin: false });
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Timeout creazione workspace')), 30000);
+      stream.on('end', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+      stream.on('error', (err: Error) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+    });
   }
 
   private async readFiles(container: any, paths: string[], workdir: string): Promise<Record<string, string>> {

@@ -87,6 +87,22 @@ export class TaskStore {
     return res.rows[0] ? this.mapProject(res.rows[0]) : null;
   }
 
+  async deleteProject(id: string, tenantId: string): Promise<boolean> {
+    const res = await db().query(
+      `DELETE FROM builder.project WHERE id = $1 AND tenant_id = $2 RETURNING id`,
+      [id, tenantId]
+    );
+    return (res.rowCount ?? 0) > 0;
+  }
+
+  async deleteTask(id: string, tenantId: string): Promise<boolean> {
+    const res = await db().query(
+      `DELETE FROM builder.task WHERE id = $1 AND tenant_id = $2 RETURNING id`,
+      [id, tenantId]
+    );
+    return (res.rowCount ?? 0) > 0;
+  }
+
   // ========== TASKS ==========
   async createTask(t: Omit<Task, 'id' | 'created_at' | 'updated_at'>): Promise<Task> {
     const res = await db().query(

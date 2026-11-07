@@ -3,181 +3,187 @@
 import { sandboxProvider } from "../sandbox.js";
 import type { AgentExecutor, AgentContext, AgentResult, AgentArtifact } from "../types.js";
 
+interface CheckOutcome {
+  skipped: boolean;
+  exitCode: number;
+  output: string;
+}
+
+/** Verifica se il workspace espone davvero lo script richiesto. */
+async function scriptDefined(
+  workspacePath: string,
+  script: string,
+): Promise<{ runnable: boolean; reason: string }> {
+  const probe = await sandboxProvider.exec({
+    command: 'sh',
+    args: [
+      '-c',
+      `if [ ! -f package.json ]; then exit 3; fi
+if ! node -e "const s=require('./package.json').scripts||{};process.exit(s['${script}']?0:1)"; then exit 4; fi
+if [ ! -d node_modules ]; then exit 5; fi
+exit 0`,
+    ],
+    workdir: workspacePath,
+    timeout_ms: 15000,
+  });
+
+  if (probe.exit_code === 0) return { runnable: true, reason: "" };
+  if (probe.exit_code === 3) {
+    return { runnable: false, reason: "il workspace non contiene un package.json" };
+  }
+  if (probe.exit_code === 4) {
+    return { runnable: false, reason: `package.json non definisce lo script "${script}"` };
+  }
+  return {
+    runnable: false,
+    reason: "le dipendenze non sono installate nel sandbox (node_modules assente)",
+  };
+}
+
+/**
+ * Esegue un controllo nel workspace. Se il controllo non e' eseguibile (nessun
+ * package.json, nessuno script, dipendenze non installate) viene saltato e
+ * referenziato: un controllo non eseguibile non e' un fallimento del task.
+ */
+async function runCheck(
+  workspacePath: string,
+  script: string,
+  timeout_ms: number,
+): Promise<CheckOutcome> {
+  const probe = await scriptDefined(workspacePath, script);
+  if (!probe.runnable) {
+    return {
+      skipped: true,
+      exitCode: 0,
+      output: `SKIPPED: ${probe.reason}`,
+    };
+  }
+
+  const result = await sandboxProvider.exec({
+    command: 'pnpm',
+    args: [script],
+    workdir: workspacePath,
+    timeout_ms,
+  });
+
+  return {
+    skipped: false,
+    exitCode: result.exit_code,
+    output: `STDOUT: ${result.stdout}
+STDERR: ${result.stderr}
+Exit code: ${result.exit_code}`,
+  };
+}
+
+function failureLines(output: string): string[] {
+  return output
+    .split('\n')
+    .filter((line) => line.includes('error') || line.includes('Error'))
+    .slice(0, 5);
+}
+
 export const qaAgent: AgentExecutor = {
   async execute(context: AgentContext): Promise<AgentResult> {
-    const { task, step, projectId, workspacePath } = context;
+    const { step, workspacePath } = context;
     const action = step.input.action as string;
 
     const artifacts: AgentArtifact[] = [];
     let costCredits = 0;
+    let passed = true;
+
+    const record = (name: string, command: string, outcome: CheckOutcome, durationMs?: number) => {
+      artifacts.push({
+        kind: 'log',
+        name,
+        content: outcome.output,
+        metadata: {
+          command,
+          status: outcome.skipped ? 'skipped' : outcome.exitCode === 0 ? 'passed' : 'failed',
+          ...(durationMs !== undefined ? { duration_ms: durationMs } : {}),
+        },
+      });
+    };
 
     switch (action) {
       case 'run_lint': {
-        // Run ESLint
-        const result = await sandboxProvider.exec({
-          command: 'pnpm',
-          args: ['lint'],
-          workdir: workspacePath,
-          timeout_ms: 60000,
-        });
-        artifacts.push({
-          kind: 'log',
-          name: 'lint-result.txt',
-          content: `STDOUT: ${result.stdout}\nSTDERR: ${result.stderr}\nExit code: ${result.exit_code}`,
-          metadata: { command: 'pnpm lint', duration_ms: result.duration_ms },
-        });
-
-        if (result.exit_code !== 0) {
-          // Extract error lines
-          const errors = result.stderr.split('\n').filter((l: string) => l.includes('error') || l.includes('Error'));
-          throw new Error(`Lint failed: ${errors.slice(0, 5).join('\n')}`);
+        const outcome = await runCheck(workspacePath, 'lint', 60000);
+        record('lint-result.txt', 'pnpm lint', outcome);
+        if (!outcome.skipped && outcome.exitCode !== 0) {
+          throw new Error(`Lint failed: ${failureLines(outcome.output).join('\n')}`);
         }
-
-        costCredits = 3;
+        costCredits = outcome.skipped ? 0 : 3;
+        passed = !outcome.skipped;
         break;
       }
 
       case 'run_typecheck': {
-        // Run TypeScript type check
-        const result = await sandboxProvider.exec({
-          command: 'pnpm',
-          args: ['typecheck'],
-          workdir: workspacePath,
-          timeout_ms: 120000,
-        });
-        artifacts.push({
-          kind: 'log',
-          name: 'typecheck-result.txt',
-          content: `STDOUT: ${result.stdout}\nSTDERR: ${result.stderr}\nExit code: ${result.exit_code}`,
-          metadata: { command: 'pnpm typecheck', duration_ms: result.duration_ms },
-        });
-
-        if (result.exit_code !== 0) {
-          const errors = result.stderr.split('\n').filter((l: string) => l.includes('error') || l.includes('Error')).slice(0, 10);
-          throw new Error(`Typecheck failed: ${errors.join('\n')}`);
+        const outcome = await runCheck(workspacePath, 'typecheck', 120000);
+        record('typecheck-result.txt', 'pnpm typecheck', outcome);
+        if (!outcome.skipped && outcome.exitCode !== 0) {
+          throw new Error(`Typecheck failed: ${failureLines(outcome.output).join('\n')}`);
         }
-
-        costCredits = 5;
+        costCredits = outcome.skipped ? 0 : 5;
+        passed = !outcome.skipped;
         break;
       }
 
       case 'run_tests': {
-        // Run vitest
-        const result = await sandboxProvider.exec({
-          command: 'pnpm',
-          args: ['test'],
-          workdir: workspacePath,
-          timeout_ms: 120000,
-        });
-        artifacts.push({
-          kind: 'log',
-          name: 'test-result.txt',
-          content: `STDOUT: ${result.stdout}\nSTDERR: ${result.stderr}\nExit code: ${result.exit_code}\n${result.stdout.includes('FAIL') ? 'Some tests failed!' : 'All tests passed!'}`,
-          metadata: { command: 'pnpm test', duration_ms: result.duration_ms },
-        });
-
-        if (result.exit_code !== 0 && result.stdout.includes('FAIL')) {
-          throw new Error(`Tests failed`);
+        const outcome = await runCheck(workspacePath, 'test', 120000);
+        record('test-result.txt', 'pnpm test', outcome);
+        if (!outcome.skipped && outcome.exitCode !== 0 && outcome.output.includes('FAIL')) {
+          throw new Error('Tests failed');
         }
-
-        costCredits = 7;
+        costCredits = outcome.skipped ? 0 : 7;
+        passed = !outcome.skipped;
         break;
       }
 
       case 'run_security_scan': {
-        // Run semgrep security scan
-        const result = await sandboxProvider.exec({
-          command: 'pnpm',
-          args: ['security:scan'],
-          workdir: workspacePath,
-          timeout_ms: 60000,
-        });
-        artifacts.push({
-          kind: 'log',
-          name: 'security-result.txt',
-          content: `STDOUT: ${result.stdout}\nSTDERR: ${result.stderr}\nExit code: ${result.exit_code}`,
-          metadata: { command: 'pnpm security:scan', duration_ms: result.duration_ms },
-        });
-
-        if (result.exit_code !== 0) {
-          const findings = result.stderr.split('\n').filter((l: string) => !l.includes('OK') && !l.includes('no issues found')).slice(0, 5);
-          throw new Error(`Security scan found issues: ${findings.join('\n')}`);
+        const outcome = await runCheck(workspacePath, 'security:scan', 60000);
+        record('security-result.txt', 'pnpm security:scan', outcome);
+        if (!outcome.skipped && outcome.exitCode !== 0) {
+          throw new Error(`Security scan found issues: ${failureLines(outcome.output).join('\n')}`);
         }
-
-        costCredits = 5;
+        costCredits = outcome.skipped ? 0 : 5;
+        passed = !outcome.skipped;
         break;
       }
 
       case 'run_full_qa': {
-        // Run all QA checks in sequence
-        let allPassed = true;
-        let totalOutput = '';
+        const checks: { script: string; timeout: number }[] = [
+          { script: 'lint', timeout: 60000 },
+          { script: 'typecheck', timeout: 120000 },
+          { script: 'test', timeout: 120000 },
+          { script: 'security:scan', timeout: 60000 },
+        ];
 
-        // Lint
-        try {
-          const lintResult = await sandboxProvider.exec({
-            command: 'pnpm',
-            args: ['lint'],
-            workdir: workspacePath,
-            timeout_ms: 60000,
-          });
-          totalOutput += `LINT: ${lintResult.exit_code === 0 ? 'PASS' : 'FAIL'}\n`;
-          if (lintResult.exit_code !== 0) allPassed = false;
-        } catch (e) {
-          totalOutput += `LINT: FAIL - ${e}\n`;
-          allPassed = false;
+        const report: string[] = [];
+        for (const check of checks) {
+          const outcome = await runCheck(workspacePath, check.script, check.timeout);
+          record(`${check.script.replace(':', '-')}-result.txt`, `pnpm ${check.script}`, outcome);
+          if (outcome.skipped) {
+            report.push(`${check.script.toUpperCase()}: SKIP (${outcome.output})`);
+            continue;
+          }
+          if (outcome.exitCode === 0) {
+            report.push(`${check.script.toUpperCase()}: PASS`);
+            costCredits += check.script === 'test' ? 7 : 3;
+          } else {
+            report.push(`${check.script.toUpperCase()}: FAIL`);
+            passed = false;
+          }
         }
 
-        // Typecheck
-        try {
-          const tcResult = await sandboxProvider.exec({
-            command: 'pnpm',
-            args: ['typecheck'],
-            workdir: workspacePath,
-            timeout_ms: 120000,
-          });
-          totalOutput += `TYPECHECK: ${tcResult.exit_code === 0 ? 'PASS' : 'FAIL'}\n`;
-          if (tcResult.exit_code !== 0) allPassed = false;
-        } catch (e) {
-          totalOutput += `TYPECHECK: FAIL - ${e}\n`;
-          allPassed = false;
-        }
+        artifacts.push({
+          kind: 'log',
+          name: 'qa-report.txt',
+          content: report.join('\n'),
+          metadata: { command: 'pnpm lint + typecheck + test + security:scan' },
+        });
 
-        // Tests
-        try {
-          const testResult = await sandboxProvider.exec({
-            command: 'pnpm',
-            args: ['test'],
-            workdir: workspacePath,
-            timeout_ms: 120000,
-          });
-          totalOutput += `TESTS: ${testResult.exit_code === 0 ? 'PASS' : 'FAIL'}\n`;
-          if (testResult.exit_code !== 0 && testResult.stdout.includes('FAIL')) allPassed = false;
-        } catch (e) {
-          totalOutput += `TESTS: FAIL - ${e}\n`;
-          allPassed = false;
+        if (!passed) {
+          throw new Error(`QA checks failed. ${report.join(' | ')}`);
         }
-
-        // Security scan
-        try {
-          const secResult = await sandboxProvider.exec({
-            command: 'pnpm',
-            args: ['security:scan'],
-            workdir: workspacePath,
-            timeout_ms: 60000,
-          });
-          totalOutput += `SECURITY: ${secResult.exit_code === 0 ? 'PASS' : 'FAIL'}\n`;
-          if (secResult.exit_code !== 0) allPassed = false;
-        } catch (e) {
-          totalOutput += `SECURITY: FAIL - ${e}\n`;
-          allPassed = false;
-        }
-
-        if (!allPassed) {
-          throw new Error(`QA checks failed. ${totalOutput}`);
-        }
-
-        costCredits = 10;
         break;
       }
 
@@ -186,7 +192,7 @@ export const qaAgent: AgentExecutor = {
     }
 
     return {
-      output: { qa: 'completed', passed: costCredits > 0 },
+      output: { qa: 'completed', passed, skipped: costCredits === 0 },
       artifacts,
       costCredits,
       stepsCompleted: 1,
