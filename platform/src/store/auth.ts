@@ -11,7 +11,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { platformApi, type SessionUser } from "@/lib/platform-api";
-import { HttpError } from "@/lib/http";
+import { HttpError, UNAUTHORIZED_EVENT } from "@/lib/http";
 import type { User } from "@/lib/types";
 
 type AuthStatus = "idle" | "loading" | "authenticated" | "anonymous";
@@ -41,6 +41,15 @@ function toUser(session: SessionUser): User {
 }
 
 let inflight: Promise<void> | null = null;
+
+// Se il BFF risponde 401 (cookie scaduto o non valido) l'app deve tornare al
+// login invece di lasciare a schermo una UI vuota con errori tecnici. Il client
+// HTTP emette l'evento: qui si azzera lo stato, la guardia di rotta reindirizza.
+if (typeof window !== "undefined") {
+  window.addEventListener(UNAUTHORIZED_EVENT, () => {
+    useAuthStore.setState({ user: null, status: "anonymous", isAuthenticated: false });
+  });
+}
 
 export const useAuthStore = create<AuthState>()(
   persist(

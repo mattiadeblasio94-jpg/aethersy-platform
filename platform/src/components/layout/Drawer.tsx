@@ -140,8 +140,7 @@ export const Drawer = memo(function Drawer({ variant }: DrawerProps) {
       )}
     >
       <div className="flex items-center gap-2.5 px-4" style={{ height: "var(--header-height)" }}>
-        <img src="/brand/logo-192.png" alt="" width={28} height={28} className="h-7 w-7" />
-        <span className="wordmark text-base font-semibold text-text-primary">AETHERSY</span>
+        <img src="/brand/logo-192.png" alt="Aethersy" width={28} height={28} className="h-7 w-7" />
         {variant === "mobile" && (
           <button
             type="button"

@@ -59,11 +59,26 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   const data = text ? safeJson(text) : null;
 
   if (!res.ok) {
+    // 401 = cookie di sessione assente, scaduto o non valido. Non e' un errore
+    // di business: si avvisa l'app (che porta l'utente al login) e si usa un
+    // messaggio comprensibile invece del tecnico "Identita' tenant non valida".
+    if (res.status === 401) {
+      notifyUnauthorized();
+      throw new HttpError(401, "Sessione scaduta o non valida: accedi di nuovo.", data?.code);
+    }
     const message =
       (data && (data.message ?? data.error)) || res.statusText || `Errore HTTP ${res.status}`;
     throw new HttpError(res.status, String(message), data?.code);
   }
   return data as T;
+}
+
+/** Evento emesso quando il BFF risponde 401: la sessione non e' piu' valida. */
+export const UNAUTHORIZED_EVENT = "aethersy:unauthorized";
+
+function notifyUnauthorized(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
 }
 
 function safeJson(text: string): any {
