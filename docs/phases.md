@@ -1041,3 +1041,10 @@ sapere che un deploy era andato a buon fine.
 - QA browser: badge campana = 2, pagina `/notifications` con le due notifiche di deploy,
   click su una notifica -> badge = 1, **0 errori di console**, nessuna risposta HTTP >= 400.
 - Lead di prova dal sito pubblicato -> notifica in-app "Nuovo lead dal sito: Notifica Prova".
+- Endpoint di verifica permanente: `POST /api/internal/webhook-echo/:tenantId` registra
+  le consegne in `pipeline.webhook_delivery`; `GET /api/platform/webhook-deliveries` le
+  espone al tenant e la pagina Integrazioni mostra "Eventi realmente consegnati" con
+  l'evento e l'inizio della firma. Il webhook del tenant QA punta a
+  `http://console:3000/api/internal/webhook-echo/<tenant>`: evento `lead.created` registrato
+  con firma `sha256=...`, QA browser con 0 errori di console. Il webhook di prova con
+  listener locale (morto a ogni deploy) e' stato revocato.
