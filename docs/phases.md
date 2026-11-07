@@ -975,6 +975,29 @@ SEO) in una pagina web pubblica servita dal BFF.
   console**, screenshot del sito pubblico.
 
 **Stato.** La pipeline produce ora un sito pubblicabile e raggiungibile via URL stabile.
-Resta da rendere monetizzabile il percorso di contatto (form sul sito pubblicato → lead
-reale in piattaforma e notifica) e la fatturazione (Stripe bloccata dai fondi).
+
+### Fase 20 — Lead dal sito pubblicato (form reale + Slack) (07/11/2026)
+
+**Contetto.** Un sito raggiungibile non monetizza se il visitatore non ha un modo per
+lasciare un contatto: il form sul sito pubblicato era un placeholder.
+
+**Implementazione.**
+- `console/server/src/platform/site.ts`: sezione "Contatti" con form reale (nome, email,
+  messaggio, honeypot anti-bot) e script di invio; `createSiteLead()` crea il lead nella
+  tabella `pipeline.lead` con `tenant_id` e `run_id` del run e inoltra il lead al canale
+  outbound Slack (`notifyLeadCreated`, `markLeadNotified`).
+- `console/server/src/platform/routes.ts`: `POST /api/platform/sites/:runId/leads` (pubblica,
+  validazione email, risposta `201` con messaggio mostrato al visitatore).
+
+**Verifica (07/11/2026).**
+- `POST` da terminale → **201** con id lead; `GET /api/pipeline/leads` → lead `source=website`,
+  `status=new`, `notified_at` valorizzato (webhook Slack ha risposto 2xx).
+- QA browser (CDP): click reale sul bottone "Invia richiesta" → richiesta `201` al BFF,
+  messaggio a video "Richiesta inviata. Rispondiamo entro 24 ore.", **0 errori console**;
+  screenshot del sito con form e conferma.
+- I lead compaiono nella tab "Contatti del sito" della pagina Sito web (sorgente dati
+  `/api/pipeline/leads`, nessuna copia locale).
+
+**Stato.** Il percorso commerciale e' reale: sito pubblico → lead in piattaforma → notifica
+Slack. Resta la fatturazione (Stripe bloccata dai fondi) e la rotazione delle credenziali.
 

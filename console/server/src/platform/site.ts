@@ -16,6 +16,7 @@ export interface SitePage {
 
 interface RunRow {
   id: string;
+  tenant_id: string;
   title: string;
   stage: string;
   brief: unknown;
@@ -210,6 +211,16 @@ function renderHtml(opts: {
   .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:20px; }
   .card p { margin:0; font-size:.95rem; }
   ul { color:var(--muted); padding-left:20px; }
+  .lead-form { display:grid; gap:14px; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); margin-top:22px; max-width:760px; }
+  .lead-form label { display:grid; gap:6px; font-size:.9rem; color:var(--muted); }
+  .lead-form input, .lead-form textarea { background:#0b1120; border:1px solid var(--line); border-radius:10px; color:var(--text); padding:11px 13px; font:inherit; }
+  .lead-form input:focus, .lead-form textarea:focus { outline:2px solid var(--accent); outline-offset:1px; }
+  .lead-form .full { grid-column:1/-1; }
+  .lead-form .hp { position:absolute; left:-9999px; }
+  .lead-form button { justify-self:start; border:0; cursor:pointer; font:inherit; }
+  .lead-form .status { margin:0; min-height:1.4em; }
+  .lead-form .status.ok { color:#4ade80; }
+  .lead-form .status.err { color:#f87171; }
   footer { border-top:1px solid var(--line); color:var(--muted); font-size:.85rem; }
   footer .bar { flex-direction:column; align-items:flex-start; gap:6px; }
 </style>
@@ -228,9 +239,55 @@ function renderHtml(opts: {
   <section id="contatti" class="section">
     <h2>Contatti</h2>
     <p>Scrivici per una consulenza: rispondiamo entro 24 ore lavorative.</p>
+    <form id="lead-form" class="lead-form" method="post" action="/api/platform/sites/${esc(runId)}/leads">
+      <label>Nome<input type="text" name="name" autocomplete="name" maxlength="120" /></label>
+      <label>Email<input type="email" name="email" autocomplete="email" required maxlength="160" /></label>
+      <label class="hp" aria-hidden="true">Sito web<input type="text" name="website" tabindex="-1" autocomplete="off" /></label>
+      <label class="full">Messaggio<textarea name="message" rows="4" maxlength="2000"></textarea></label>
+      <button class="cta" type="submit">Invia richiesta</button>
+      <p class="status full" id="lead-status" role="status"></p>
+    </form>
   </section>
 </main>
 <footer><div class="bar"><span>© ${new Date().getFullYear()} ${esc(brand)}</span><span>Pubblicato da Aethersy · run ${esc(runId.slice(0, 8))}</span></div></footer>
+<script>
+(function () {
+  var form = document.getElementById("lead-form");
+  var status = document.getElementById("lead-status");
+  if (!form || !status) return;
+  form.addEventListener("submit", function (event) {
+    event.preventDefault();
+    var data = new FormData(form);
+    var payload = {
+      name: String(data.get("name") || ""),
+      email: String(data.get("email") || ""),
+      message: String(data.get("message") || ""),
+      website: String(data.get("website") || "")
+    };
+    status.className = "status full";
+    status.textContent = "Invio in corso...";
+    fetch(form.action, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }).then(function (res) {
+      return res.json().then(function (body) { return { ok: res.ok, body: body }; });
+    }).then(function (out) {
+      if (out.ok) {
+        form.reset();
+        status.className = "status full ok";
+        status.textContent = out.body && out.body.message ? out.body.message : "Richiesta inviata. Rispondiamo entro 24 ore.";
+      } else {
+        status.className = "status full err";
+        status.textContent = out.body && out.body.message ? out.body.message : "Invio non riuscito. Riprova o scrivici via email.";
+      }
+    }).catch(function () {
+      status.className = "status full err";
+      status.textContent = "Invio non riuscito. Controlla la connessione e riprova.";
+    });
+  });
+})();
+</script>
 </body>
 </html>`;
 }
@@ -255,7 +312,7 @@ function slug(value: string): string {
 export async function loadSiteRun(runId: string): Promise<{ run: RunRow; assets: AssetRow[] } | null> {
   const run = await withTx(async (client) => {
     const { rows } = await client.query<RunRow>(
-      `SELECT id, title, stage, brief, created_at
+      `SELECT id, tenant_id, title, stage, brief, created_at
          FROM pipeline.pipeline_run
         WHERE id = $1`,
       [runId],
@@ -313,4 +370,66 @@ export async function renderSitePage(runId: string): Promise<SitePage | null> {
       runId,
     }),
   };
+}
+
+export interface SiteLeadInput {
+  name?: string;
+  email?: string;
+  phone?: string;
+  message?: string;
+  website?: string;
+  utm?: Record<string, unknown>;
+  payload?: Record<string, unknown>;
+}
+
+const EMAIL_RE = /^[^@\s]+@[^@\s.]+\.[^@\s]+$/;
+
+/**
+ * Crea un lead per il sito pubblicato del run e lo inoltra al canale outbound
+ * (Slack). Il tenant e' quello del run: il visitatore del sito non ha
+ * sessione, il lead resta pero' attribuito al cliente che ha commissionato il
+ * sito.
+ */
+export async function createSiteLead(
+  runId: string,
+  input: SiteLeadInput,
+): Promise<{ id: string; tenantId: string } | null> {
+  const loaded = await loadSiteRun(runId);
+  if (!loaded) return null;
+
+  const name = (input.name ?? "").trim().slice(0, 200);
+  const email = (input.email ?? "").trim().slice(0, 200);
+  const phone = (input.phone ?? "").trim().slice(0, 60);
+  const message = (input.message ?? "").trim().slice(0, 4000);
+
+  if (!EMAIL_RE.test(email)) {
+    throw new Error("Inserisci un indirizzo email valido");
+  }
+
+  const { createLead, getLead, markLeadNotified } = await import("../pipeline/repo.js");
+  const created = await createLead({
+    tenantId: loaded.run.tenant_id,
+    runId,
+    source: "website",
+    name: name || null,
+    email,
+    phone: phone || null,
+    message: message || null,
+    utm: input.utm ?? {},
+    payload: input.payload ?? {},
+  });
+
+  const { notifyLeadCreated } = await import("../pipeline/notify.js");
+  const lead = await getLead(loaded.run.tenant_id, created.id);
+  if (lead) {
+    const notified = await notifyLeadCreated(loaded.run.tenant_id, lead).catch(() => ({
+      sent: false,
+      channel: null,
+    }));
+    if (notified.sent) {
+      await markLeadNotified(loaded.run.tenant_id, lead.id).catch(() => undefined);
+    }
+  }
+
+  return { id: created.id, tenantId: loaded.run.tenant_id };
 }

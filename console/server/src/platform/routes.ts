@@ -289,6 +289,43 @@ export async function registerPlatformRoutes(app: FastifyInstance): Promise<void
       .send(site.html);
   });
 
+  // Lead dal form del sito pubblicato: il visitatore non ha sessione, il lead
+  // viene attribuito al tenant del run e inoltrato al canale outbound (Slack).
+  app.post<{ Params: { runId: string } }>("/api/platform/sites/:runId/leads", async (request, reply) => {
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    // Honeypot: i bot compilano il campo "website", l'utente no. Risposta
+    // identica a quella reale, ma nessun lead viene creato.
+    if (String(body.website ?? "").trim()) {
+      return reply.code(201).send({
+        id: null,
+        message: "Richiesta inviata. Rispondiamo entro 24 ore.",
+      });
+    }
+    const { createSiteLead } = await import("./site.js");
+    try {
+      const created = await createSiteLead(request.params.runId, {
+        name: typeof body.name === "string" ? body.name : undefined,
+        email: typeof body.email === "string" ? body.email : undefined,
+        phone: typeof body.phone === "string" ? body.phone : undefined,
+        message: typeof body.message === "string" ? body.message : undefined,
+        website: typeof body.website === "string" ? body.website : undefined,
+        utm: (body.utm ?? {}) as Record<string, unknown>,
+        payload: { origin: request.headers.origin ?? null, user_agent: request.headers["user-agent"] ?? null },
+      });
+      if (!created) {
+        return reply.code(404).send({ code: "NOT_FOUND", message: "Sito non trovato" });
+      }
+      return reply.code(201).send({
+        id: created.id,
+        message: "Richiesta inviata. Rispondiamo entro 24 ore.",
+      });
+    } catch (error) {
+      const message = (error as Error).message;
+      request.log.warn({ error: message }, "lead dal sito rifiutato");
+      return reply.code(400).send({ code: "BAD_REQUEST", message });
+    }
+  });
+
   // ------------------------------------------------------- account/FAQ ----
   app.get("/api/platform/account", async (request, reply) => {
     const tenant = await requireMeteredTenant(request, reply);
