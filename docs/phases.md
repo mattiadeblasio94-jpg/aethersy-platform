@@ -1245,6 +1245,15 @@ VPS. Ora il collegamento parte dalla piattaforma ed e' il tenant a fare login e 
   URL di autorizzazione master con 12 scope + PKCE).
 - `npm run test:social` -> **19/19 verdi** (nessuna regressione sul login sociale).
 - Build BFF (`tsc`) e build platform (`tsc -b && vite build`) OK.
+- **Live su produzione** (deploy `0aeb2a9`, notifica `d15620dc`): tabella `pipeline.oauth_app` creata dalla
+  migrazione; `GET /api/pipeline/connectors` -> 44 connettori (master in testa, 24 pronti, 20 provider con
+  `signupUrl`); `POST /api/pipeline/connectors/notion/app` -> 200 e `GET .../notion/connect` -> **302 alla pagina di
+  login di Notion** con il `client_id` del tenant, il `state` firmato e gli scope; nel DB il secret e' cifrato
+  (`v1:...`, il valore in chiaro non compare); `DELETE .../app` -> rimozione e stato tornato "da attivare"
+  (nessun resto di test: 0 righe in `oauth_app`).
+- **QA browser** (utente QA reale): prima card "Google (tutti i servizi)" con badge "Un solo accesso" e l'elenco dei
+  12 servizi; pulsante "Registra l'app" su 19 provider; modal con link alla console del provider, callback da
+  copiare e campi Client ID/Secret; **0 errori console**; screenshot `shots/connettori-app.png`.
 
 **Stato**: `DONE`. Il flusso richiesto e' operativo: dalla piattaforma si clicca il provider, l'utente viene
 mandato alla pagina di login/consenso del provider e al rientro la connessione e' attiva con il token cifrato. Restano

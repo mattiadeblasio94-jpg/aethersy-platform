@@ -396,6 +396,18 @@ export default function Connectors() {
                           Prova
                         </Button>
                       ) : null}
+                      {entry.auth === "provider" && !entry.appRegistered ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setAppTarget(entry);
+                            setAppValues({ clientId: "", clientSecret: "" });
+                          }}
+                        >
+                          Registra l'app
+                        </Button>
+                      ) : null}
                       <Button
                         variant="ghost"
                         size="sm"
