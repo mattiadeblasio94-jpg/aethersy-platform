@@ -84,6 +84,7 @@ const {
   decryptBundle,
   connectorRedirectUri,
   resolveConnectorClient,
+  googleConsentHint,
 } = await import("../dist/connectors/oauth.js");
 const { registerConnectorRoutes } = await import("../dist/connectors/routes.js");
 
@@ -112,9 +113,9 @@ await check("catalogo: id univoci", () => {
   assert.equal(new Set(ids).size, ids.length);
 });
 
-await check("catalogo: i connettori Google sono 12 e usano l'app Google", () => {
+await check("catalogo: i connettori Google sono 10 e usano l'app Google", () => {
   const google = CONNECTORS.filter((connector) => connector.auth === "google" && !connector.master);
-  assert.equal(google.length, 12, `sono ${google.length} servizi Google`);
+  assert.equal(google.length, 10, `sono ${google.length} servizi Google`);
   for (const connector of google) {
     assert.equal(connector.loginLabel, "Accedi con Google");
     assert.ok(connector.scopes.length > 0, `${connector.id} senza scope`);
@@ -125,7 +126,7 @@ await check("catalogo: il master Google attiva tutti i servizi Google", () => {
   const master = googleMasterSpec();
   assert.ok(master, "manca il connettore master Google");
   assert.equal(master.auth, "google");
-  assert.equal(master.masterServices.length, 12);
+  assert.equal(master.masterServices.length, 10);
   const services = CONNECTORS.filter((connector) => connector.auth === "google" && !connector.master);
   for (const service of services) {
     assert.ok(master.masterServices.includes(service.id), `${service.id} non coperto dal master`);
@@ -136,11 +137,27 @@ await check("catalogo: il master Google attiva tutti i servizi Google", () => {
 await check("scope Google concessi -> servizi che risultano collegati", () => {
   const master = googleMasterSpec();
   const covered = googleServicesForScopes(master.scopes);
-  assert.equal(covered.length, 12);
+  assert.equal(covered.length, 10);
   assert.deepEqual(googleServicesForScopes(["https://www.googleapis.com/auth/gmail.modify"]), [
     "gmail",
   ]);
   assert.deepEqual(googleServicesForScopes([]), []);
+});
+
+await check("catalogo: gli scope non validi del progetto non sono nel master", () => {
+  // `maps-api` e `meetings.space` non sono scope validi per il progetto
+  // Google: con quelli il consenso unificato falliva con invalid_scope.
+  const master = googleMasterSpec();
+  const forbidden = [
+    "https://www.googleapis.com/auth/maps-api",
+    "https://www.googleapis.com/auth/meetings.space",
+  ];
+  for (const scope of forbidden) {
+    assert.ok(!master.scopes.includes(scope), `scope non valido nel master: ${scope}`);
+    for (const connector of CONNECTORS) {
+      assert.ok(!connector.scopes.includes(scope), `scope non valido in ${connector.id}: ${scope}`);
+    }
+  }
 });
 
 await check("catalogo: ogni connettore con app dedicata ha la console sviluppatore", () => {
@@ -307,6 +324,15 @@ await check("app tenant: l'app di piattaforma ha la precedenza", async () => {
   assert.equal(resolved.client.clientId, "slack-client-id");
 });
 
+await check("consenso Google: invalid_scope e app non verificata hanno una guida", () => {
+  const invalid = googleConsentHint("invalid_scope", "Some requested scopes were invalid.");
+  assert.match(invalid, /Google ha rifiutato uno scope/);
+  const unverified = googleConsentHint("access_denied", "App is not verified for this user");
+  assert.match(unverified, /utenti di test/);
+  assert.equal(googleConsentHint("access_denied", "User cancelled"), null);
+  assert.equal(googleConsentHint(null, null), null);
+});
+
 // --- URL di autorizzazione ----------------------------------------------------
 
 await check("authorize Google: client_id, redirect_uri, scope e PKCE", () => {
@@ -340,13 +366,13 @@ await check("authorize app dedicata: endpoint del provider e client_id", () => {
   assert.equal(url.searchParams.get("state"), "st");
 });
 
-await check("authorize master Google: consenso unificato sui 12 servizi", () => {
+await check("authorize master Google: consenso unificato sui 10 servizi", () => {
   const master = googleMasterSpec();
   const url = new URL(
     connectorAuthorizeUrl(master, { state: "st", codeVerifier: "verifier" }),
   );
   const scopes = url.searchParams.get("scope").split(" ");
-  assert.equal(scopes.length, 12);
+  assert.equal(scopes.length, 10);
   assert.equal(url.searchParams.get("client_id"), "google-client-id");
   assert.equal(url.searchParams.get("redirect_uri"), connectorRedirectUri("google", "google"));
   assert.equal(url.searchParams.get("prompt"), "consent");

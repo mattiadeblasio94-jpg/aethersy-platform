@@ -11,6 +11,8 @@ import {
   CONNECTOR_CATEGORY_LABELS,
   CONNECTORS,
   CONNECTOR_SIGNUP_URLS,
+  GOOGLE_CONSOLE_URL,
+  GOOGLE_TEST_USER_NOTICE,
   connectorById,
   connectorCredentialKinds,
   type ConnectorSpec,
@@ -20,6 +22,7 @@ import {
   connectorRedirectUri,
   decryptBundle,
   encryptBundle,
+  googleConsentHint,
   resolveConnectorClient,
 } from "./oauth.js";
 import { deleteConnectorApp, listConnectorApps, saveConnectorApp } from "./app-store.js";
@@ -119,6 +122,10 @@ interface CatalogEntry {
   /** Un solo accesso attiva piu' servizi (Google). */
   master: boolean;
   masterServices: string[];
+  /** Avviso sui requisiti del provider (Google: utente di test). */
+  notice: string | null;
+  /** Console del provider (schermata di consenso OAuth). */
+  consoleUrl: string | null;
 }
 
 export async function registerConnectorRoutes(app: FastifyInstance): Promise<void> {
@@ -181,6 +188,12 @@ export async function registerConnectorRoutes(app: FastifyInstance): Promise<voi
         appRegistered: apps.has(spec.id),
         master: Boolean(spec.master),
         masterServices: spec.masterServices ?? [],
+        notice:
+          spec.auth === "google"
+            ? GOOGLE_TEST_USER_NOTICE
+            : (spec.notice ?? null),
+        consoleUrl:
+          spec.auth === "google" ? GOOGLE_CONSOLE_URL : (spec.consoleUrl ?? null),
       });
     }
 
@@ -267,10 +280,12 @@ export async function registerConnectorRoutes(app: FastifyInstance): Promise<voi
     }
 
     if (query.error) {
+      const hint = spec.auth === "google" ? googleConsentHint(query.error, query.error_description) : null;
       const message =
-        query.error === "access_denied"
+        hint ??
+        (query.error === "access_denied"
           ? "Accesso annullato."
-          : `Il provider ha rifiutato il collegamento: ${query.error_description ?? query.error}.`;
+          : `Il provider ha rifiutato il collegamento: ${query.error_description ?? query.error}.`);
       return reply.redirect(
         connectorsUiUrl({ connect: spec.id, error: "CONNECTOR_ACCESS_DENIED", message }),
       );

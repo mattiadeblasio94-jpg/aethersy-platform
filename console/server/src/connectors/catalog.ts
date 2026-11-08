@@ -69,6 +69,13 @@ export interface ConnectorSpec {
    */
   master?: boolean;
   masterServices?: string[];
+  /**
+   * Avviso mostrato in UI: requisiti del provider che l'utente deve
+   * soddisfare (per Google: account tra gli utenti di test).
+   */
+  notice?: string;
+  /** Console del provider da aprire (schermata di consenso, API da abilitare). */
+  consoleUrl?: string;
   /** Verifica reale della connessione: chiama il provider e riporta l'esito. */
   test?: (secret: Record<string, string>) => Promise<{
     ok: boolean;
@@ -148,11 +155,27 @@ export const CONNECTOR_SIGNUP_URLS: Record<string, string> = {
   stripe: "https://dashboard.stripe.com/connect/apps",
 };
 
+/**
+ * Console del progetto Google (schermata di consenso OAuth): serve per
+ * aggiungere gli utenti di test senza i quali gli ambiti sensibili restano
+ * bloccati.
+ */
+export const GOOGLE_CONSOLE_URL = "https://console.cloud.google.com/apis/credentials/consent";
+
+/** Avviso mostrato su tutti i connettori Google. */
+export const GOOGLE_TEST_USER_NOTICE =
+  "L'app Google non e' ancora verificata: gli ambiti sensibili (Gmail, Calendar, Docs, YouTube, Ads) si concedono solo agli utenti di test. Aggiungi il tuo account in Google Cloud Console -> Schermata di consenso OAuth -> Utenti di test. Drive funziona subito (ambito non sensibile).";
+
 export const CONNECTORS: ConnectorSpec[] = [
   // ------------------------------------------------- Google: un solo accesso --
   // "master": un unico login Google, con il consenso unificato, attiva tutti
-  // i servizi Google elencati in `masterServices` (Gmail, Drive, Calendar,
-  // Sheets, Slides, Docs, Tasks, Meet, YouTube, Maps, Analytics, Ads).
+  // i servizi Google elencati in `masterServices`.
+  //
+  // Gli scope sono quelli che il progetto Google accetta: `maps-api` e
+  // `meetings.space` NON sono scope validi per questo progetto (le API Maps
+  // Platform e Meet non sono abilitate) e facevano fallire l'intero consenso
+  // con `invalid_scope`. Meet e Maps sono quindi servizi separati, attivabili
+  // dopo aver abilitato le rispettive API nel progetto.
   {
     id: "google",
     label: "Google (tutti i servizi)",
@@ -167,19 +190,17 @@ export const CONNECTORS: ConnectorSpec[] = [
       "https://www.googleapis.com/auth/presentations",
       "https://www.googleapis.com/auth/documents",
       "https://www.googleapis.com/auth/tasks",
-      "https://www.googleapis.com/auth/meetings.space",
       "https://www.googleapis.com/auth/youtube.upload",
-      "https://www.googleapis.com/auth/maps-api",
       "https://www.googleapis.com/auth/analytics.readonly",
       "https://www.googleapis.com/auth/adwords",
     ],
     capabilities: [
       "Un solo login per tutti i servizi Google",
       "Consenso unificato in una schermata",
-      "Gmail, Drive, Calendar, Docs, Sheets, Ads...",
+      "Gmail, Drive, Calendar, Docs, Ads...",
     ],
     howTo:
-      "Un solo accesso Google: il consenso copre tutti i servizi Google collegati. Se la Console Google chiede di aggiungere un utente di test, aggiungi il tuo account (Schermata di consenso OAuth -> Utenti di test); se rifiuta un scope, collega i servizi uno alla volta.",
+      "Un solo accesso Google: il consenso copre tutti i servizi Google collegati. Si puo' anche attivare un servizio alla volta.",
     master: true,
     masterServices: [
       "gmail",
@@ -189,9 +210,7 @@ export const CONNECTORS: ConnectorSpec[] = [
       "google-slides",
       "google-docs",
       "google-tasks",
-      "google-meet",
       "youtube",
-      "google-maps",
       "google-analytics",
       "google-ads",
     ],
@@ -287,17 +306,6 @@ export const CONNECTORS: ConnectorSpec[] = [
     test: async (s) => jsonProbe(`${GOOGLE_BASE}/tasks/v1/users/@me/lists`, bearer(s.access_token)),
   },
   {
-    id: "google-meet",
-    label: "Google Meet",
-    category: "communication",
-    auth: "google",
-    loginLabel: "Accedi con Google",
-    scopes: ["https://www.googleapis.com/auth/meetings.space"],
-    capabilities: ["Creare riunioni con il cliente", "Link di call automatici", "Colloqui generati dal CRM"],
-    howTo: "Login Google: la stessa app che usi per entrare in Aethersy, con il consenso Meet.",
-    test: async (s) => jsonProbe(`${GOOGLE_BASE}/meet/v2/spaces`, bearer(s.access_token)),
-  },
-  {
     id: "youtube",
     label: "YouTube",
     category: "media",
@@ -309,18 +317,8 @@ export const CONNECTORS: ConnectorSpec[] = [
     test: async (s) => jsonProbe(`${GOOGLE_BASE}/youtube/v3/channels?mine=true`, bearer(s.access_token)),
   },
   {
-    id: "google-maps",
-    label: "Google Maps",
-    category: "analytics",
-    auth: "google",
-    loginLabel: "Accedi con Google",
-    scopes: ["https://www.googleapis.com/auth/maps-api"],
-    capabilities: ["Analisi della concorrenza locale", "Piani di visita", "Geolocalizzazione attivita'"],
-    howTo: "Login Google: la stessa app che usi per entrare in Aethersy, con il consenso Maps.",
-    test: async (s) => jsonProbe(`${GOOGLE_BASE}/geolocation/v1/geolocate`, bearer(s.access_token)),
-  },
-  {
     id: "google-analytics",
+
     label: "Google Analytics",
     category: "analytics",
     auth: "google",

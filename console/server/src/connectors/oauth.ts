@@ -346,6 +346,37 @@ export async function exchangeConnectorCode(
   return bundle;
 }
 
+/**
+ * Messaggio leggibile quando Google blocca il consenso.
+ *
+ * Due casi reali (2026-11-08):
+ *   - `invalid_scope`: uno degli scope richiesti non e' valido per il progetto
+ *     (le API corrispondenti non sono abilitate) -> conviene collegare i
+ *     servizi uno alla volta;
+ *   - app non verificata: gli ambiti sensibili si concedono solo agli utenti
+ *     di test, quindi l'account deve essere aggiunto nella schermata di
+ *     consenso OAuth del progetto.
+ */
+export function googleConsentHint(
+  error?: string | null,
+  description?: string | null,
+): string | null {
+  const text = `${error ?? ""} ${description ?? ""}`.toLowerCase();
+  if (!text.trim()) return null;
+  if (text.includes("invalid_scope")) {
+    return "Google ha rifiutato uno scope richiesto: l'API corrispondente non e' abilitata nel progetto Google. Collega i servizi uno alla volta: quelli senza problemi restano collegati.";
+  }
+  if (
+    text.includes("not verified") ||
+    text.includes("unverified") ||
+    text.includes("sensitive") ||
+    text.includes("access_blocked")
+  ) {
+    return "L'app Google non e' verificata: gli ambiti sensibili (Gmail, Calendar, Docs, YouTube, Ads) si concedono solo agli utenti di test. Aggiungi il tuo account in Google Cloud Console -> Schermata di consenso OAuth -> Utenti di test, poi riprova. Drive funziona subito.";
+  }
+  return null;
+}
+
 /** Cifra il pacchetto token per il database. */
 export function encryptBundle(bundle: ConnectorTokenBundle | Record<string, string>): string {
   return encryptSecret(JSON.stringify(bundle));

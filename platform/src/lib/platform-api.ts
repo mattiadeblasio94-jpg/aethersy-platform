@@ -668,6 +668,10 @@ export interface ConnectorEntry {
   /** Un solo accesso attiva piu' servizi (Google). */
   master: boolean;
   masterServices: string[];
+  /** Avviso sui requisiti del provider (Google: utente di test). */
+  notice: string | null;
+  /** Console del provider (schermata di consenso OAuth). */
+  consoleUrl: string | null;
 }
 
 export interface ConnectorCatalog {

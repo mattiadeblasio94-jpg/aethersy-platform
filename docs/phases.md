@@ -1259,3 +1259,37 @@ VPS. Ora il collegamento parte dalla piattaforma ed e' il tenant a fare login e 
 mandato alla pagina di login/consenso del provider e al rientro la connessione e' attiva con il token cifrato. Restano
 azioni utente: completare il consenso Google (aggiungere il proprio account come utente di test se la Console lo
 chiede) e creare l'app del provider nella sua console (il pulsante "Registra l'app" guida passo passo).
+
+### Fase 24 — Correzione scope Google e avviso "utente di test" (08/11/2026)
+
+**Problema**: il consenso unificato Google falliva con `Errore 400: invalid_scope`. L'errore di Google era
+esplicito: `valid=[gmail.modify, drive.file, calendar, spreadsheets, presentations, documents, tasks,
+youtube.upload, analytics.readonly, adwords]`, `invalid=[maps-api, meetings.space]`. `maps-api` e
+`meetings.space` **non sono scope validi per questo progetto** (le API Maps Platform e Meet non sono abilitate),
+e la presenza di un solo scope non valido fa fallire l'intera richiesta. Inoltre il collegamento reale
+riusciva solo su Google Drive: gli ambiti sensibili (Gmail, Calendar, Docs, YouTube, Ads) vengono concessi solo
+agli **utenti di test** finche' l'app non e' verificata, e Drive funziona perche' non e' un ambito sensibile.
+
+**Cosa e' cambiato**
+
+- `console/server/src/connectors/catalog.ts`: il connettore master Google chiede ora **solo i 10 scope validi**
+  (`maps-api` e `meetings.space` eliminati); i servizi **Google Meet** e **Google Maps** escono dal catalogo
+  (le rispettive API non sono abilitate nel progetto: si possono riaggiungere abilitandole).
+- `console/server/src/connectors/oauth.ts`: `googleConsentHint()` traduce gli errori di Google in indicazioni
+  operative (`invalid_scope` -> collegare i servizi uno alla volta; app non verificata -> aggiungere l'account
+  come utente di test).
+- `console/server/src/connectors/routes.ts` e `console/server/src/auth/social-routes.ts`: il callback mostra il
+  messaggio operativo invece del codice grezzo del provider.
+- `platform/src/pages/Connectors.tsx`: ogni card Google mostra l'avviso "app non verificata / utenti di test" con
+  il link alla console del progetto Google (`apis/credentials/consent`).
+- `GOOGLE_CONSOLE_URL` e `GOOGLE_TEST_USER_NOTICE` centralizzati nel catalogo.
+
+**Verifica**: `npm run test:connectors` -> **37/37 verdi** (nuovo test: gli scope non validi non devono comparire
+in nessun connettore; nuovo test sui messaggi di consenso), `npm run test:social` -> **19/19**, build BFF e
+platform OK.
+
+**Azione utente** (2 minuti, una volta sola): Google Cloud Console -> progetto AIFORGE -> "Schermata di consenso
+OAuth" -> stato pubblicazione **In test** -> "Utenti di test" -> aggiungi `mattiadeblasio94@gmail.com` -> Salva.
+Da quel momento Gmail, Calendar, Docs, Sheets, YouTube, Ads si collegano con un solo accesso (in modalita' test il
+refresh token scade dopo 7 giorni: la piattaforma riusa il token finche' e' valido). Alternativa a lungo termine:
+richiedere la verifica dell'app.

@@ -370,6 +370,23 @@ export default function Connectors() {
                   </p>
                 ) : null}
 
+                {entry.notice ? (
+                  <div className="rounded-lg border border-secondary/25 bg-bg-hover px-3 py-2 text-xs text-text-secondary">
+                    <p>{entry.notice}</p>
+                    {entry.consoleUrl ? (
+                      <a
+                        className="mt-1 inline-flex items-center gap-1 text-secondary underline"
+                        href={entry.consoleUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                        Apri la console Google
+                      </a>
+                    ) : null}
+                  </div>
+                ) : null}
+
                 {entry.appRegistered ? (
                   <p className="text-xs text-text-muted">
                     App OAuth registrata da te: il login parte dalla pagina di {entry.label}.
