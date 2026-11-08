@@ -23,6 +23,13 @@ import {
   SocialAuthError,
   type SocialProvider,
 } from "./social.js";
+import { connectorById } from "../connectors/catalog.js";
+import { completeConnectorAuthorization } from "../connectors/complete.js";
+import {
+  CONNECTOR_STATE_COOKIE,
+  parseSignedState,
+  verifyConnectorState,
+} from "../connectors/state.js";
 
 // Login sociale (Google, GitHub): avvio del flusso, callback e stato dei
 // provider.
@@ -177,6 +184,14 @@ async function completeSocialLogin(
     state?: string;
   };
 
+  // Callback unificato: Google e GitHub hanno un solo callback URL per app,
+  // quindi qui arrivano sia i login sia i collegamenti dei connettori. Lo
+  // `state` firmato dice quale dei due e' (campo `c` = connettore).
+  const connectorState = parseSignedState(query.state);
+  if (connectorState) {
+    return completeConnectorLogin(provider, connectorState, query, request, reply);
+  }
+
   // Il target si considera fidato solo se lo `state` firmato combacia con il
   // cookie anti-CSRF: altrimenti si usa la destinazione di default.
   const verifiedTarget = verifyOAuthState(query.state, request.cookies[OAUTH_STATE_COOKIE]);
@@ -247,6 +262,89 @@ async function completeSocialLogin(
   clearSocialFailure(provider);
 
   return reply.redirect(oauthSuccessUrl(target));
+}
+
+/**
+ * Collegamento di un connettore Google/GitHub: lo `state` firmato porta
+ * tenant + connettore, il cookie httpOnly porta il code_verifier PKCE.
+ */
+async function completeConnectorLogin(
+  provider: SocialProvider,
+  connectorState: { tenantId: string; connectorId: string; nonce: string },
+  query: { code?: string; error?: string; error_description?: string; state?: string },
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  const spec = connectorById(connectorState.connectorId);
+  const cookieValue = request.cookies[CONNECTOR_STATE_COOKIE];
+  const verified = verifyConnectorState(query.state, cookieValue);
+
+  const clearConnectorCookie = (): void => {
+    reply.clearCookie(CONNECTOR_STATE_COOKIE, {
+      path: "/api",
+      ...(config.cookieDomain ? { domain: config.cookieDomain } : {}),
+    });
+  };
+
+  const back = (params: Record<string, string>): string => {
+    const url = new URL(`${config.platformPublicUrl}/connectors`);
+    for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+    return url.toString();
+  };
+
+  if (!spec || spec.auth !== provider) {
+    clearConnectorCookie();
+    return reply.redirect(
+      back({
+        error: "CONNECTOR_STATE_INVALID",
+        message: "Sessione di collegamento non valida: riavria il collegamento.",
+      }),
+    );
+  }
+
+  if (!verified || verified.connectorId !== spec.id || verified.tenantId !== connectorState.tenantId) {
+    clearConnectorCookie();
+    return reply.redirect(
+      back({
+        connect: spec.id,
+        error: "CONNECTOR_STATE_INVALID",
+        message: "Sessione di collegamento non valida o scaduta: riprova.",
+      }),
+    );
+  }
+
+  if (query.error) {
+    clearConnectorCookie();
+    const message =
+      query.error === "access_denied"
+        ? "Accesso annullato."
+        : `Il provider ha rifiutato il collegamento: ${query.error_description ?? query.error}.`;
+    return reply.redirect(
+      back({ connect: spec.id, error: "CONNECTOR_ACCESS_DENIED", message }),
+    );
+  }
+
+  if (!query.code) {
+    clearConnectorCookie();
+    return reply.redirect(
+      back({
+        connect: spec.id,
+        error: "CONNECTOR_CODE_MISSING",
+        message: "Codice di autorizzazione mancante: riprova il collegamento.",
+      }),
+    );
+  }
+
+  const codeVerifier = (cookieValue ?? "").split(".")[1] ?? "";
+  const completion = await completeConnectorAuthorization({
+    spec,
+    code: query.code,
+    codeVerifier,
+    tenantId: verified.tenantId,
+    platformUrl: config.platformPublicUrl,
+  });
+  clearConnectorCookie();
+  return reply.redirect(completion.redirect);
 }
 
 export async function registerSocialRoutes(app: FastifyInstance): Promise<void> {

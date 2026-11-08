@@ -1152,6 +1152,16 @@ collegamento deve avvenire tramite login diretto*. Traduzione tecnica:
 - `console/server/src/connectors/state.ts`: `state` firmato (HMAC con
   `CONSOLE_SESSION_SECRET`) che porta tenant + connettore + nonce, con
   confronto obbligatorio del cookie httpOnly e scadenza 10 minuti.
+- **Callback unificato**: Google e GitHub accettano **un solo callback URL per
+  app**, quindi il login e il collegamento dei connettori devono tornare dalla
+  stessa porta. I connettori Google/GitHub usano il callback gia' registrato
+  (`/api/auth/social/{google,github}/callback`) e il flusso si distingue dal
+  contenuto dello `state` firmato (campo `c` = connettore): il callback sociale
+  riconosce gli `state` di connettore e completa il collegamento
+  (`console/server/src/connectors/complete.ts`). Le app OAuth dedicate dei
+  provider hanno invece il proprio callback
+  `/api/pipeline/connectors/<id>/callback`. Senza questo, GitHub avrebbe
+  risposto `404 Not Found` sul callback del connettore.
 - `console/server/src/connectors/routes.ts`: `GET /api/pipeline/connectors`
   (catalogo + stato reale per tenant), `GET /:id/connect` (redirect al
   provider), `GET /:id/callback` (scambio codice -> credenziale cifrata ->
@@ -1178,10 +1188,10 @@ collegamento deve avvenire tramite login diretto*. Traduzione tecnica:
 
 **Verifica**
 
-- `npm run test:connectors` -> **23/23 verdi** (catalogo coerente, `state`
+- `npm run test:connectors` -> **27/27 verdi** (catalogo coerente, `state`
   valido/manomesso/scaduto, URL di autorizzazione Google/GitHub/app dedicate
-  con PKCE, scambio codice con provider finto, cifratura del token, rotte
-  montate).
+  con PKCE, callback unificato riconosciuto dal login sociale, scambio codice
+  con provider finto, cifratura del token, rotte montate).
 - `npm run test:social` -> **19/19 verdi** (nessuna regressione sul login).
 - Build BFF (`tsc`) e build platform (`tsc -b && vite build`) OK.
 

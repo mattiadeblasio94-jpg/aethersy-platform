@@ -36,13 +36,27 @@ function envName(connectorId: string, suffix: string): string {
   return `CONNECTOR_${connectorId.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_${suffix}`;
 }
 
-export function connectorRedirectUri(connectorId: string): string {
+/**
+ * Callback OAuth del connettore.
+ *
+ * Google e GitHub accettano **un solo** callback URL per app: per non
+ * litigare con il login sociale, i connettori Google/GitHub usano lo stesso
+ * callback gia' registrato, e il flusso si distingue dal contenuto dello
+ * `state` firmato. Le app dedicate dei provider hanno invece il proprio
+ * callback sotto `/api/pipeline/connectors/<id>/callback`.
+ */
+export function connectorRedirectUri(
+  connectorId: string,
+  auth?: "google" | "github" | "provider" | "api_key",
+): string {
+  if (auth === "google") return config.googleRedirectUri;
+  if (auth === "github") return config.githubRedirectUri;
   return `${config.platformPublicUrl}/api/pipeline/connectors/${connectorId}/callback`;
 }
 
 /** Credenziali dell'app OAuth da usare per il connettore. */
 export function connectorConfig(spec: ConnectorSpec): ConnectorConfigState {
-  const redirectUri = connectorRedirectUri(spec.id);
+  const redirectUri = connectorRedirectUri(spec.id, spec.auth);
 
   if (spec.auth === "google") {
     if (!config.googleClientId || !config.googleClientSecret) {

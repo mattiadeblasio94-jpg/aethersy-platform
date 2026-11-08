@@ -68,9 +68,8 @@ process.env.CONNECTOR_SLACK_TOKEN_URL = `${stubBase}/token`;
 const { CONNECTORS, connectorById, CONNECTOR_CATEGORY_LABELS } = await import(
   "../dist/connectors/catalog.js"
 );
-const { createConnectorState, verifyConnectorState, connectorStateCookieValue } = await import(
-  "../dist/connectors/state.js"
-);
+const { createConnectorState, verifyConnectorState, connectorStateCookieValue, parseSignedState, isConnectorState } =
+  await import("../dist/connectors/state.js");
 const {
   connectorAuthorizeUrl,
   connectorConfig,
@@ -212,7 +211,7 @@ await check("config: app dedicata accreditata -> pronta", () => {
   const state = connectorConfig(slack);
   assert.equal(state.ok, true);
   assert.equal(state.client.clientId, "slack-client-id");
-  assert.equal(state.client.redirectUri, connectorRedirectUri("slack"));
+  assert.equal(state.client.redirectUri, connectorRedirectUri("slack", "provider"));
 });
 
 await check("config: i connettori a credenziale sono sempre utilizzabili", () => {
@@ -227,7 +226,7 @@ await check("authorize Google: client_id, redirect_uri, scope e PKCE", () => {
   );
   assert.equal(url.origin + url.pathname, "https://accounts.google.com/o/oauth2/v2/auth");
   assert.equal(url.searchParams.get("client_id"), "google-client-id");
-  assert.equal(url.searchParams.get("redirect_uri"), connectorRedirectUri("gmail"));
+  assert.equal(url.searchParams.get("redirect_uri"), connectorRedirectUri("gmail", "google"));
   assert.equal(url.searchParams.get("state"), "st");
   assert.ok(url.searchParams.get("scope").includes("gmail.modify"));
   assert.equal(url.searchParams.get("code_challenge_method"), "S256");
@@ -240,7 +239,7 @@ await check("authorize GitHub: scope repo workflow e redirect_uri", () => {
   );
   assert.equal(url.origin + url.pathname, "https://github.com/login/oauth/authorize");
   assert.equal(url.searchParams.get("scope"), "repo workflow");
-  assert.equal(url.searchParams.get("redirect_uri"), connectorRedirectUri("github"));
+  assert.equal(url.searchParams.get("redirect_uri"), connectorRedirectUri("github", "github"));
 });
 
 await check("authorize app dedicata: endpoint del provider e client_id", () => {
@@ -250,6 +249,33 @@ await check("authorize app dedicata: endpoint del provider e client_id", () => {
   assert.equal(url.origin + url.pathname, "https://slack.com/oauth/v2/authorize");
   assert.equal(url.searchParams.get("client_id"), "slack-client-id");
   assert.equal(url.searchParams.get("state"), "st");
+});
+
+await check("callback unificato: Google/GitHub usano il callback gia' registrato", () => {
+  // Google e GitHub accettano un solo callback URL per app: il connettore
+  // deve usare quello del login sociale, altrimenti GitHub risponde 404.
+  assert.equal(
+    connectorRedirectUri("gmail", "google"),
+    "https://platform.aethersy.online/api/auth/social/google/callback",
+  );
+  assert.equal(
+    connectorRedirectUri("github", "github"),
+    "https://platform.aethersy.online/api/auth/social/github/callback",
+  );
+  assert.equal(
+    connectorRedirectUri("slack", "provider"),
+    "https://platform.aethersy.online/api/pipeline/connectors/slack/callback",
+  );
+});
+
+await check("state di connettore: riconosciuto senza cookie (callback unificato)", () => {
+  const { state } = createConnectorState({ tenantId: "tenant-1", connectorId: "gmail" });
+  const payload = parseSignedState(state);
+  assert.equal(payload.connectorId, "gmail");
+  assert.equal(payload.tenantId, "tenant-1");
+  assert.equal(isConnectorState(state), true);
+  assert.equal(isConnectorState("state.manomesso"), false);
+  assert.equal(isConnectorState(undefined), false);
 });
 
 // --- Scambio codice / token --------------------------------------------------
@@ -297,6 +323,42 @@ await check("rotte: GET connect di un connettore inesistente -> 404", async () =
   });
   assert.ok([401, 503].includes(response.statusCode), `status ${response.statusCode}`);
 });
+
+// Callback unificato: il login sociale deve riconoscere uno `state` di
+// connettore e rientrare in /connectors (non nella pagina di login).
+const { registerSocialRoutes } = await import("../dist/auth/social-routes.js");
+const socialApp = Fastify({ logger: false });
+await socialApp.register(cookie);
+await registerSocialRoutes(socialApp);
+await socialApp.ready();
+
+await check("callback unificato: state di connettore -> rientro in /connectors", async () => {
+  const { state, nonce, codeVerifier } = createConnectorState({
+    tenantId: "tenant-1",
+    connectorId: "github",
+  });
+  const cookie = connectorStateCookieValue(nonce, codeVerifier);
+  const response = await socialApp.inject({
+    method: "GET",
+    url: `/api/auth/social/github/callback?code=good&state=${encodeURIComponent(state)}`,
+    headers: { cookie: `aethersy_connector_oauth=${cookie}` },
+  });
+  assert.equal(response.statusCode, 302);
+  const location = new URL(response.headers.location);
+  assert.equal(location.pathname, "/connectors");
+});
+
+await check("callback unificato: state di connettore senza cookie -> rientro in /connectors", async () => {
+  const { state } = createConnectorState({ tenantId: "tenant-1", connectorId: "github" });
+  const response = await socialApp.inject({
+    method: "GET",
+    url: `/api/auth/social/github/callback?code=good&state=${encodeURIComponent(state)}`,
+  });
+  assert.equal(response.statusCode, 302);
+  assert.equal(new URL(response.headers.location).pathname, "/connectors");
+});
+
+await socialApp.close();
 
 await app.close();
 stub.close();

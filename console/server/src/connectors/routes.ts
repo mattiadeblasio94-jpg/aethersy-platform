@@ -20,8 +20,8 @@ import {
   connectorRedirectUri,
   decryptBundle,
   encryptBundle,
-  exchangeConnectorCode,
 } from "./oauth.js";
+import { completeConnectorAuthorization } from "./complete.js";
 import {
   CONNECTOR_STATE_COOKIE,
   connectorStateCookieValue,
@@ -44,7 +44,10 @@ import {
 
 function setStateCookie(reply: FastifyReply, value: string): void {
   reply.setCookie(CONNECTOR_STATE_COOKIE, value, {
-    path: "/api/pipeline/connectors",
+    // Path "/api": il callback dei connettori Google/GitHub e' lo stesso del
+    // login sociale (`/api/auth/social/...`), perche' il provider accetta un
+    // solo callback URL per app.
+    path: "/api",
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
@@ -55,7 +58,7 @@ function setStateCookie(reply: FastifyReply, value: string): void {
 
 function clearStateCookie(reply: FastifyReply): void {
   reply.clearCookie(CONNECTOR_STATE_COOKIE, {
-    path: "/api/pipeline/connectors",
+    path: "/api",
     ...(config.cookieDomain ? { domain: config.cookieDomain } : {}),
   });
 }
@@ -156,7 +159,7 @@ export async function registerConnectorRoutes(app: FastifyInstance): Promise<voi
           : null,
         revoked: Boolean(credential) && !connected && credential?.status === "revoked",
         testable: Boolean(spec.test),
-        redirectUri: connectorRedirectUri(spec.id),
+        redirectUri: connectorRedirectUri(spec.id, spec.auth),
       };
     });
 
@@ -261,33 +264,14 @@ export async function registerConnectorRoutes(app: FastifyInstance): Promise<voi
     }
 
     const codeVerifier = (cookieValue ?? "").split(".")[1] ?? "";
-    try {
-      const bundle = await exchangeConnectorCode(spec, query.code, codeVerifier);
-      await saveIntegrationCredential({
-        tenantId: verified.tenantId,
-        provider: spec.id,
-        kind: "oauth",
-        label: spec.id,
-        secretEnc: encryptBundle(bundle),
-        scopes: bundle.scope ? bundle.scope.split(" ").filter(Boolean) : spec.scopes,
-        meta: {
-          connected_at: new Date().toISOString(),
-          auth: spec.auth,
-          ...(bundle.extra ?? {}),
-        },
-      });
-      return reply.redirect(
-        connectorsUiUrl({ connected: spec.id, message: `${spec.label} collegato.` }),
-      );
-    } catch (err) {
-      return reply.redirect(
-        connectorsUiUrl({
-          connect: spec.id,
-          error: "CONNECTOR_FAILED",
-          message: `Collegamento a ${spec.label} fallito: ${(err as Error).message}`,
-        }),
-      );
-    }
+    const completion = await completeConnectorAuthorization({
+      spec,
+      code: query.code,
+      codeVerifier,
+      tenantId: verified.tenantId,
+      platformUrl: config.platformPublicUrl,
+    });
+    return reply.redirect(completion.redirect);
   });
 
   // Credenziale manuale (solo per i provider senza OAuth).
