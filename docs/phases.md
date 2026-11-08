@@ -1048,3 +1048,68 @@ sapere che un deploy era andato a buon fine.
   `http://console:3000/api/internal/webhook-echo/<tenant>`: evento `lead.created` registrato
   con firma `sha256=...`, QA browser con 0 errori di console. Il webhook di prova con
   listener locale (morto a ogni deploy) e' stato revocato.
+
+### Fase 21 — Login sociale reale Google/GitHub (08/11/2026)
+
+**Problema.** I bottoni "Continua con Google/GitHub" dalla pagina di login non
+portavano a una sessione: il callback finiva su risposte JSON (502/400) e non
+sulla pagina di login. Diagnosi live (non da documentazione):
+
+- **Google**: credenziali accettate da Google (`invalid_grant` = codice
+  fasullo, non `invalid_client`) e `redirect_uri` registrata correttamente
+  (l'authorize risponde 302, non 400 `redirect_uri_mismatch`).
+- **GitHub**: `POST /login/oauth/access_token` rispondeva `{"error":"Not Found"}`
+  = `client_id`/`client_secret` non riconosciuti. Cause: il `client_secret`
+  era vecchio (rigenerato) e, in aggiunta, l'errore non era mai mostrato
+  all'utente.
+
+**Cosa e' cambiato (server)**
+
+- `console/server/src/auth/social.ts`: client OAuth2 dei due provider
+  (authorize/token/userinfo, `nonce` OIDC, `prompt=select_account` per Google
+  invece del consenso forzato), mappatura degli errori del provider in messaggi
+  leggibili, stato dell'ultimo errore per provider. Endpoint sovrascrivibili
+  via env (`GOOGLE_TOKEN_URL`, `GITHUB_USERINFO_URL`, ...) per i test.
+- `console/server/src/auth/social-routes.ts`: rotte del flusso. Il login **non
+  si blocca piu'**: se Activepieces rifiuta la creazione account, non e'
+  raggiungibile o l'archivio credenziali non funziona, si apre comunque la
+  sessione (il tenant e' risolto via email). Ogni errore rientra alla pagina
+  di login con `?error=&message=`.
+- `GET /api/auth/social/providers`: stato dei provider (configurati, scope,
+  ultimo errore) usato dalla UI.
+- `console/server/src/routes.ts`: il blocco OAuth inline (361 righe) e' stato
+  sostituito dal modulo dedicato.
+- `scripts/deploy-stack.sh`: la nota del deploy viene sanitizzata (apostrofi e
+  virgolette rompevano il quoting della notifica: il deploy partiva ma la
+  notifica non veniva registrata).
+
+**Cosa e' cambiato (UI)**
+
+- `platform/src/pages/Login.tsx`: banner di errore OAuth, hint sotto ogni
+  bottone social (ultimo errore del provider), bottone disabilitato se il
+  provider non e' configurato, divisore "o continua con" non piu' sovrapposto.
+- `platform/src/lib/platform-api.ts`: `getSocialProviders()`.
+- `console/web/src/pages/Login.tsx`: banner di errore OAuth.
+
+**Verifica (live, 08/11/2026)**
+
+- Test automatici: `npm run test:social` -> **19/19 verdi** (provider finto in
+  locale: URL di autorizzazione, scambio token, profilo, anti-CSRF, callback
+  completo con cookie di sessione, rientro al login su errore).
+- `GET /api/auth/social/providers` -> 200, `google.configured=true`,
+  `github.configured=true`.
+- Avvio Google/GitHub -> 302 al provider con `client_id`, `redirect_uri` e
+  `state` corretti.
+- Callback GitHub con codice fasullo -> **redirect a
+  `/login?error=OAUTH_CODE_INVALID&message=...`** (prima: pagina JSON).
+- QA browser reale: click "Continua con Google" -> `accounts.google.com`
+  (client_id corretto); click "Continua con GitHub" -> `github.com/login` con
+  `client_id` e `redirect_uri` corretti; banner d'errore visibile; **0 errori
+  console**.
+- Credenziali GitHub: con il secret rigenerato, il token endpoint risponde
+  `bad_verification_code` (non `Not Found`): le credenziali sono riconosciute
+  e il `redirect_uri` registrato coincide.
+
+**Stato**: `DONE`. Resta da fare l'utente: il consenso sul provider (schermata
+Google/GitHub) e la verifica che la schermata di consenso Google non sia in
+modalita' "Testing" (in quel caso serve aggiungere l'account come test user).
