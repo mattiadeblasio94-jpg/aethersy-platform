@@ -1,6 +1,7 @@
 import { config } from "../config.js";
 import { decryptSecret, encryptSecret } from "../pipeline/secrets.js";
 import type { ConnectorSpec } from "./catalog.js";
+import { getConnectorApp, type ConnectorApp } from "./app-store.js";
 import { pkceChallenge } from "./state.js";
 
 // Flusso OAuth2 dei connettori.
@@ -8,9 +9,13 @@ import { pkceChallenge } from "./state.js";
 // Un solo codice per tre situazioni:
 //   - app Google gia' configurata (Gmail, Drive, Calendar, ...);
 //   - app GitHub gia' configurata;
-//   - app dedicata del provider (Slack, Notion, Figma, ...), le cui
-//     credenziali si accreditano nel VPS come CONNECTOR_<ID>_CLIENT_ID e
-//     CONNECTOR_<ID>_CLIENT_SECRET.
+//   - app dedicata del provider (Slack, Notion, Figma, ...): le credenziali
+//     arrivano dall'app di piattaforma (CONNECTOR_<ID>_CLIENT_ID /
+//     CONNECTOR_<ID>_CLIENT_SECRET nel VPS) oppure dall'app registrata dal
+//     tenant direttamente nella piattaforma.
+//
+// In ogni caso l'utente viene mandate alla pagina di login del provider e il
+// consenso torna alla piattaforma.
 //
 // I token viaggiano cifrati (AES-256-GCM) e restano sul server: il frontend
 // riceve solo lo stato della connessione.
@@ -124,12 +129,82 @@ export function connectorConfigured(spec: ConnectorSpec): boolean {
   return connectorConfig(spec).ok;
 }
 
+export interface ResolvedClient {
+  client: ConnectorClient | null;
+  /** "env" = app di piattaforma, "tenant" = app registrata dal tenant. */
+  source: "env" | "tenant" | null;
+  /** Motivo per cui il connettore non e' utilizzabile. */
+  reason: string | null;
+}
+
+/**
+ * Client OAuth da usare per il connettore.
+ *
+ * Priorita': app di piattaforma (env del VPS) -> app registrata dal tenant
+ * dalla piattaforma. Se il tenant ha registrato un'app, la UI permette di
+ * rimuoverla per tornare all'app di piattaforma.
+ */
+export async function resolveConnectorClient(
+  spec: ConnectorSpec,
+  tenantId: string | null,
+  apps?: Map<string, ConnectorApp>,
+): Promise<ResolvedClient> {
+  const envState = connectorConfig(spec);
+  if (envState.ok && envState.client) {
+    return { client: envState.client, source: "env", reason: null };
+  }
+  if (spec.auth !== "provider" || !tenantId) {
+    return { client: null, source: null, reason: envState.reason };
+  }
+
+  const app = apps ? apps.get(spec.id) : await getConnectorApp(tenantId, spec.id);
+  if (!app) {
+    return {
+      client: null,
+      source: null,
+      reason: `Registra l'app OAuth di ${spec.label} (client_id e client_secret) per attivare il login: il pulsante mandera' l'utente alla pagina di accesso di ${spec.label}.`,
+    };
+  }
+  if (!app.valid || !app.clientId || !app.clientSecret) {
+    return {
+      client: null,
+      source: null,
+      reason: `L'app OAuth di ${spec.label} non e' piu' decifrabile: registrala di nuovo.`,
+    };
+  }
+  const redirectUri = app.redirectUri || connectorRedirectUri(spec.id, spec.auth);
+  return {
+    client: { clientId: app.clientId, clientSecret: app.clientSecret, redirectUri },
+    source: "tenant",
+    reason: null,
+  };
+}
+
+/**
+ * Scope richiesti a Google.
+ *
+ * Il connettore master chiede il consenso unificato su tutti i servizi; se
+ * Google rifiuta uno scope (scope "restricted" su app non verificate), si puo'
+ * ridurre l'elenco con CONNECTOR_GOOGLE_SCOPES e collegare i servizi restanti
+ * uno alla volta.
+ */
+export function googleScopes(spec: ConnectorSpec): string[] {
+  const override = envValue("CONNECTOR_GOOGLE_SCOPES");
+  if (!override) return spec.scopes;
+  const scopes = override
+    .split(/[\s,]+/)
+    .map((scope) => scope.trim())
+    .filter(Boolean);
+  return scopes.length ? scopes : spec.scopes;
+}
+
 /** URL di autorizzazione del provider (con state firmato e PKCE dove serve). */
 export function connectorAuthorizeUrl(
   spec: ConnectorSpec,
   params: { state: string; codeVerifier: string },
+  clientOverride?: ConnectorClient | null,
 ): string {
-  const client = connectorConfig(spec).client;
+  const client = clientOverride ?? connectorConfig(spec).client;
   if (!client) throw new Error(`Connettore ${spec.id} non configurato`);
 
   if (spec.auth === "google") {
@@ -137,7 +212,7 @@ export function connectorAuthorizeUrl(
       client_id: client.clientId,
       redirect_uri: client.redirectUri,
       response_type: "code",
-      scope: spec.scopes.join(" "),
+      scope: googleScopes(spec).join(" "),
       state: params.state,
       access_type: "offline",
       prompt: "consent",
@@ -194,8 +269,9 @@ export async function exchangeConnectorCode(
   spec: ConnectorSpec,
   code: string,
   codeVerifier: string,
+  clientOverride?: ConnectorClient | null,
 ): Promise<ConnectorTokenBundle> {
-  const client = connectorConfig(spec).client;
+  const client = clientOverride ?? connectorConfig(spec).client;
   if (!client) throw new Error(`Connettore ${spec.id} non configurato`);
 
   const tokenUrl =

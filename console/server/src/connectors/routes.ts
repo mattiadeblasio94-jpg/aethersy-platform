@@ -10,17 +10,19 @@ import {
 import {
   CONNECTOR_CATEGORY_LABELS,
   CONNECTORS,
+  CONNECTOR_SIGNUP_URLS,
   connectorById,
   connectorCredentialKinds,
   type ConnectorSpec,
 } from "./catalog.js";
 import {
   connectorAuthorizeUrl,
-  connectorConfig,
   connectorRedirectUri,
   decryptBundle,
   encryptBundle,
+  resolveConnectorClient,
 } from "./oauth.js";
+import { deleteConnectorApp, listConnectorApps, saveConnectorApp } from "./app-store.js";
 import { completeConnectorAuthorization } from "./complete.js";
 import {
   CONNECTOR_STATE_COOKIE,
@@ -96,7 +98,7 @@ interface CatalogEntry {
   scopes: string[];
   capabilities: string[];
   howTo: string;
-  /** L'app OAuth del provider e' accreditata nel VPS. */
+  /** L'app OAuth del provider e' disponibile (piattaforma o tenant). */
   configured: boolean;
   /** Motivo per cui non e' utilizzabile (null quando e' ok). */
   missingReason: string | null;
@@ -110,6 +112,13 @@ interface CatalogEntry {
   /** Il connettore espone una verifica reale. */
   testable: boolean;
   redirectUri: string;
+  /** Console sviluppatore dove si registra l'app OAuth del provider. */
+  signupUrl: string | null;
+  /** Il tenant ha registrato una app OAuth per questo provider. */
+  appRegistered: boolean;
+  /** Un solo accesso attiva piu' servizi (Google). */
+  master: boolean;
+  masterServices: string[];
 }
 
 export async function registerConnectorRoutes(app: FastifyInstance): Promise<void> {
@@ -123,18 +132,23 @@ export async function registerConnectorRoutes(app: FastifyInstance): Promise<voi
     for (const row of credentials) {
       if (!byProvider.has(row.provider)) byProvider.set(row.provider, row);
     }
+    const apps = await listConnectorApps(tenant.tenantId);
 
-    const entries: CatalogEntry[] = CONNECTORS.map((spec) => {
+    const entries: CatalogEntry[] = [];
+    for (const spec of CONNECTORS) {
       const credential = byProvider.get(spec.id);
       const kinds = connectorCredentialKinds(spec);
       // Solo le credenziali del tipo giusto contano come collegamento: la
       // credenziale webhook di Slack non e' il login OAuth di Slack.
       const matches =
         credential && kinds.includes(credential.kind as "oauth" | "webhook" | "api_key");
-      const configState = spec.auth === "api_key" ? null : connectorConfig(spec);
-      const configured = spec.auth === "api_key" ? true : (configState?.ok ?? false);
+      const resolved =
+        spec.auth === "api_key"
+          ? { client: null, source: null, reason: null }
+          : await resolveConnectorClient(spec, tenant.tenantId, apps);
+      const configured = spec.auth === "api_key" ? true : Boolean(resolved.client);
       const connected = Boolean(matches && credential?.status === "active");
-      return {
+      entries.push({
         id: spec.id,
         label: spec.label,
         category: spec.category,
@@ -143,15 +157,18 @@ export async function registerConnectorRoutes(app: FastifyInstance): Promise<voi
         loginLabel: spec.loginLabel,
         scopes: spec.scopes,
         capabilities: spec.capabilities,
-        howTo: spec.howTo,
+        howTo:
+          spec.auth === "google" && !spec.master
+            ? `${spec.howTo} Se Google chiede di verificare l'app, aggiungi il tuo account come utente di test (Schermata di consenso OAuth -> Utenti di test).`
+            : spec.howTo,
         configured,
         missingReason:
           configured || connected
             ? null
-            : (configState?.reason ??
+            : (resolved.reason ??
               (spec.auth === "api_key"
                 ? null
-                : "App OAuth del provider non configurata nel VPS.")),
+                : "App OAuth del provider non configurata.")),
         apiKeyFields: spec.apiKeyFields ?? [],
         connected,
         connectedAt: connected
@@ -160,8 +177,12 @@ export async function registerConnectorRoutes(app: FastifyInstance): Promise<voi
         revoked: Boolean(credential) && !connected && credential?.status === "revoked",
         testable: Boolean(spec.test),
         redirectUri: connectorRedirectUri(spec.id, spec.auth),
-      };
-    });
+        signupUrl: CONNECTOR_SIGNUP_URLS[spec.id] ?? null,
+        appRegistered: apps.has(spec.id),
+        master: Boolean(spec.master),
+        masterServices: spec.masterServices ?? [],
+      });
+    }
 
     return {
       connectors: entries,
@@ -174,11 +195,13 @@ export async function registerConnectorRoutes(app: FastifyInstance): Promise<voi
         total: entries.length,
         connected: entries.filter((entry) => entry.connected).length,
         ready: entries.filter((entry) => entry.configured).length,
+        apps: entries.filter((entry) => entry.appRegistered).length,
       },
     };
   });
 
-  // Avvio del login al provider.
+  // Avvio del login al provider: l'utente viene mandato alla pagina di
+  // accesso del provider, che chiede il consenso e rimanda qui.
   app.get("/api/pipeline/connectors/:id/connect", async (request, reply) => {
     const tenant = await requireMeteredTenant(request, reply);
     if (!tenant) return reply;
@@ -194,13 +217,13 @@ export async function registerConnectorRoutes(app: FastifyInstance): Promise<voi
       );
     }
 
-    const configState = connectorConfig(spec);
-    if (!configState.ok || !configState.client) {
+    const resolved = await resolveConnectorClient(spec, tenant.tenantId);
+    if (!resolved.client) {
       return reply.redirect(
         connectorsUiUrl({
           connect: spec.id,
           error: "CONNECTOR_NOT_CONFIGURED",
-          message: configState.reason ?? "App OAuth del provider non configurata.",
+          message: resolved.reason ?? "App OAuth del provider non configurata.",
         }),
       );
     }
@@ -211,7 +234,7 @@ export async function registerConnectorRoutes(app: FastifyInstance): Promise<voi
     });
     setStateCookie(reply, connectorStateCookieValue(nonce, codeVerifier));
 
-    const url = connectorAuthorizeUrl(spec, { state, codeVerifier });
+    const url = connectorAuthorizeUrl(spec, { state, codeVerifier }, resolved.client);
     return reply.redirect(url);
   });
 
@@ -264,14 +287,83 @@ export async function registerConnectorRoutes(app: FastifyInstance): Promise<voi
     }
 
     const codeVerifier = (cookieValue ?? "").split(".")[1] ?? "";
+    // L'app da usare e' quella del tenant (se l'ha registrata dalla
+    // piattaforma), altrimenti quella di piattaforma.
+    const resolved = await resolveConnectorClient(spec, verified.tenantId);
     const completion = await completeConnectorAuthorization({
       spec,
       code: query.code,
       codeVerifier,
       tenantId: verified.tenantId,
       platformUrl: config.platformPublicUrl,
+      client: resolved.client,
     });
     return reply.redirect(completion.redirect);
+  });
+
+  // Registrazione dell'app OAuth del provider: da qui in poi il pulsante
+  // "Accedi con <Provider>" porta alla pagina di login del provider.
+  app.post("/api/pipeline/connectors/:id/app", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return reply;
+
+    const params = request.params as { id: string };
+    const spec = connectorById(params.id);
+    if (!spec) {
+      return reply.code(404).send({ code: "CONNECTOR_UNKNOWN", message: "Connettore sconosciuto" });
+    }
+    if (spec.auth !== "provider") {
+      return reply.code(400).send({
+        code: "CONNECTOR_NOT_PROVIDER_AUTH",
+        message: `${spec.label} non usa un'app OAuth registrata dal tenant.`,
+      });
+    }
+
+    const body = (request.body ?? {}) as {
+      clientId?: string;
+      clientSecret?: string;
+      redirectUri?: string;
+    };
+    const clientId = (body.clientId ?? "").trim();
+    const clientSecret = (body.clientSecret ?? "").trim();
+    if (!clientId || !clientSecret) {
+      return reply.code(400).send({
+        code: "CONNECTOR_APP_FIELDS_MISSING",
+        message: "Client ID e Client Secret sono obbligatori.",
+      });
+    }
+
+    const redirectUri = (body.redirectUri ?? "").trim() || connectorRedirectUri(spec.id, spec.auth);
+    const app = await saveConnectorApp({
+      tenantId: tenant.tenantId,
+      provider: spec.id,
+      clientId,
+      clientSecret,
+      redirectUri,
+    });
+
+    return {
+      ok: true,
+      connector: spec.id,
+      appRegistered: true,
+      redirectUri: app.redirectUri,
+      message: `App ${spec.label} registrata: il pulsante di accesso e' attivo.`,
+    };
+  });
+
+  // Rimozione dell'app registrata dal tenant (la connessione resta).
+  app.delete("/api/pipeline/connectors/:id/app", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return reply;
+
+    const params = request.params as { id: string };
+    const spec = connectorById(params.id);
+    if (!spec) {
+      return reply.code(404).send({ code: "CONNECTOR_UNKNOWN", message: "Connettore sconosciuto" });
+    }
+
+    const removed = await deleteConnectorApp(tenant.tenantId, spec.id);
+    return { ok: removed, connector: spec.id, appRegistered: false };
   });
 
   // Credenziale manuale (solo per i provider senza OAuth).

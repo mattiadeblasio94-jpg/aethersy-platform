@@ -23,6 +23,7 @@
 | 11 | Aethersy Console (fusion A+B+C) | `DONE` — frontend proprietario React 19 + Vite + TS + Tailwind v4 + TanStack Query + React Router + BFF Fastify con sessione httpOnly firmata, proxy `/api/ap/*` verso Activepieces e **AI Router** multimodale (selezione automatica di modelli gratuiti OpenRouter per capacità testo/immagine/audio/video). Deployato su `https://console.aethersy.online` con TLS Let's Encrypt; smoke test 5/5 OK |
 | 12 | Piattaforma a consumo (P0) — pipeline + libreria asset + Console run/crediti | `IN CORSO` — metering/billing (P0.1/P0.2, `24c1d1f`), pipeline multi-stadio + orchestratore HITL + segreti (P0.3, `94f65a9`), **libreria asset con versioning e approvazione in Console** (P0.4), **Console run/crediti** (P0.5), **lead webhook + canale Slack + export pacchettizzato + UI lead** (P0.6), **QA E2E + backup off-site** (P0.7), **layer Anteprima `/preview`** (P0.8), **deploy Console+Platform** (P0.9), **modulo piattaforma Business Pulse + `pipeline.schedule`** (P0.10, 29/10/2026), **substrato aziendale multi-tenant: schema `business` (obiettivi/memoria/prodotti) + API + Console** (P1.1, 29/10/2026), **motore agenti P2.1 + piattaforma reale P2.2 (`platform.aethersy.online`)** (29/10/2026). QA E2E **65/65 OK**; metering 44/44; web+server build OK; deployato sul VPS |
 | 22 | Connettori reali con login ai provider | `DONE` — catalogo di **43 provider** (Google ×12 via app Google, GitHub, Slack/Notion/Figma/... via app OAuth dedicata, Telegram/Cloudflare/... via credenziale), login reale con `state` firmato + PKCE, token cifrati AES-256-GCM, pagina `/connectors` con verifica live; **connessioni placeholder eliminate**. Test `test:connectors` 23/23. Restano azioni utente: accreditare le app OAuth dei provider e creare quelle mancanti |
+| 23 | Collegamento ai provider con consenso del provider | `DONE` — **un solo accesso Google** attiva i 12 servizi Google (consenso unificato) e le **app OAuth dei provider si registrano dalla piattaforma** (tabella `pipeline.oauth_app`, secret cifrato): il pulsante porta alla pagina di login/consenso del provider e al rientro la connessione e' attiva. Test `test:connectors` 35/35, `test:social` 19/19. Restano azioni utente: consenso Google (eventuale utente di test) e creazione delle app dei provider |
 
 ## Verifica §11 — nomi variabili, versioni, route
 
@@ -1200,3 +1201,52 @@ primo giorno) e per la parte Slack/Notion/Figma/... (il codice e' pronto e
 attivabile appena l'app OAuth del provider viene accreditata nel VPS). Per i
 provider senza OAuth resta da fare l'utente (creare l'app o recuperare la
 credenziale del proprio account).
+
+### Fase 23 — Collegamento ai provider: un solo accesso Google + app OAuth registrate dal tenant (08/11/2026)
+
+**Richiesta**: "dalla piattaforma manda nella pagina login del provider e fa fare accesso con consenso tramite login". La
+fase 22 aveva il codice del flusso, ma due ostacoli restavano: (a) i servizi Google si collegavano uno alla volta,
+(b) i provider con app OAuth dedicata (Slack, Notion, Figma, ...) non si potevano attivare senza toccare il `.env` del
+VPS. Ora il collegamento parte dalla piattaforma ed e' il tenant a fare login e consenso sulla pagina del provider.
+
+**Cosa e' cambiato (backend)**
+
+- **Connettore master Google** (`console/server/src/connectors/catalog.ts`): `google` — "Google (tutti i servizi)" con
+  il consenso unificato sui 12 servizi (Gmail, Drive, Calendar, Sheets, Slides, Docs, Tasks, Meet, YouTube, Maps,
+  Analytics, Ads). Un solo login, una sola schermata di consenso. `googleServicesForScopes()` calcola quali servizi
+  copre il token concesso: al rientro dal callback il token viene salvato per **ogni** servizio incluso nel consenso.
+- **App OAuth registrate dal tenant** (nuova tabella `pipeline.oauth_app`, `console/server/src/connectors/app-store.ts`):
+  il tenant crea l'app nella console del provider e registra `client_id`/`client_secret` **dalla piattaforma**; il
+  secret e' cifrato a riposo (AES-256-GCM). Le app sono per tenant (`tenant_id`, `provider`), quindi un tenant non
+  tocca gli altri; la `redirect_uri` resta quella del provider (`/api/pipeline/connectors/<id>/callback`).
+- `console/server/src/connectors/oauth.ts`: `resolveConnectorClient()` risolve il client con priorita' app di
+  piattaforma (env) -> app del tenant; `connectorAuthorizeUrl()`/`exchangeConnectorCode()` accettano il client
+  risolto; `googleScopes()` con override `CONNECTOR_GOOGLE_SCOPES` (per ridurre il consenso unificato se Google
+  rifiuta uno scope "restricted" su app non verificate).
+- `console/server/src/connectors/routes.ts`: `POST /api/pipeline/connectors/:id/app` (registra l'app),
+  `DELETE /api/pipeline/connectors/:id/app` (la rimuove), catalogo arricchito con `signupUrl` (console sviluppatore),
+  `appRegistered`, `master`, `masterServices`.
+- `console/server/src/connectors/complete.ts`: al rientro dal callback il token e' salvato per il connettore e per
+  tutti i servizi Google coperti dal consenso (master: tutti e 12).
+
+**Cosa e' cambiato (UI)**
+
+- `platform/src/pages/Connectors.tsx`: card master in testa con badge "Un solo accesso" e l'elenco dei servizi che
+  attiva; per i provider con app dedicata il pulsante diventa **"Registra l'app"** e apre un modal con il link alla
+  console del provider, il `callback` da copiare e i campi client id/secret; pulsante "Rimuovi app"; dopo la
+  registrazione il pulsante passa a "Accedi con <Provider>" e manda alla pagina di login del provider.
+- `platform/src/lib/platform-api.ts` + `platform-queries.ts`: `registerConnectorApp`, `deleteConnectorApp` e relativi
+  hook (`useRegisterConnectorApp`, `useDeleteConnectorApp`).
+
+**Verifica**
+
+- `npm run test:connectors` -> **35/35 verdi** (catalogo con master e 12 servizi, mappa scope->servizi, console
+  sviluppatore per ogni provider con app, risoluzione client con app del tenant e priorita' dell'app di piattaforma,
+  URL di autorizzazione master con 12 scope + PKCE).
+- `npm run test:social` -> **19/19 verdi** (nessuna regressione sul login sociale).
+- Build BFF (`tsc`) e build platform (`tsc -b && vite build`) OK.
+
+**Stato**: `DONE`. Il flusso richiesto e' operativo: dalla piattaforma si clicca il provider, l'utente viene
+mandato alla pagina di login/consenso del provider e al rientro la connessione e' attiva con il token cifrato. Restano
+azioni utente: completare il consenso Google (aggiungere il proprio account come utente di test se la Console lo
+chiede) e creare l'app del provider nella sua console (il pulsante "Registra l'app" guida passo passo).

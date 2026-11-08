@@ -63,6 +63,12 @@ export interface ConnectorSpec {
   };
   /** Campi da chiedere all'utente per i connettori "api_key". */
   apiKeyFields?: { key: string; label: string; secret?: boolean }[];
+  /**
+   * Connettore "master": un solo accesso attiva piu' servizi (Google).
+   * `masterServices` elenca i servizi che ricevono lo stesso token.
+   */
+  master?: boolean;
+  masterServices?: string[];
   /** Verifica reale della connessione: chiama il provider e riporta l'esito. */
   test?: (secret: Record<string, string>) => Promise<{
     ok: boolean;
@@ -115,7 +121,87 @@ function bearer(token: string, extra: Record<string, string> = {}): RequestInit 
 
 const GOOGLE_BASE = "https://www.googleapis.com";
 
+/**
+ * Console sviluppatore dove il tenant crea l'app OAuth del provider.
+ * La UI la mostra accanto al form di registrazione dell'app.
+ */
+export const CONNECTOR_SIGNUP_URLS: Record<string, string> = {
+  slack: "https://api.slack.com/apps",
+  notion: "https://www.notion.so/my-integrations",
+  figma: "https://www.figma.com/developers/apps",
+  linear: "https://linear.app/settings/api",
+  canva: "https://www.canva.com/developers/integrations",
+  salesforce: "https://developer.salesforce.com",
+  zoom: "https://marketplace.zoom.us",
+  outlook: "https://entra.microsoft.com",
+  "microsoft-teams": "https://entra.microsoft.com",
+  instagram: "https://developers.facebook.com",
+  facebook: "https://developers.facebook.com",
+  "meta-ads": "https://developers.facebook.com",
+  linkedin: "https://www.linkedin.com/developers/apps",
+  tiktok: "https://developers.tiktok.com",
+  "tiktok-ads": "https://business-api.tiktok.com/portal/auth",
+  x: "https://developer.x.com",
+  reddit: "https://www.reddit.com/prefs/apps",
+  wix: "https://dev.wix.com/apps",
+  paypal: "https://developer.paypal.com",
+  stripe: "https://dashboard.stripe.com/connect/apps",
+};
+
 export const CONNECTORS: ConnectorSpec[] = [
+  // ------------------------------------------------- Google: un solo accesso --
+  // "master": un unico login Google, con il consenso unificato, attiva tutti
+  // i servizi Google elencati in `masterServices` (Gmail, Drive, Calendar,
+  // Sheets, Slides, Docs, Tasks, Meet, YouTube, Maps, Analytics, Ads).
+  {
+    id: "google",
+    label: "Google (tutti i servizi)",
+    category: "productivity",
+    auth: "google",
+    loginLabel: "Collega Google con un solo accesso",
+    scopes: [
+      "https://www.googleapis.com/auth/gmail.modify",
+      "https://www.googleapis.com/auth/drive.file",
+      "https://www.googleapis.com/auth/calendar",
+      "https://www.googleapis.com/auth/spreadsheets",
+      "https://www.googleapis.com/auth/presentations",
+      "https://www.googleapis.com/auth/documents",
+      "https://www.googleapis.com/auth/tasks",
+      "https://www.googleapis.com/auth/meetings.space",
+      "https://www.googleapis.com/auth/youtube.upload",
+      "https://www.googleapis.com/auth/maps-api",
+      "https://www.googleapis.com/auth/analytics.readonly",
+      "https://www.googleapis.com/auth/adwords",
+    ],
+    capabilities: [
+      "Un solo login per tutti i servizi Google",
+      "Consenso unificato in una schermata",
+      "Gmail, Drive, Calendar, Docs, Sheets, Ads...",
+    ],
+    howTo:
+      "Un solo accesso Google: il consenso copre tutti i servizi Google collegati. Se la Console Google chiede di aggiungere un utente di test, aggiungi il tuo account (Schermata di consenso OAuth -> Utenti di test); se rifiuta un scope, collega i servizi uno alla volta.",
+    master: true,
+    masterServices: [
+      "gmail",
+      "google-drive",
+      "google-calendar",
+      "google-sheets",
+      "google-slides",
+      "google-docs",
+      "google-tasks",
+      "google-meet",
+      "youtube",
+      "google-maps",
+      "google-analytics",
+      "google-ads",
+    ],
+    test: async (s) =>
+      jsonProbe(
+        `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(s.access_token ?? "")}`,
+        { headers: { Accept: "application/json" } },
+      ),
+  },
+
   // ---------------------------------------------------------- Google (OAuth) --
   {
     id: "gmail",
@@ -784,6 +870,26 @@ export const CONNECTORS: ConnectorSpec[] = [
 
 export function connectorById(id: string): ConnectorSpec | undefined {
   return CONNECTORS.find((connector) => connector.id === id);
+}
+
+/** Connettore master Google (un solo accesso per tutti i servizi). */
+export function googleMasterSpec(): ConnectorSpec | undefined {
+  return CONNECTORS.find((connector) => connector.master);
+}
+
+/**
+ * Servizi Google coperti dagli scope concessi: cosi' un accesso Google
+ * attiva anche gli altri servizi per cui il consenso e' gia' stato dato.
+ */
+export function googleServicesForScopes(granted: string[]): string[] {
+  const set = new Set(granted.map((scope) => scope.trim()).filter(Boolean));
+  return CONNECTORS.filter(
+    (connector) =>
+      connector.auth === "google" &&
+      !connector.master &&
+      connector.scopes.length > 0 &&
+      connector.scopes.every((scope) => set.has(scope)),
+  ).map((connector) => connector.id);
 }
 
 /** Tipi di credenziale che valgono come collegamento per un connettore. */

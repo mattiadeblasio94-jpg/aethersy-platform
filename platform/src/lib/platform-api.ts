@@ -519,6 +519,17 @@ export const platformApi = {
       `/api/pipeline/connectors/${encodeURIComponent(id)}/disconnect`,
       {},
     ),
+  /** Registra l'app OAuth del provider (client_id + client_secret). */
+  registerConnectorApp: (id: string, body: { clientId: string; clientSecret: string; redirectUri?: string }) =>
+    http.post<{ ok: boolean; connector: string; appRegistered: boolean; redirectUri: string; message: string }>(
+      `/api/pipeline/connectors/${encodeURIComponent(id)}/app`,
+      body,
+    ),
+  /** Rimuove l'app OAuth registrata dal tenant. */
+  deleteConnectorApp: (id: string) =>
+    http.delete<{ ok: boolean; connector: string; appRegistered: boolean }>(
+      `/api/pipeline/connectors/${encodeURIComponent(id)}/app`,
+    ),
 
   // --- Post social ----------------------------------------------------------
   getSocialPosts: () => http.get<SocialPost[]>("/api/platform/social/posts"),
@@ -650,12 +661,19 @@ export interface ConnectorEntry {
   revoked: boolean;
   testable: boolean;
   redirectUri: string;
+  /** Console sviluppatore dove si registra l'app OAuth del provider. */
+  signupUrl: string | null;
+  /** Il tenant ha registrato una app OAuth per questo provider. */
+  appRegistered: boolean;
+  /** Un solo accesso attiva piu' servizi (Google). */
+  master: boolean;
+  masterServices: string[];
 }
 
 export interface ConnectorCatalog {
   connectors: ConnectorEntry[];
   groups: { key: string; label: string; count: number }[];
-  summary: { total: number; connected: number; ready: number };
+  summary: { total: number; connected: number; ready: number; apps: number };
 }
 
 export interface ConnectorTestResult {

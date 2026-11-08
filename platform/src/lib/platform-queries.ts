@@ -244,6 +244,32 @@ export function useDisconnectConnector() {
   });
 }
 
+/** Registra l'app OAuth del provider: da li' il login del provider e' attivo. */
+export function useRegisterConnectorApp() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      id: string;
+      clientId: string;
+      clientSecret: string;
+      redirectUri?: string;
+    }) => platformApi.registerConnectorApp(input.id, input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: realKeys.connectors });
+    },
+  });
+}
+
+export function useDeleteConnectorApp() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => platformApi.deleteConnectorApp(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: realKeys.connectors });
+    },
+  });
+}
+
 export function useDisconnectPlatform() {
   const qc = useQueryClient();
   return useMutation({

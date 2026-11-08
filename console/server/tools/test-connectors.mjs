@@ -65,9 +65,14 @@ process.env.CONNECTOR_SLACK_CLIENT_ID = "slack-client-id";
 process.env.CONNECTOR_SLACK_CLIENT_SECRET = "slack-client-secret";
 process.env.CONNECTOR_SLACK_TOKEN_URL = `${stubBase}/token`;
 
-const { CONNECTORS, connectorById, CONNECTOR_CATEGORY_LABELS } = await import(
-  "../dist/connectors/catalog.js"
-);
+const {
+  CONNECTORS,
+  connectorById,
+  CONNECTOR_CATEGORY_LABELS,
+  CONNECTOR_SIGNUP_URLS,
+  googleMasterSpec,
+  googleServicesForScopes,
+} = await import("../dist/connectors/catalog.js");
 const { createConnectorState, verifyConnectorState, connectorStateCookieValue, parseSignedState, isConnectorState } =
   await import("../dist/connectors/state.js");
 const {
@@ -78,6 +83,7 @@ const {
   encryptBundle,
   decryptBundle,
   connectorRedirectUri,
+  resolveConnectorClient,
 } = await import("../dist/connectors/oauth.js");
 const { registerConnectorRoutes } = await import("../dist/connectors/routes.js");
 
@@ -107,11 +113,42 @@ await check("catalogo: id univoci", () => {
 });
 
 await check("catalogo: i connettori Google sono 12 e usano l'app Google", () => {
-  const google = CONNECTORS.filter((connector) => connector.auth === "google");
-  assert.ok(google.length >= 10, `solo ${google.length} connettori Google`);
+  const google = CONNECTORS.filter((connector) => connector.auth === "google" && !connector.master);
+  assert.equal(google.length, 12, `sono ${google.length} servizi Google`);
   for (const connector of google) {
     assert.equal(connector.loginLabel, "Accedi con Google");
     assert.ok(connector.scopes.length > 0, `${connector.id} senza scope`);
+  }
+});
+
+await check("catalogo: il master Google attiva tutti i servizi Google", () => {
+  const master = googleMasterSpec();
+  assert.ok(master, "manca il connettore master Google");
+  assert.equal(master.auth, "google");
+  assert.equal(master.masterServices.length, 12);
+  const services = CONNECTORS.filter((connector) => connector.auth === "google" && !connector.master);
+  for (const service of services) {
+    assert.ok(master.masterServices.includes(service.id), `${service.id} non coperto dal master`);
+    assert.ok(master.scopes.includes(service.scopes[0]), `scope di ${service.id} assente nel master`);
+  }
+});
+
+await check("scope Google concessi -> servizi che risultano collegati", () => {
+  const master = googleMasterSpec();
+  const covered = googleServicesForScopes(master.scopes);
+  assert.equal(covered.length, 12);
+  assert.deepEqual(googleServicesForScopes(["https://www.googleapis.com/auth/gmail.modify"]), [
+    "gmail",
+  ]);
+  assert.deepEqual(googleServicesForScopes([]), []);
+});
+
+await check("catalogo: ogni connettore con app dedicata ha la console sviluppatore", () => {
+  for (const connector of CONNECTORS) {
+    if (connector.auth !== "provider") continue;
+    const url = CONNECTOR_SIGNUP_URLS[connector.id];
+    assert.ok(url, `${connector.id} senza console sviluppatore`);
+    assert.match(url, /^https:\/\//, `${connector.id} console non valida`);
   }
 });
 
@@ -218,6 +255,58 @@ await check("config: i connettori a credenziale sono sempre utilizzabili", () =>
   assert.equal(connectorConfigured(connectorById("telegram")), true);
 });
 
+// --- App registrata dal tenant ------------------------------------------------
+
+await check("app tenant: senza app il motivo spiega come registrarla", async () => {
+  const resolved = await resolveConnectorClient(connectorById("notion"), "tenant-1", new Map());
+  assert.equal(resolved.client, null);
+  assert.match(resolved.reason, /Registra l'app OAuth di Notion/);
+});
+
+await check("app tenant: registrata, il provider e' utilizzabile", async () => {
+  const apps = new Map([
+    [
+      "notion",
+      {
+        provider: "notion",
+        clientId: "tenant-client-id",
+        clientSecret: "tenant-secret",
+        redirectUri: null,
+        updatedAt: new Date().toISOString(),
+        valid: true,
+      },
+    ],
+  ]);
+  const resolved = await resolveConnectorClient(connectorById("notion"), "tenant-1", apps);
+  assert.equal(resolved.source, "tenant");
+  assert.equal(resolved.client.clientId, "tenant-client-id");
+  assert.equal(resolved.client.redirectUri, connectorRedirectUri("notion", "provider"));
+});
+
+await check("app tenant: con redirect URI propria viene usata", async () => {
+  const apps = new Map([
+    [
+      "figma",
+      {
+        provider: "figma",
+        clientId: "cid",
+        clientSecret: "secret",
+        redirectUri: "https://platform.aethersy.online/api/pipeline/connectors/figma/callback",
+        updatedAt: new Date().toISOString(),
+        valid: true,
+      },
+    ],
+  ]);
+  const resolved = await resolveConnectorClient(connectorById("figma"), "tenant-1", apps);
+  assert.equal(resolved.client.redirectUri, apps.get("figma").redirectUri);
+});
+
+await check("app tenant: l'app di piattaforma ha la precedenza", async () => {
+  const resolved = await resolveConnectorClient(connectorById("slack"), "tenant-1", new Map());
+  assert.equal(resolved.source, "env");
+  assert.equal(resolved.client.clientId, "slack-client-id");
+});
+
 // --- URL di autorizzazione ----------------------------------------------------
 
 await check("authorize Google: client_id, redirect_uri, scope e PKCE", () => {
@@ -249,6 +338,19 @@ await check("authorize app dedicata: endpoint del provider e client_id", () => {
   assert.equal(url.origin + url.pathname, "https://slack.com/oauth/v2/authorize");
   assert.equal(url.searchParams.get("client_id"), "slack-client-id");
   assert.equal(url.searchParams.get("state"), "st");
+});
+
+await check("authorize master Google: consenso unificato sui 12 servizi", () => {
+  const master = googleMasterSpec();
+  const url = new URL(
+    connectorAuthorizeUrl(master, { state: "st", codeVerifier: "verifier" }),
+  );
+  const scopes = url.searchParams.get("scope").split(" ");
+  assert.equal(scopes.length, 12);
+  assert.equal(url.searchParams.get("client_id"), "google-client-id");
+  assert.equal(url.searchParams.get("redirect_uri"), connectorRedirectUri("google", "google"));
+  assert.equal(url.searchParams.get("prompt"), "consent");
+  assert.equal(url.searchParams.get("code_challenge_method"), "S256");
 });
 
 await check("callback unificato: Google/GitHub usano il callback gia' registrato", () => {

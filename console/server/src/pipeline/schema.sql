@@ -121,6 +121,21 @@ CREATE TABLE IF NOT EXISTS pipeline.integration_credential (
 CREATE UNIQUE INDEX IF NOT EXISTS integration_credential_uniq
   ON pipeline.integration_credential(tenant_id, provider, label);
 
+-- App OAuth dei provider, registrate dal tenant dalla piattaforma ---------
+-- Ogni tenant puo' registrare la propria app per un provider (Slack, Notion,
+-- Figma, ...): e' l'app che riceve il consenso dell'utente al rientro dal
+-- login del provider. Il secret e' cifrato a riposo (AES-256-GCM).
+CREATE TABLE IF NOT EXISTS pipeline.oauth_app (
+  tenant_id         uuid NOT NULL REFERENCES metering.tenant(id) ON DELETE CASCADE,
+  provider          text NOT NULL,
+  client_id         text NOT NULL,
+  client_secret_enc text NOT NULL,
+  redirect_uri      text,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  updated_at        timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (tenant_id, provider)
+);
+
 -- Lead raccolti dal sito/form/webhook (P0.6) ---------------------------------
 CREATE TABLE IF NOT EXISTS pipeline.lead (
   id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),

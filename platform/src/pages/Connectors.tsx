@@ -2,12 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   CheckCircle2,
+  ExternalLink,
   KeyRound,
   Link2,
   Plug,
   PlugZap,
   Search,
   ShieldAlert,
+  Sparkles,
   Unplug,
 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
@@ -21,7 +23,9 @@ import { EmptyState, PageHeader } from "@/components/common/PageElements";
 import { PageTransition } from "@/components/common/Motion";
 import {
   useConnectors,
+  useDeleteConnectorApp,
   useDisconnectConnector,
+  useRegisterConnectorApp,
   useSaveConnectorApiKey,
   useTestConnector,
 } from "@/lib/platform-queries";
@@ -47,11 +51,15 @@ export default function Connectors() {
   const saveKey = useSaveConnectorApiKey();
   const testConnector = useTestConnector();
   const disconnectConnector = useDisconnectConnector();
+  const registerApp = useRegisterConnectorApp();
+  const deleteApp = useDeleteConnectorApp();
 
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState<string>("all");
   const [keyTarget, setKeyTarget] = useState<ConnectorEntry | null>(null);
   const [keyValues, setKeyValues] = useState<Record<string, string>>({});
+  const [appTarget, setAppTarget] = useState<ConnectorEntry | null>(null);
+  const [appValues, setAppValues] = useState({ clientId: "", clientSecret: "" });
   const [testingId, setTestingId] = useState<string | null>(null);
 
   const entries = connectors.data?.connectors ?? [];
@@ -99,7 +107,7 @@ export default function Connectors() {
 
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    return entries.filter((entry) => {
+    const filtered = entries.filter((entry) => {
       if (category !== "all" && entry.category !== category) return false;
       if (!needle) return true;
       return (
@@ -107,6 +115,8 @@ export default function Connectors() {
         entry.capabilities.some((item) => item.toLowerCase().includes(needle))
       );
     });
+    // I connettori "master" (un solo accesso per piu' servizi) in testa.
+    return [...filtered].sort((a, b) => Number(Boolean(b.master)) - Number(Boolean(a.master)));
   }, [entries, search, category]);
 
   function handleConnect(entry: ConnectorEntry) {
@@ -116,6 +126,13 @@ export default function Connectors() {
       return;
     }
     if (!entry.configured) {
+      // Provider con app OAuth dedicata: il tenant registra la sua app, poi il
+      // pulsante porta alla pagina di accesso del provider.
+      if (entry.auth === "provider") {
+        setAppTarget(entry);
+        setAppValues({ clientId: "", clientSecret: "" });
+        return;
+      }
       toast({
         kind: "error",
         title: `${entry.label} non e' ancora attivabile`,
@@ -125,6 +142,48 @@ export default function Connectors() {
     }
     // Redirect del browser: il provider fa login e consenso.
     window.location.assign(platformApi.connectorConnectUrl(entry.id));
+  }
+
+  async function handleSaveApp() {
+    if (!appTarget) return;
+    try {
+      await registerApp.mutateAsync({
+        id: appTarget.id,
+        clientId: appValues.clientId.trim(),
+        clientSecret: appValues.clientSecret.trim(),
+        redirectUri: appTarget.redirectUri,
+      });
+      toast({
+        kind: "success",
+        title: `App ${appTarget.label} registrata`,
+        description: `Ora il pulsante "${appTarget.loginLabel}" porta alla pagina di accesso di ${appTarget.label}.`,
+      });
+      setAppTarget(null);
+      setAppValues({ clientId: "", clientSecret: "" });
+    } catch (err) {
+      toast({
+        kind: "error",
+        title: "Registrazione app non riuscita",
+        description: (err as Error).message || "Riprova fra poco.",
+      });
+    }
+  }
+
+  async function handleDeleteApp(entry: ConnectorEntry) {
+    try {
+      await deleteApp.mutateAsync(entry.id);
+      toast({
+        kind: "success",
+        title: `App ${entry.label} rimossa`,
+        description: "La connessione resta attiva finche' non la scolleghi.",
+      });
+    } catch (err) {
+      toast({
+        kind: "error",
+        title: "Rimozione non riuscita",
+        description: (err as Error).message || "Riprova fra poco.",
+      });
+    }
   }
 
   async function handleSaveKey() {
@@ -274,6 +333,10 @@ export default function Connectors() {
                     <Badge variant="success" icon={<CheckCircle2 className="h-3 w-3" aria-hidden="true" />}>
                       Collegato
                     </Badge>
+                  ) : entry.master ? (
+                    <Badge variant="accent" icon={<Sparkles className="h-3 w-3" aria-hidden="true" />}>
+                      Un solo accesso
+                    </Badge>
                   ) : entry.configured ? (
                     <Badge variant={badge.variant}>{badge.label}</Badge>
                   ) : (
@@ -292,9 +355,24 @@ export default function Connectors() {
                   ))}
                 </ul>
 
+                {entry.master && entry.masterServices.length ? (
+                  <p className="text-xs text-text-muted">
+                    Attiva con un solo accesso:{" "}
+                    {entry.masterServices
+                      .map((id) => entries.find((item) => item.id === id)?.label ?? id)
+                      .join(", ")}
+                  </p>
+                ) : null}
+
                 {!entry.configured && entry.missingReason ? (
                   <p className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
                     {entry.missingReason}
+                  </p>
+                ) : null}
+
+                {entry.appRegistered ? (
+                  <p className="text-xs text-text-muted">
+                    App OAuth registrata da te: il login parte dalla pagina di {entry.label}.
                   </p>
                 ) : null}
 
@@ -329,21 +407,39 @@ export default function Connectors() {
                       </Button>
                     </>
                   ) : (
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      disabled={!entry.configured}
-                      leftIcon={
-                        entry.auth === "api_key" ? (
-                          <KeyRound className="h-4 w-4" aria-hidden="true" />
-                        ) : (
-                          <Link2 className="h-4 w-4" aria-hidden="true" />
-                        )
-                      }
-                      onClick={() => handleConnect(entry)}
-                    >
-                      {entry.auth === "api_key" ? "Inserisci credenziale" : entry.loginLabel}
-                    </Button>
+                    <>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        disabled={!entry.configured && entry.auth !== "provider"}
+                        leftIcon={
+                          entry.auth === "api_key" ? (
+                            <KeyRound className="h-4 w-4" aria-hidden="true" />
+                          ) : entry.auth === "provider" && !entry.configured ? (
+                            <KeyRound className="h-4 w-4" aria-hidden="true" />
+                          ) : (
+                            <Link2 className="h-4 w-4" aria-hidden="true" />
+                          )
+                        }
+                        onClick={() => handleConnect(entry)}
+                      >
+                        {entry.auth === "api_key"
+                          ? "Inserisci credenziale"
+                          : entry.auth === "provider" && !entry.configured
+                            ? "Registra l'app"
+                            : entry.loginLabel}
+                      </Button>
+                      {entry.appRegistered ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          loading={deleteApp.isPending && deleteApp.variables === entry.id}
+                          onClick={() => handleDeleteApp(entry)}
+                        >
+                          Rimuovi app
+                        </Button>
+                      ) : null}
+                    </>
                   )}
                 </div>
               </Card>
@@ -396,6 +492,89 @@ export default function Connectors() {
               autoComplete="off"
             />
           ))}
+        </div>
+      </Modal>
+      <Modal
+        open={appTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setAppTarget(null);
+            setAppValues({ clientId: "", clientSecret: "" });
+          }
+        }}
+        title={appTarget ? `Collega ${appTarget.label}` : "Collega"}
+        description={
+          appTarget
+            ? `Crea l'app di ${appTarget.label} nella console del provider, poi registra qui le credenziali: il pulsante di accesso portera' l'utente alla pagina di login di ${appTarget.label}.`
+            : ""
+        }
+        footer={
+          <>
+            <Button variant="ghost" size="sm" onClick={() => setAppTarget(null)}>
+              Annulla
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              loading={registerApp.isPending}
+              disabled={!appValues.clientId.trim() || !appValues.clientSecret.trim()}
+              onClick={handleSaveApp}
+            >
+              Salva e attiva
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-4">
+          {appTarget?.signupUrl ? (
+            <a
+              className="inline-flex items-center gap-2 text-sm text-secondary underline"
+              href={appTarget.signupUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <ExternalLink className="h-4 w-4" aria-hidden="true" />
+              Apri la console sviluppatore di {appTarget.label}
+            </a>
+          ) : null}
+
+          {appTarget?.howTo ? (
+            <p className="rounded-lg border border-secondary/20 bg-bg-hover px-3 py-2 text-sm text-text-secondary">
+              {appTarget.howTo}
+            </p>
+          ) : null}
+
+          {appTarget ? (
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-text-secondary">
+                Callback da registrare nel provider
+              </span>
+              <code className="rounded-lg border border-secondary/20 bg-bg-hover px-3 py-2 text-xs break-all text-text-primary">
+                {appTarget.redirectUri}
+              </code>
+            </div>
+          ) : null}
+
+          <Input
+            label="Client ID"
+            value={appValues.clientId}
+            onChange={(event) =>
+              setAppValues((prev) => ({ ...prev, clientId: event.target.value }))
+            }
+            autoComplete="off"
+          />
+          <Input
+            label="Client Secret"
+            type="password"
+            value={appValues.clientSecret}
+            onChange={(event) =>
+              setAppValues((prev) => ({ ...prev, clientSecret: event.target.value }))
+            }
+            autoComplete="off"
+          />
+          <p className="text-xs text-text-muted">
+            Il secret e' cifrato sul server e non viene mai mostrato in chiaro.
+          </p>
         </div>
       </Modal>
     </PageTransition>
