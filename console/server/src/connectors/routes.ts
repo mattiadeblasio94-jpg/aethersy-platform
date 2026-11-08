@@ -2,8 +2,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { config } from "../config.js";
 import { requireMeteredTenant } from "../platform/guard.js";
 import {
-  findActiveIntegrationCredential,
   listIntegrationCredentials,
+  getIntegrationCredential,
   revokeIntegrationCredential,
   saveIntegrationCredential,
 } from "../pipeline/repo.js";
@@ -11,6 +11,7 @@ import {
   CONNECTOR_CATEGORY_LABELS,
   CONNECTORS,
   connectorById,
+  connectorCredentialKinds,
   type ConnectorSpec,
 } from "./catalog.js";
 import {
@@ -65,6 +66,23 @@ function connectorsUiUrl(query: Record<string, string>): string {
   return url.toString();
 }
 
+/**
+ * Credenziale attiva del tenant per un connettore, filtrata per tipo:
+ * il webhook Slack non e' il login OAuth di Slack, e viceversa.
+ */
+async function findConnectorCredential(tenantId: string, spec: ConnectorSpec) {
+  const kinds = connectorCredentialKinds(spec);
+  const rows = await listIntegrationCredentials(tenantId);
+  const row = rows.find(
+    (item) =>
+      item.provider === spec.id &&
+      item.status === "active" &&
+      kinds.includes(item.kind as "oauth" | "webhook" | "api_key"),
+  );
+  if (!row) return null;
+  return getIntegrationCredential(tenantId, row.id);
+}
+
 interface CatalogEntry {
   id: string;
   label: string;
@@ -105,7 +123,14 @@ export async function registerConnectorRoutes(app: FastifyInstance): Promise<voi
 
     const entries: CatalogEntry[] = CONNECTORS.map((spec) => {
       const credential = byProvider.get(spec.id);
+      const kinds = connectorCredentialKinds(spec);
+      // Solo le credenziali del tipo giusto contano come collegamento: la
+      // credenziale webhook di Slack non e' il login OAuth di Slack.
+      const matches =
+        credential && kinds.includes(credential.kind as "oauth" | "webhook" | "api_key");
       const configState = spec.auth === "api_key" ? null : connectorConfig(spec);
+      const configured = spec.auth === "api_key" ? true : (configState?.ok ?? false);
+      const connected = Boolean(matches && credential?.status === "active");
       return {
         id: spec.id,
         label: spec.label,
@@ -116,18 +141,20 @@ export async function registerConnectorRoutes(app: FastifyInstance): Promise<voi
         scopes: spec.scopes,
         capabilities: spec.capabilities,
         howTo: spec.howTo,
-        configured: spec.auth === "api_key" ? true : (configState?.ok ?? false),
+        configured,
         missingReason:
-          spec.auth === "api_key"
+          configured || connected
             ? null
-            : (configState?.reason ?? "App OAuth del provider non configurata nel VPS."),
+            : (configState?.reason ??
+              (spec.auth === "api_key"
+                ? null
+                : "App OAuth del provider non configurata nel VPS.")),
         apiKeyFields: spec.apiKeyFields ?? [],
-        connected: credential?.status === "active",
-        connectedAt:
-          credential?.status === "active"
-            ? new Date(credential.updated_at ?? credential.created_at).toISOString()
-            : null,
-        revoked: credential?.status === "revoked",
+        connected,
+        connectedAt: connected
+          ? new Date(credential!.updated_at ?? credential!.created_at).toISOString()
+          : null,
+        revoked: Boolean(credential) && !connected && credential?.status === "revoked",
         testable: Boolean(spec.test),
         redirectUri: connectorRedirectUri(spec.id),
       };
@@ -325,7 +352,7 @@ export async function registerConnectorRoutes(app: FastifyInstance): Promise<voi
       });
     }
 
-    const credential = await findActiveIntegrationCredential(tenant.tenantId, spec.id);
+    const credential = await findConnectorCredential(tenant.tenantId, spec);
     if (!credential) {
       return reply.code(409).send({
         code: "CONNECTOR_NOT_CONNECTED",
@@ -356,7 +383,7 @@ export async function registerConnectorRoutes(app: FastifyInstance): Promise<voi
       return reply.code(404).send({ code: "CONNECTOR_UNKNOWN", message: "Connettore sconosciuto" });
     }
 
-    const credential = await findActiveIntegrationCredential(tenant.tenantId, spec.id);
+    const credential = await findConnectorCredential(tenant.tenantId, spec);
     if (!credential) {
       return reply.code(409).send({
         code: "CONNECTOR_NOT_CONNECTED",

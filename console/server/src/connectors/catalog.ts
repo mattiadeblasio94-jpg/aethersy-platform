@@ -47,6 +47,12 @@ export interface ConnectorSpec {
   capabilities: string[];
   /** Come ottenere le credenziali (mostrato nella UI quando mancano). */
   howTo: string;
+  /**
+   * Tipi di credenziale che valgono come "collegamento" per questo connettore.
+   * Default: `oauth` per i connettori con login, `api_key` per gli altri.
+   * Slack accetta anche il canale webhook gia' salvato dal tenant.
+   */
+  credentialKinds?: ("oauth" | "webhook" | "api_key")[];
   /** Endpoint OAuth per i connettori con app dedicata. */
   oauth?: {
     authorizeUrl: string;
@@ -275,11 +281,34 @@ export const CONNECTORS: ConnectorSpec[] = [
     scopes: ["chat:write", "channels:read", "im:write", "users:read"],
     capabilities: ["Postare nei canali", "Rispondere ai clienti", "Notifiche operative"],
     howTo: "Serve l'app Slack Aethersy (OAuth): creala su api.slack.com/apps, poi accreditane CLIENT_ID e CLIENT_SECRET nel VPS.",
+    credentialKinds: ["oauth", "webhook"],
     oauth: {
       authorizeUrl: "https://slack.com/oauth/v2/authorize",
       tokenUrl: "https://slack.com/api/oauth.v2.access",
     },
-    test: async (s) => jsonProbe("https://slack.com/api/auth.test", bearer(s.access_token)),
+    test: async (s) => {
+      // Il tenant puo' avere gia' un canale webhook (fase 20) invece dell'app
+      // OAuth: in quel caso la prova e' un messaggio reale sul canale.
+      const raw = s.access_token ?? "";
+      if (raw.startsWith("https://hooks.slack.com/")) {
+        try {
+          const res = await fetch(raw, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: "Test di connessione Aethersy: canale Slack operativo." }),
+          });
+          const text = await res.text();
+          return {
+            ok: res.ok && text.trim() === "ok",
+            status: res.status,
+            detail: res.ok ? "Messaggio di prova inviato sul canale Slack." : text.slice(0, 200),
+          };
+        } catch (err) {
+          return { ok: false, status: 0, detail: (err as Error).message };
+        }
+      }
+      return jsonProbe("https://slack.com/api/auth.test", bearer(raw));
+    },
   },
   {
     id: "notion",
@@ -755,6 +784,14 @@ export const CONNECTORS: ConnectorSpec[] = [
 
 export function connectorById(id: string): ConnectorSpec | undefined {
   return CONNECTORS.find((connector) => connector.id === id);
+}
+
+/** Tipi di credenziale che valgono come collegamento per un connettore. */
+export function connectorCredentialKinds(
+  spec: ConnectorSpec,
+): ("oauth" | "webhook" | "api_key")[] {
+  if (spec.credentialKinds?.length) return spec.credentialKinds;
+  return spec.auth === "api_key" ? ["api_key"] : ["oauth"];
 }
 
 export const CONNECTOR_CATEGORY_ORDER: ConnectorCategory[] = [

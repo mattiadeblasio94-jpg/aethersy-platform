@@ -1142,7 +1142,8 @@ collegamento deve avvenire tramite login diretto*. Traduzione tecnica:
 - `console/server/src/connectors/catalog.ts`: catalogo di **43 provider** reali
   (id, categoria, tipo di login, scope, capacita' dichiarate, istruzioni
   `howTo`, endpoint OAuth, campi credenziale, **verifica reale** con chiamata
-  all'API del provider).
+  all'API del provider). Slack accetta anche il canale webhook gia' salvato dal
+  tenant (la verifica invia un messaggio reale sul canale).
 - `console/server/src/connectors/oauth.ts`: OAuth2 unico per i tre casi
   (Google, GitHub, app dedicate) con PKCE, redirect derivato da
   `PLATFORM_PUBLIC_URL`, client dedicati da env
@@ -1159,7 +1160,10 @@ collegamento deve avvenire tramite login diretto*. Traduzione tecnica:
 - `console/server/src/routes.ts`: **eliminata la credenziale placeholder** di
   `POST /api/platform/platforms/:id/connect` (era la fonte delle connessioni
   finte: creava una riga con `secret_enc` vuoto). Ora la rotta risponde con il
-  redirect al login del provider e **non crea nulla**.
+  redirect al login del provider e **non crea nulla**. La riga finita rimasta
+  in produzione (`provider=webhook`, `kind=oauth`, `secret_enc` vuoto) e' stata
+  cancellata dal DB: in tabella restano solo 3 credenziali reali (canale Slack
+  + 2 webhook di verifica).
 
 **Cosa e' cambiato (UI)**
 
