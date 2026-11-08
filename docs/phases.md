@@ -3,7 +3,7 @@
 > Aggiornare dopo **ogni** fase con: data/ora, esito, comandi di verifica, note.
 > Stati ammessi: `DONE`, `BLOCKED: input #N`, `NOTE`.
 >
-> Ultima revisione: 2026-11-07 (fasi 0–12 `DONE`; **fasi 13–20** implementate e deployate: CI, IA nel platform, **platform a dati reali senza mock + UI cyber + agenti builder eseguibili + sito pubblicabile dal run pipeline**; restano azioni utente per la rotazione credenziali e Stripe)
+> Ultima revisione: 2026-11-08 (fasi 0–12 `DONE`; **fasi 13–22** implementate e deployate: CI, IA nel platform, **platform a dati reali senza mock + UI cyber + agenti builder eseguibili + sito pubblicabile dal run pipeline**, **login sociale reale Google/GitHub**, **connettori reali con login ai provider (43 provider, niente connessioni finte)**; restano azioni utente per la rotazione credenziali, Stripe e le app OAuth dei provider)
 
 ## Stato sintetico
 
@@ -22,6 +22,7 @@
 | 10 | Review finale e consegna | `DONE` — audit infrastrutturale **completato** (tutte le verifiche OK) e **clean-clone** verificato (tarball da `git ls-files`, 73 file, nessun `.env` → `docker compose config` OK + build `console` OK). Restano solo **azioni utente**: rotazione credenziali esposte in chat (P0–P2, `docs/security.md` §6.1) e backup offline dei due segreti critici |
 | 11 | Aethersy Console (fusion A+B+C) | `DONE` — frontend proprietario React 19 + Vite + TS + Tailwind v4 + TanStack Query + React Router + BFF Fastify con sessione httpOnly firmata, proxy `/api/ap/*` verso Activepieces e **AI Router** multimodale (selezione automatica di modelli gratuiti OpenRouter per capacità testo/immagine/audio/video). Deployato su `https://console.aethersy.online` con TLS Let's Encrypt; smoke test 5/5 OK |
 | 12 | Piattaforma a consumo (P0) — pipeline + libreria asset + Console run/crediti | `IN CORSO` — metering/billing (P0.1/P0.2, `24c1d1f`), pipeline multi-stadio + orchestratore HITL + segreti (P0.3, `94f65a9`), **libreria asset con versioning e approvazione in Console** (P0.4), **Console run/crediti** (P0.5), **lead webhook + canale Slack + export pacchettizzato + UI lead** (P0.6), **QA E2E + backup off-site** (P0.7), **layer Anteprima `/preview`** (P0.8), **deploy Console+Platform** (P0.9), **modulo piattaforma Business Pulse + `pipeline.schedule`** (P0.10, 29/10/2026), **substrato aziendale multi-tenant: schema `business` (obiettivi/memoria/prodotti) + API + Console** (P1.1, 29/10/2026), **motore agenti P2.1 + piattaforma reale P2.2 (`platform.aethersy.online`)** (29/10/2026). QA E2E **65/65 OK**; metering 44/44; web+server build OK; deployato sul VPS |
+| 22 | Connettori reali con login ai provider | `DONE` — catalogo di **43 provider** (Google ×12 via app Google, GitHub, Slack/Notion/Figma/... via app OAuth dedicata, Telegram/Cloudflare/... via credenziale), login reale con `state` firmato + PKCE, token cifrati AES-256-GCM, pagina `/connectors` con verifica live; **connessioni placeholder eliminate**. Test `test:connectors` 23/23. Restano azioni utente: accreditare le app OAuth dei provider e creare quelle mancanti |
 
 ## Verifica §11 — nomi variabili, versioni, route
 
@@ -1113,3 +1114,75 @@ sulla pagina di login. Diagnosi live (non da documentazione):
 **Stato**: `DONE`. Resta da fare l'utente: il consenso sul provider (schermata
 Google/GitHub) e la verifica che la schermata di consenso Google non sia in
 modalita' "Testing" (in quel caso serve aggiungere l'account come test user).
+
+### Fase 22 — Connettori reali: login ai provider, niente connessioni finte (08/11/2026)
+
+**Obiettivo**: sostituire le "connessioni" simulate con collegamenti **reali**
+ai provider richiesti. Regola di progetto fissata dal committente: *il
+collegamento deve avvenire tramite login diretto*. Traduzione tecnica:
+
+- **Login Google** -> i 12 servizi Google (Gmail, Drive, Calendar, Sheets,
+  Slides, Docs, Tasks, Meet, YouTube, Maps, Analytics, Ads) si collegano con
+  la **stessa app Google** del login della piattaforma (un solo consenso,
+  scope per servizio).
+- **Login GitHub** -> GitHub (repo, issue, PR, workflow) con la **stessa app
+  GitHub** del login.
+- **Login del provider** -> Slack, Notion, Figma, Linear, Canva, Salesforce,
+  Zoom, Outlook, Microsoft Teams, Instagram, Facebook, Meta Ads, LinkedIn,
+  TikTok, TikTok Ads, X, Reddit, Wix, PayPal, Stripe: il flusso e' identico
+  (login -> consenso -> token cifrato), serve accreditare nel VPS l'app OAuth
+  del provider.
+- **Credenziale personale** -> solo dove il provider non offre un OAuth per
+  account (Telegram, WhatsApp Cloud, Cloudflare, Supabase, ElevenLabs,
+  Mailchimp, DataForSEO, GoDaddy, WordPress, Activepieces): l'utente incolla la
+  credenziale del **proprio** account.
+
+**Cosa e' cambiato (server)**
+
+- `console/server/src/connectors/catalog.ts`: catalogo di **43 provider** reali
+  (id, categoria, tipo di login, scope, capacita' dichiarate, istruzioni
+  `howTo`, endpoint OAuth, campi credenziale, **verifica reale** con chiamata
+  all'API del provider).
+- `console/server/src/connectors/oauth.ts`: OAuth2 unico per i tre casi
+  (Google, GitHub, app dedicate) con PKCE, redirect derivato da
+  `PLATFORM_PUBLIC_URL`, client dedicati da env
+  `CONNECTOR_<ID>_CLIENT_ID/_CLIENT_SECRET/_REDIRECT_URI/_TOKEN_URL`, bundle
+  token cifrato con AES-256-GCM (`pipeline/secrets.ts`).
+- `console/server/src/connectors/state.ts`: `state` firmato (HMAC con
+  `CONSOLE_SESSION_SECRET`) che porta tenant + connettore + nonce, con
+  confronto obbligatorio del cookie httpOnly e scadenza 10 minuti.
+- `console/server/src/connectors/routes.ts`: `GET /api/pipeline/connectors`
+  (catalogo + stato reale per tenant), `GET /:id/connect` (redirect al
+  provider), `GET /:id/callback` (scambio codice -> credenziale cifrata ->
+  rientro in UI), `POST /:id/api-key`, `POST /:id/test` (chiamata reale al
+  provider), `POST /:id/disconnect` (revoca).
+- `console/server/src/routes.ts`: **eliminata la credenziale placeholder** di
+  `POST /api/platform/platforms/:id/connect` (era la fonte delle connessioni
+  finte: creava una riga con `secret_enc` vuoto). Ora la rotta risponde con il
+  redirect al login del provider e **non crea nulla**.
+
+**Cosa e' cambiato (UI)**
+
+- `platform/src/pages/Connectors.tsx`: pagina `/connectors` con catalogo
+  filtrabile per categoria e ricerca, stato per connettore (collegato / pronto
+  / da attivare), pulsante di login per provider, modulo per le credenziali
+  quando il provider non ha OAuth, **Prova** (verifica live) e **Scollega**.
+- `platform/src/lib/platform-api.ts` + `platform-queries.ts`: API e hook dei
+  connettori; `useConnectPlatform` ora **manda l'utente al login del provider**
+  invece di creare una connessione vuota.
+- `platform/src/components/layout/Drawer.tsx`: voce "Connettori" nel menu.
+
+**Verifica**
+
+- `npm run test:connectors` -> **23/23 verdi** (catalogo coerente, `state`
+  valido/manomesso/scaduto, URL di autorizzazione Google/GitHub/app dedicate
+  con PKCE, scambio codice con provider finto, cifratura del token, rotte
+  montate).
+- `npm run test:social` -> **19/19 verdi** (nessuna regressione sul login).
+- Build BFF (`tsc`) e build platform (`tsc -b && vite build`) OK.
+
+**Stato**: `DONE` per la parte Google/GitHub (collegamento funzionante dal
+primo giorno) e per la parte Slack/Notion/Figma/... (il codice e' pronto e
+attivabile appena l'app OAuth del provider viene accreditata nel VPS). Per i
+provider senza OAuth resta da fare l'utente (creare l'app o recuperare la
+credenziale del proprio account).

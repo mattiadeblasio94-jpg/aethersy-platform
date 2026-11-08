@@ -24,6 +24,7 @@ export const realKeys = {
   account: ["real", "account"] as const,
   faq: ["real", "faq"] as const,
   platforms: ["real", "platforms"] as const,
+  connectors: ["real", "connectors"] as const,
   socialPosts: ["real", "social-posts"] as const,
   socialScheduled: ["real", "social-scheduled"] as const,
   socialSummary: ["real", "social-summary"] as const,
@@ -193,7 +194,53 @@ export function useConnectPlatform() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => platformApi.connectPlatform(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: realKeys.platforms }),
+    onSuccess: (result) => {
+      // Il collegamento reale avviene sul provider: il browser deve seguire
+      // il redirect (login -> consenso -> ritorno alla piattaforma).
+      if (result?.redirect) {
+        window.location.assign(result.redirect);
+        return;
+      }
+      qc.invalidateQueries({ queryKey: realKeys.platforms });
+    },
+  });
+}
+
+// --- Connettori ---------------------------------------------------------------
+
+export function useConnectors() {
+  return useQuery({
+    queryKey: realKeys.connectors,
+    queryFn: () => platformApi.getConnectors(),
+  });
+}
+
+export function useSaveConnectorApiKey() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string; fields: Record<string, string> }) =>
+      platformApi.saveConnectorApiKey(input.id, input.fields),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: realKeys.connectors });
+      qc.invalidateQueries({ queryKey: realKeys.platforms });
+    },
+  });
+}
+
+export function useTestConnector() {
+  return useMutation({
+    mutationFn: (id: string) => platformApi.testConnector(id),
+  });
+}
+
+export function useDisconnectConnector() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => platformApi.disconnectConnector(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: realKeys.connectors });
+      qc.invalidateQueries({ queryKey: realKeys.platforms });
+    },
   });
 }
 

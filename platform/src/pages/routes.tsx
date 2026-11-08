@@ -42,6 +42,7 @@ const Skills = lazy(() => import("./Skills"));
 const Members = lazy(() => import("./Members"));
 const Payouts = lazy(() => import("./Payouts"));
 const Account = lazy(() => import("./Account"));
+const Connectors = lazy(() => import("./Connectors"));
 
 export interface RouteSpec {
   path: string;
@@ -264,6 +265,13 @@ export const APP_ROUTES: RouteSpec[] = [
     title: "Account",
     description: "Tenant, piano, regole di addebito e domande frequenti.",
     component: Account,
+  },
+  {
+    path: "connectors",
+    title: "Connettori",
+    description:
+      "Collega i tuoi account ai provider (Google, GitHub, Slack, Notion, Figma...) con un login reale.",
+    component: Connectors,
   },
 ];
 

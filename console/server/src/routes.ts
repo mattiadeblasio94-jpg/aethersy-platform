@@ -11,6 +11,7 @@ import { registerPlatformRoutes } from "./platform/routes.js";
 import { requireMeteredTenant } from "./platform/guard.js";
 import { registerBusinessRoutes } from "./business/routes.js";
 import { registerSocialRoutes } from "./auth/social-routes.js";
+import { registerConnectorRoutes } from "./connectors/routes.js";
 import { saveIdentityCredential } from "./auth/identity-store.js";
 import type { NotifyResult } from "./pipeline/notify.js";
 
@@ -159,6 +160,11 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   // `auth/social-routes.ts`: li' il flusso non puo' mai lasciare l'utente su
   // una pagina JSON, ma torna sempre alla pagina di login con un messaggio.
   await registerSocialRoutes(app);
+
+  // ------------------------------------------------------- Connettori -------
+  // Catalogo dei provider collegabili con login reale (Google, GitHub, app
+  // OAuth dedicate) e stato delle connessioni del tenant.
+  await registerConnectorRoutes(app);
 
   app.post("/api/auth/logout", async (_request, reply) => {
     clearSessionCookie(reply);
@@ -1354,38 +1360,28 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     }));
   });
 
-  // POST /api/platform/platforms/:id/connect -> attiva una piattaforma (crea o
-  // riattiva l'integrazione per il tenant).
+  // POST /api/platform/platforms/:id/connect -> avvia il **login reale** al
+  // provider del connettore. Non crea credenziali vuote: la risposta dice al
+  // frontend dove mandare l'utente (il provider fa login e consenso).
   app.post("/api/platform/platforms/:id/connect", async (request, reply) => {
     const tenant = await requireMeteredTenant(request, reply);
     if (!tenant) return;
     const { id } = request.params as { id: string };
-    const body = (request.body ?? {}) as {
-      provider?: string;
-      label?: string;
-      kind?: "oauth" | "webhook" | "api_key";
+    const { connectorById } = await import("./connectors/catalog.js");
+    const spec = connectorById(id);
+    if (!spec) {
+      return reply.code(400).send({
+        code: "CONNECTOR_UNKNOWN",
+        message: `Nessun connettore "${id}": apri /connectors per collegare un account reale.`,
+      });
+    }
+    return {
+      ok: true,
+      mode: spec.auth === "api_key" ? "api_key" : "login",
+      id: spec.id,
+      label: spec.label,
+      redirect: `/api/pipeline/connectors/${encodeURIComponent(spec.id)}/connect`,
     };
-    const provider = body.provider ?? id;
-    const label = body.label ?? provider;
-    const kind = body.kind ?? "oauth";
-    const { saveIntegrationCredential } = await import("./pipeline/repo.js");
-    const saved = await saveIntegrationCredential({
-      tenantId: tenant.tenantId,
-      provider,
-      kind,
-      label,
-      secretEnc: "", // nessun segreto fornito: connessione placeholder, attivabile in un secondo momento
-      scopes: [],
-      meta: { connectedAt: new Date().toISOString() },
-    });
-    return reply.code(201).send({
-      id: saved.id,
-      provider: saved.provider,
-      kind: saved.kind,
-      label: saved.label,
-      status: saved.status,
-      connected: saved.status === "active",
-    });
   });
 
   // DELETE /api/platform/platforms/:id -> disconnetti una piattaforma (revoca l'integrazione).

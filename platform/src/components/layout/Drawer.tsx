@@ -27,6 +27,7 @@ import {
   X,
   Zap,
   Bell,
+  Plug,
 } from "lucide-react";
 import { useUiStore } from "@/store/ui";
 import { useAuthStore } from "@/store/auth";
@@ -92,12 +93,8 @@ export const Drawer = memo(function Drawer({ variant }: DrawerProps) {
           { to: "/opportunities", label: "Opportunità", icon: Target, badge: counters?.runs.open ?? 0 },
           { to: "/library", label: "Libreria", icon: FolderOpen },
           { to: "/outreach", label: "Outreach", icon: Send },
-          {
-            to: "/social-media",
-            label: "Social Media",
-            icon: Share2,
-            badge: connectedPlatforms,
-          },
+          { to: "/social-media", label: "Social Media", icon: Share2, badge: connectedPlatforms },
+          { to: "/connectors", label: "Connettori", icon: Plug },
           { to: "/tasks", label: "Task", icon: Users, badge: activeTasks },
         ],
       },

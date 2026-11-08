@@ -495,9 +495,30 @@ export const platformApi = {
   // --- Piattaforme / connessioni social -------------------------------------
   getPlatforms: () => http.get<PlatformConnection[]>("/api/platform/platforms"),
   connectPlatform: (id: string) =>
-    http.post<PlatformConnection>(`/api/platform/platforms/${encodeURIComponent(id)}/connect`, {}),
+    http.post<{ ok: boolean; mode: string; id: string; label: string; redirect: string }>(
+      `/api/platform/platforms/${encodeURIComponent(id)}/connect`,
+      {},
+    ),
   disconnectPlatform: (id: string) =>
     http.delete<{ ok: boolean }>(`/api/platform/platforms/${encodeURIComponent(id)}`),
+
+  // --- Connettori (login reale ai provider) ---------------------------------
+  getConnectors: () => http.get<ConnectorCatalog>("/api/pipeline/connectors"),
+  /** URL del flusso di login al provider (redirect del browser, non fetch). */
+  connectorConnectUrl: (id: string) =>
+    `/api/pipeline/connectors/${encodeURIComponent(id)}/connect`,
+  saveConnectorApiKey: (id: string, fields: Record<string, string>) =>
+    http.post<{ ok: boolean; connector: string; connected: boolean }>(
+      `/api/pipeline/connectors/${encodeURIComponent(id)}/api-key`,
+      { fields },
+    ),
+  testConnector: (id: string) =>
+    http.post<ConnectorTestResult>(`/api/pipeline/connectors/${encodeURIComponent(id)}/test`, {}),
+  disconnectConnector: (id: string) =>
+    http.post<{ ok: boolean; connector: string; connected: boolean }>(
+      `/api/pipeline/connectors/${encodeURIComponent(id)}/disconnect`,
+      {},
+    ),
 
   // --- Post social ----------------------------------------------------------
   getSocialPosts: () => http.get<SocialPost[]>("/api/platform/social/posts"),
@@ -605,6 +626,43 @@ export interface PlatformConnection {
   label: string;
   status: string;
   connected: boolean;
+}
+
+// --- Connettori --------------------------------------------------------------
+
+export type ConnectorAuth = "google" | "github" | "provider" | "api_key";
+
+export interface ConnectorEntry {
+  id: string;
+  label: string;
+  category: string;
+  categoryLabel: string;
+  auth: ConnectorAuth;
+  loginLabel: string;
+  scopes: string[];
+  capabilities: string[];
+  howTo: string;
+  configured: boolean;
+  missingReason: string | null;
+  apiKeyFields: { key: string; label: string; secret?: boolean }[];
+  connected: boolean;
+  connectedAt: string | null;
+  revoked: boolean;
+  testable: boolean;
+  redirectUri: string;
+}
+
+export interface ConnectorCatalog {
+  connectors: ConnectorEntry[];
+  groups: { key: string; label: string; count: number }[];
+  summary: { total: number; connected: number; ready: number };
+}
+
+export interface ConnectorTestResult {
+  ok: boolean;
+  status: number;
+  detail: string;
+  connector: string;
 }
 
 export interface SocialPost {
