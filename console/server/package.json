@@ -9,7 +9,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "gen:schema": "node tools/gen-schema.mjs",
     "test:metering": "node tools/test-metering.mjs",
-    "dev": "node --watch --experimental-strip-types src/index.ts"
+    "dev": "node --watch --experimental-strip-types src/index.ts",
+    "test:social": "npm run build && node tools/test-social-login.mjs"
   },
   "dependencies": {
     "@fastify/cookie": "^10.0.1",

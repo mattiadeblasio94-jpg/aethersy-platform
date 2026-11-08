@@ -354,9 +354,23 @@ export interface UsageResponse {
 
 // --- API --------------------------------------------------------------------
 
+export interface SocialProviderStatus {
+  id: "google" | "github";
+  label: string;
+  /** true se il provider e' configurato lato server (client_id/secret). */
+  configured: boolean;
+  scopes: string[];
+  redirectUri: string;
+  /** Ultimo errore osservato nel flusso: viene mostrato sulla pagina di login. */
+  lastError: { code: string; message: string; at: string } | null;
+}
+
 export const platformApi = {
   // --- Sessione (auth cookie Console) --------------------------------------
   getSession: () => http.get<SessionUser>("/api/auth/session"),
+  /** Stato dei provider di login sociale (Google, GitHub). */
+  getSocialProviders: () =>
+    http.get<{ providers: Record<string, SocialProviderStatus> }>("/api/auth/social/providers"),
   login: (email: string, password: string) =>
     http.post<SessionUser>("/api/auth/login", { email, password }),
   register: (input: { email: string; password: string; firstName?: string; lastName?: string }) =>

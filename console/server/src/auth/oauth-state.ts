@@ -74,3 +74,21 @@ export function verifyOAuthState(
 export function oauthTargetUrl(target: OAuthTarget): string {
   return target === "console" ? `${config.consolePublicUrl}/` : `${config.platformPublicUrl}/`;
 }
+
+/**
+ * URL della pagina di login a cui tornare quando il flusso OAuth fallisce.
+ * L'utente torna sulla pagina con un messaggio leggibile invece di vedere
+ * una risposta JSON grezza: era questo il "accesso bloccato" che si vedeva.
+ */
+export function oauthLoginUrl(target: OAuthTarget, code: string, message: string): string {
+  const base = target === "console" ? `${config.consolePublicUrl}/login` : `${config.platformPublicUrl}/login`;
+  const params = new URLSearchParams({ error: code, message });
+  return `${base}?${params.toString()}`;
+}
+
+/** URL di arrivo dopo un login riuscito: la destinazione richiesta. */
+export function oauthSuccessUrl(target: OAuthTarget): string {
+  return target === "console"
+    ? `${config.consolePublicUrl}/`
+    : `${config.platformPublicUrl}/studio?login=social`;
+}

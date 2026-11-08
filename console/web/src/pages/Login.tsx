@@ -1,13 +1,18 @@
 import { useState } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { useLogin, useSession } from "../lib/query";
 
 export default function Login() {
   const { data: user } = useSession();
   const login = useLogin();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+
+  // Messaggio di errore portato dal callback OAuth (?error=&message=).
+  const oauthError = searchParams.get("error");
+  const oauthMessage = searchParams.get("message");
 
   if (user) return <Navigate to="/" replace />;
 
@@ -54,6 +59,13 @@ export default function Login() {
         {login.isError && (
           <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
             Credenziali non valide.
+          </div>
+        )}
+
+        {/* Esito del login sociale: il BFF rimanda qui con ?error=&message=. */}
+        {oauthError && (
+          <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
+            {oauthMessage ?? "Accesso con il provider non riuscito."}
           </div>
         )}
 
