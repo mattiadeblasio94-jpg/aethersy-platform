@@ -20,6 +20,13 @@ HOST="${AETHERSY_HOST:-aethersy-vps}"
 REMOTE_DIR="${AETHERSY_REMOTE_DIR:-/home/deploy/aethersy}"
 SERVICES="${1:-console platform}"
 NOTE="${2:-}"
+# La nota viaggia dentro un payload JSON passato al container via shell: gli
+# apici singoli e le virgolette doppie vanno rimossi, altrimenti il quoting
+# della chiamata ssh si rompe e la notifica di deploy non viene registrata.
+NOTE="${NOTE//\'/}"
+NOTE="${NOTE//\"/}"
+NOTE="${NOTE//\\/}"
+NOTE="${NOTE//$'\n'/ }"
 VERSION="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 COMMIT="${DEPLOY_COMMIT:-$VERSION}"
 
