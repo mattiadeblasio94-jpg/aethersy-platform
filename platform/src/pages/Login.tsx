@@ -183,13 +183,10 @@ export default function Login() {
           </form>
 
           {/* Divider con "o" */}
-          <div className="mt-6 relative">
-            <div className="absolute inset-0 flex items-center">
-              <span className="w-full border-t border-secondary/30"></span>
-              <span className="px-2 text-xs font-medium text-text-muted bg-background">
-                o continua con
-              </span>
-            </div>
+          <div className="my-6 flex items-center gap-3">
+            <span className="h-px flex-1 border-t border-secondary/30" />
+            <span className="text-xs font-medium text-text-muted">o continua con</span>
+            <span className="h-px flex-1 border-t border-secondary/30" />
           </div>
 
           {/* Social login buttons - non sovrapposti, uno per riga */}
