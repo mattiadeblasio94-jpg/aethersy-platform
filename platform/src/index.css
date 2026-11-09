@@ -165,6 +165,130 @@ html.light .text-tertiary {
   background-clip: padding-box;
 }
 
+/* =============================================================================
+ * Area operativa (Console) portata dentro la piattaforma.
+ *
+ * Le pagine operatorie (/console/*) usano il design system scuro della vecchia
+ * console separata. I token sono dichiarati dentro `.console-root`, quindi non
+ * entrano in conflitto con i token della piattaforma ne' con il tema chiaro.
+ * =========================================================================== */
+
+.console-root {
+  --color-primary: #00d4ff;
+  --color-primary-dim: #00a8cc;
+  --color-secondary: #1a0f4a;
+  --color-accent: #ff9f1c;
+  --color-glow: #4deeff;
+  --color-bg: #0a0518;
+  --color-surface: #140b2e;
+  --color-surface-2: #1b1040;
+  --color-border: #2a1d5c;
+  --color-muted: #9aa3c7;
+
+  --shadow-glow: 0 0 20px rgba(0, 212, 255, 0.3);
+
+  min-height: 100vh;
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(0, 212, 255, 0.12), transparent 60%),
+    radial-gradient(900px 500px at 0% 110%, rgba(255, 159, 28, 0.08), transparent 55%),
+    var(--color-bg);
+  color: #e9edff;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+.console-root .glow {
+  box-shadow: var(--shadow-glow);
+}
+
+.console-root .card {
+  background: linear-gradient(180deg, rgba(27, 16, 64, 0.9), rgba(20, 11, 46, 0.9));
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+}
+
+.console-root .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.9rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: filter 0.15s ease, background 0.15s ease;
+}
+.console-root .btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.console-root .btn-primary {
+  background: var(--color-primary);
+  color: #04121a;
+}
+.console-root .btn-primary:not(:disabled):hover {
+  filter: brightness(1.08);
+}
+.console-root .btn-ghost {
+  background: transparent;
+  border-color: var(--color-border);
+  color: #cfd6ff;
+}
+.console-root .btn-ghost:not(:disabled):hover {
+  background: var(--color-surface-2);
+}
+
+.console-root .input {
+  width: 100%;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-border);
+  background: rgba(10, 5, 24, 0.6);
+  padding: 0.55rem 0.75rem;
+  color: #e9edff;
+  font-size: 0.9rem;
+}
+.console-root .input:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+.console-root .badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border: 1px solid var(--color-border);
+}
+
+.console-root .nav-link {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.5rem;
+  color: #b9c2e8;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+.console-root .nav-link:hover {
+  background: var(--color-surface-2);
+  color: #fff;
+}
+.console-root .nav-link.active {
+  background: rgba(0, 212, 255, 0.12);
+  color: #fff;
+  box-shadow: inset 2px 0 0 var(--color-primary);
+}
+
+.console-root :focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+
 /* --- Rispetto di prefers-reduced-motion (brief §5.7) -------------------- */
 @media (prefers-reduced-motion: reduce) {
   *,

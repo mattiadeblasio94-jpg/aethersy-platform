@@ -1,15 +1,13 @@
 {
-  "name": "aethersy-console",
+  "name": "aethersy-bff",
   "version": "0.1.0",
   "private": true,
-  "description": "Aethersy Console - frontend proprietario + BFF sopra le API Activepieces",
+  "description": "Aethersy BFF - API (sessione, pipeline, connettori, AI) sopra le API Activepieces. La UI e' dentro platform/src/console.",
   "scripts": {
-    "install:all": "npm --prefix web install && npm --prefix server install",
-    "build": "npm --prefix web run build && npm --prefix server run build",
-    "build:web": "npm --prefix web run build",
+    "install:all": "npm --prefix server install",
+    "build": "npm --prefix server run build",
     "build:server": "npm --prefix server run build",
-    "typecheck": "npm --prefix web run typecheck && npm --prefix server run typecheck",
-    "dev:web": "npm --prefix web run dev",
+    "typecheck": "npm --prefix server run typecheck",
     "dev:server": "npm --prefix server run dev"
   }
 }

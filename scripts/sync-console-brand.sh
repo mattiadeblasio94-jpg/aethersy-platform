@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Sincronizza gli asset di brand Aethersy (branding/web/) in console/web/public/.
+# Sincronizza gli asset di brand Aethersy (branding/web/) in platform/public/.
 # Idempotente: va rieseguito dopo ogni rigenerazione del logo (scripts/gen_brand_assets.py).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SRC="$ROOT/branding/web"
-DST="$ROOT/console/web/public"
+DST="$ROOT/platform/public"
 
 mkdir -p "$DST/brand"
 cp -f "$SRC/favicon.ico"   "$DST/favicon.ico"

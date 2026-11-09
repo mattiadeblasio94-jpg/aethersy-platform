@@ -7,7 +7,9 @@
 #   {$APEX_DOMAIN}         -> redirect 301 verso APP_DOMAIN
 #   www.{$APEX_DOMAIN}     -> redirect 301 verso APP_DOMAIN
 #
-# App, Console e Platform sono container distinti (app:80 / console:3000 / platform:80).
+# App, BFF (console) e Platform sono container distinti (app:80 / console:3000 / platform:80).
+# Il container `console` e' il BFF API: dal 08/11/2026 la UI operativa e' dentro la
+# piattaforma (/console/*), quindi non serve piu' nessuna SPA separata.
 # Activepieces riconosce le richieste MCP dall'hostname, quindi l'header
 # Host pubblico viene preservato (vedi header_up Host {host}).
 {

@@ -182,12 +182,16 @@ Trigger manuale: `curl -X POST https://app.aethersy.online/api/v1/webhooks/frmFo
 > Nota: il piece Slack nativo richiede OAuth (non accetta webhook in ingresso) → si usa `piece-http` con `body_type=json` e payload annidato in `body.data`.
 
 
-## 6.4 Aethersy Console (Fase 11)
+## 6.4 Aethersy BFF (Fase 11, UI unificata nella piattaforma dalla fase 26)
 
-App proprietaria (frontend React + BFF Fastify) su `https://console.aethersy.online`, servita da Caddy (`console:3000`) — **in aggiunta** ad Activepieces, che resta engine/admin/fallback.
+Il container `console` e' oggi **solo il BFF (API Fastify)**: espone `/api/*` (sessione, pipeline, connettori, AI,
+metering) e non serve piu' nessuna SPA. La UI operativa (la "Console") e' stata spostata dentro la piattaforma:
+stesso dominio `https://platform.aethersy.online`, rotte `/console/*`, stessa sessione httpOnly.
+
+Caddy inoltra `/api*` da `platform.aethersy.online` a `console:3000` e il resto alla SPA statica `platform:80`.
 
 **Env necessarie** (nel `.env` del VPS):
-- `CONSOLE_DOMAIN` (default `console.aethersy.online`)
+- `CONSOLE_DOMAIN` (default `console.aethersy.online`, non piu' servito da Caddy: il dominio legacy puo' reindirizzare a `platform.aethersy.online/console`)
 - `CONSOLE_VERSION` (tag immagine, default `0.1.0`)
 - `CONSOLE_SESSION_SECRET` (firma HMAC del cookie di sessione; `openssl rand -hex 32`)
 - `OPENROUTER_API_KEY` (usata dall'AI Router lato BFF)
@@ -219,11 +223,11 @@ curl -s -o /dev/null -w '%{http_code}\n' https://console.aethersy.online/api/ai/
 
 ## 6.5 Aethersy Platform (Fase 12)
 
-SPA React **mock-first** del technical brief, servita come **sito dedicato** su
-`https://platform.aethersy.online` da Caddy (`platform:80`, container nginx). La stessa
-app è **anche** dentro la Console come layer anteprima su `/preview` (porting P0.8):
-due esposizioni della stessa UI, un solo codice sorgente per entrambe
-(`platform/src` → `console/web/src/preview`).
+SPA React servita come **sito dedicato** su
+`https://platform.aethersy.online` da Caddy (`platform:80`, container nginx). Dal 08/11/2026 (fase 26) la **Console
+operativa vive nella stessa app**: le sue pagine sono in `platform/src/console` e rispondono su `/console/*`, con la
+sua barra laterale e il suo design system (scuro, scoped in `.console-root`). Un solo codice, un solo dominio, una
+sola sessione: niente piu' app separata ne' layer "anteprima" con dati demo.
 
 **Env necessarie** (nel `.env` del VPS):
 - `PLATFORM_DOMAIN` (default `platform.aethersy.online`)

@@ -1338,3 +1338,41 @@ OAuth" -> stato **In test** -> "Utenti di test" -> aggiungi `mattiadeblasio94@gm
 Calendar, Docs, Sheets, YouTube e Ads si collegano con un solo accesso (in test il refresh token scade dopo 7
 giorni). Per gli altri provider: creare l'app di piattaforma una volta sola (stato `self_serve`) e avviare la
 revisione per quelli in `review`.
+
+### Fase 26 — Console unificata dentro la piattaforma (08/11/2026)
+
+**Domanda del committente**: "serve avere la console? non posso avere tutto sulla piattaforma? voglio che sposti la
+console sulla piattaforma!"
+
+**Stato prima**: due app separate — `console.aethersy.online` (SPA React operativa + BFF Fastify) e
+`platform.aethersy.online` (SPA utente). La SPA della console non era nemmeno pubblicata dal Caddy (manca
+`CONSOLE_DOMAIN` nella configurazione) e conteneva un layer "anteprima" con il porting demo della piattaforma: due
+copie della stessa UI, una sola realmente in uso.
+
+**Cosa e' cambiato**
+
+- `platform/src/console/` (nuovo): le 16 pagine operative reali (Pulse, Obiettivi, Memoria, Prodotti, Opportunita',
+  Schedule, Roster Agenti, Pipeline, Lead, Libreria asset, Crediti, Dashboard, Flows, Runs, Connections, AI Center)
+  e il loro client API tipizzato (`lib/api.ts`, `lib/query.ts`, `lib/types.ts`) sono ora dentro la piattaforma e
+  rispondono su `/console/*` (`platform/src/App.tsx`).
+- `platform/src/console/components/Layout.tsx`: barra laterale operativa con le rotte prefixed `/console/*`, link
+  "Torna alla piattaforma", logout e rimozione del collegamento all'anteprima demo.
+- `platform/src/index.css`: scope `.console-root` con i token e le classi del design system della console
+  (`.card`, `.btn`, `.input`, `.badge`, `.nav-link`, `.glow`): l'area operativa resta identica ma non tocca i token
+  della piattaforma ne' il tema chiaro.
+- Conversione delle classi Tailwind v4 -> v3 per le pagine portate (`text-[--color-muted]` ->
+  `text-[color:var(--color-muted)]`): senza questa conversione le utility arbitrarie non verrebbero generate dal
+  Tailwind v3 della piattaforma e i colori andrebbero persi.
+- `platform/src/components/layout/Drawer.tsx`: voce "Console operativa" nella sezione secondaria del menu.
+- `console/web/` **eliminata** (SPA, layer anteprima, assets duplicati): `console/Dockerfile` ora builda solo il BFF
+  e `console/package.json` espone solo gli script del server. Il BFF resta il container `console:3000` (Caddy
+  inoltra `/api*` -> `console:3000`), ma non serve piu' nessun frontend.
+- `scripts/sync-console-brand.sh` ora sincronizza gli asset di brand in `platform/public`; CI: eliminato il job
+  `console/web` (il job `platform` typechecka e builda anche la Console unificata); `docs/runbook.md` e
+  `caddy/Caddyfile` aggiornati.
+
+**Verifica**: `tsc -b --force` (platform) senza errori, build Vite OK, `npm run test:connectors` -> **40/40**,
+`npm run test:social` -> **19/19**, build BFF OK.
+
+**Esito**: una sola app, un solo dominio (`platform.aethersy.online`), una sola sessione. L'utente va su `/console`
+dalla stessa navigazione in cui usa Studio, Agenti e Connettori; il BFF resta un servizio interno, senza UI propria.

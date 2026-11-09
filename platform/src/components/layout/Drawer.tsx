@@ -126,6 +126,7 @@ export const Drawer = memo(function Drawer({ variant }: DrawerProps) {
   }, [overview.data, platforms.data, roster.data]);
 
   const secondaryItems: NavItem[] = [
+    { to: "/console/pulse", label: "Console operativa", icon: LayoutDashboard },
     { to: "/settings", label: "Impostazioni", icon: Settings },
     { to: "/help", label: "Aiuto", icon: HelpCircle },
   ];
