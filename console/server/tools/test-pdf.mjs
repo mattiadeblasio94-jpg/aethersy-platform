@@ -95,6 +95,34 @@ await check("il documento contiene il contenuto atteso", () => {
   assert.ok(raw.includes("Aethersy"), "manca il brand nel pie' di pagina");
 });
 
+// Regressione 09/11/2026: un marcatore isolato ("5*3", "indice[0]") faceva
+// entrare il parser in loop infinito e bloccava l'event loop del BFF, rendendo
+// '/api/*' irraggiungibile per tutti gli utenti. Ogni caso deve rendersi in
+// tempo finito.
+const REGRESSION_CASES = [
+  ["asterisco isolato", "Valutazione 5*3 in crescita."],
+  ["bracket isolato", "Indice [0] del report."],
+  ["asterisco e bold", "Prezzo **5 EUR** e sconto 10*2."],
+  ["asterisco non accoppiato", "Moltiplicatore * e divisione /"],
+  ["link e nota", "Vedi [docs](https://example.com/a?b=1) e *nota*."],
+  ["vuoto", ""],
+];
+
+for (const [name, md] of REGRESSION_CASES) {
+  await check(`regressione: ${name} non blocca il rendering`, async () => {
+    const started = Date.now();
+    const timeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("rendering bloccato (timeout 10s)")), 10_000),
+    );
+    const buffer = await Promise.race([
+      renderDeliverablePdf({ title: name, markdown: `# ${name}\n\n${md}\n` }),
+      timeout,
+    ]);
+    assert.ok(buffer.subarray(0, 5).toString("latin1") === "%PDF-", "output non e' un PDF");
+    assert.ok(Date.now() - started < 10_000, "rendering troppo lento");
+  });
+}
+
 writeFileSync(out, pdf);
 console.log(`\n${passed} test superati, ${failures.length} falliti`);
 console.log(`PDF scritto in ${out} (${Math.round(pdf.length / 1024)} KB)`);

@@ -17,6 +17,6 @@
       "@/*": ["src/*"]
     }
   },
-  "include": ["src/index.ts", "src/config.ts", "src/routes.ts", "src/ap.ts", "src/session.ts", "src/types/fastify.d.ts", "src/types/dockerode.d.ts"],
+  "include": ["src/index.ts", "src/config.ts", "src/routes.ts", "src/ap.ts", "src/session.ts", "src/types/fastify.d.ts", "src/types/dockerode.d.ts", "src/pipeline/pdf-worker.ts"],
   "exclude": ["node_modules", "dist", "src/builder"]
 }

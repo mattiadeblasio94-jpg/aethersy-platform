@@ -1406,3 +1406,30 @@ consegnare al cliente era un file di testo, non un documento.
 **Verifica**: `npm run test:pdf` -> **3/3**, `npm run test:connectors` -> **40/40**, `npm run test:social` -> **19/19**,
 typecheck e build (BFF + platform) OK. Verifica visiva del documento reso in Chrome headless: titolo, tabelle,
 elenchi, blocchi di codice, numerazione di pagina e footer corretti, testo che va a capo correttamente.
+
+### Fase 27b — Hotfix: blackout dell'API causato dal renderer PDF (09/11/2026)
+
+**Incidente**: dopo il deploy della Fase 27, un markdown con un marcatore isolato
+(es. `5*3`, `indice[0]`) faceva entrare `parseInline` in loop infinito. Il
+rendering girava sul thread principale del BFF: l'event loop Node si bloccava e
+**tutte** le rotte `/api/*` smettevano di rispondere (timeout, non 502). La SPA
+statica continuava a rispondere, quindi il sintomo era "la piattaforma si
+carica ma non si collega". Il container risultava `unhealthy` perche' il
+health check non rispondeva.
+
+**Correzioni**
+
+1. `console/server/src/pipeline/pdf-render.ts`: il parser inline emette come
+   testo il marcatore isolato invece di non avanzare nel ciclo.
+2. `console/server/src/pipeline/pdf.ts` + `pdf-worker.ts` (nuovi): il rendering
+   gira in un **worker thread** dedicato con timeout di 30 s. Anche un input
+   patologico non puo' piu' bloccare il server: il worker viene terminato e il
+   task resta valido (solo il `.md`).
+3. `console/server/tools/test-pdf.mjs`: 6 casi di regressione (asterisco
+   isolato, bracket isolato, asterisco + bold, asterisco non accoppiato, link,
+   markdown vuoto) che verificano che il rendering finisca sempre in tempo
+   finito. `npm run test:pdf` -> **9/9**.
+
+**Verifica**: riproduzione del bug (loop infinito) prima del fix e output
+corretto dopo; deploy `console`+`platform` con health check ok e login
+funzionante; risposta a `/api/health` in 100 ms.

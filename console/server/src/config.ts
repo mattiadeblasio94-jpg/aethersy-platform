@@ -101,6 +101,12 @@ export const config = {
   githubClientSecret: process.env.GITHUB_CLIENT_SECRET ?? "",
   githubRedirectUri:
     (process.env.GITHUB_REDIRECT_URI ?? "https://platform.aethersy.online/api/auth/social/github/callback").replace(/\/$/, ""),
+  // Telegram Login (OIDC su oauth.telegram.org): Client ID e Secret forniti da
+  // @BotFather -> Login Widget. Vedi docs/telegram-login.md.
+  telegramClientId: process.env.TELEGRAM_CLIENT_ID ?? "",
+  telegramClientSecret: process.env.TELEGRAM_CLIENT_SECRET ?? "",
+  telegramRedirectUri:
+    (process.env.TELEGRAM_REDIRECT_URI ?? "https://platform.aethersy.online/api/auth/social/telegram/callback").replace(/\/$/, ""),
 
   // Canale di notifica outbound (P0.6): webhook Slack a livello di stack.
   // Usato come fallback quando il tenant non ha un canale dedicato salvato in
