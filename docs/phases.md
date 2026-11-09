@@ -1376,3 +1376,33 @@ copie della stessa UI, una sola realmente in uso.
 
 **Esito**: una sola app, un solo dominio (`platform.aethersy.online`), una sola sessione. L'utente va su `/console`
 dalla stessa navigazione in cui usa Studio, Agenti e Connettori; il BFF resta un servizio interno, senza UI propria.
+
+### Fase 27 — Deliverable in PDF professionale (08/11/2026)
+
+**Problema**: il pipeline produceva solo `markdown` (`mime: text/markdown`, `meta.content`): il deliverable da
+consegnare al cliente era un file di testo, non un documento.
+
+**Cosa e' cambiato**
+
+- `console/server/src/pipeline/pdf.ts` (nuovo): renderer server-side dei deliverable in PDF (A4) con pdfkit
+  (JavaScript puro, nessun binario nativo, nessun browser headless):
+  - testata con titolo, sottotitolo (droid/stadio), data e accento di brand; pie' di pagina con brand, titolo e
+    numerazione `pagina N di M`;
+  - gerarchia dei titoli (H1/H2/H3), paragrafi, elenchi puntati e numerati, citazioni, blocchi di codice con sfondo
+    e tabelle (intestazione indigo, righe alternate, larghezze proporzionali al contenuto);
+  - formattazione inline (`**grassetto**`, `*corsivo*`, `` `codice` ``, `[link](url)`), andata a capo automatica;
+  - gli allegati (PNG/JPEG prodotti dal pipeline) vengono incorporati in un allegato finale con didascalia;
+  - i caratteri fuori WinAnsi (il font built-in non li copre) vengono sostituiti in modo dichiarato, non corrotti.
+- `console/server/src/pipeline/executor.ts`: ogni task produce **due** asset — il markdown (sorgente editabile) e il
+  PDF (`mime: application/pdf`, byte in base64 nei metadati, `storage_key inline://.../document.pdf`). Se il rendering
+  fallisce il task resta valido (consegnato solo il .md) e l'errore viene loggato.
+- `console/server/src/platform/routes.ts`: la lettura di un asset restituisce `contentBase64` per i binari.
+- `platform/src/pages/Library.tsx`: il download decodifica il base64 in byte reali (il PDF scaricato e' un PDF
+  valido, non testo corrotto) e l'anteprima mostra "Documento PDF pronto" con la dimensione invece di stampare
+  migliaia di caratteri base64.
+- `console/server/tools/test-pdf.mjs` (nuovo, `npm run test:pdf`): genera un PDF di prova da markdown completo e
+  ne verifica struttura, pagine, dimensione e contenuto. Aggiunto al job CI del BFF.
+
+**Verifica**: `npm run test:pdf` -> **3/3**, `npm run test:connectors` -> **40/40**, `npm run test:social` -> **19/19**,
+typecheck e build (BFF + platform) OK. Verifica visiva del documento reso in Chrome headless: titolo, tabelle,
+elenchi, blocchi di codice, numerazione di pagina e footer corretti, testo che va a capo correttamente.

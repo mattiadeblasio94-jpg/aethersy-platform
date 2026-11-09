@@ -10,6 +10,7 @@ import {
 import { droidProfile } from "../platform/catalog.js";
 import type { TaskContext, TaskExecutionResult, TaskExecutor } from "./orchestrator.js";
 import { businessContext } from "../business/chat.js";
+import { renderDeliverablePdf } from "./pdf.js";
 
 // Esecutore REALE dei task di pipeline (P2.1).
 //
@@ -101,6 +102,37 @@ export function buildAiExecutor(): TaskExecutor {
           binaryFollowUp: wantedBinary ? "contenuto binario richiesto: generare via /api/ai/generate" : null,
         },
       };
+
+      // Stesso deliverable in PDF professionale (server-side, pdfkit): il
+      // markdown resta la sorgente editabile, il PDF e' il file da consegnare.
+      // Se la generazione fallisce il task resta valido (solo il .md).
+      const assets: TaskExecutionResult["assets"] = [asset];
+      try {
+        const pdf = await renderDeliverablePdf({
+          title: ctx.task.title,
+          subtitle: `${ctx.task.droid} · ${ctx.stage.title}`,
+          markdown: answer,
+        });
+        assets.push({
+          kind: "document",
+          name: asset.name.replace(/\.md$/, ".pdf"),
+          storageKey: `inline://pipeline/${ctx.run.id}/${ctx.task.id}/document.pdf`,
+          mime: "application/pdf",
+          sizeBytes: pdf.length,
+          meta: {
+            droid: ctx.task.droid,
+            stage: ctx.stage.id,
+            title: ctx.task.title,
+            inline: true,
+            binary: true,
+            contentBase64: pdf.toString("base64"),
+            source: "pdf-renderer",
+          },
+        });
+      } catch (pdfError) {
+        console.warn("[pipeline] rendering PDF non riuscito:", (pdfError as Error).message);
+      }
+
       return {
         status: "done",
         output: {
@@ -109,7 +141,7 @@ export function buildAiExecutor(): TaskExecutor {
           task: ctx.task.title,
           content: answer,
         },
-        assets: [asset],
+        assets,
         // L'agente "propone" il deliverable: entra subito in revisione umana.
         submit: true,
       };

@@ -5,7 +5,7 @@
 
 import { useState, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import { FolderOpen, Bot, MessageSquare, Mail, Search, Filter, Download, Eye, Copy, Share2, FileCode2 } from "lucide-react";
+import { FolderOpen, Bot, MessageSquare, Mail, Search, Filter, Download, Eye, Copy, Share2, FileCode2, FileText } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -510,8 +510,17 @@ function ResourceCard({ resource }: { resource: LibraryResource }) {
     try {
       const data = detail ?? (await platformApi.getLibraryAsset(resource.id));
       setDetail(data);
-      const text = data.content ?? JSON.stringify(data.meta, null, 2);
-      const blob = new Blob([text], { type: data.asset.mime ?? "text/plain;charset=utf-8" });
+      let blob: Blob;
+      if (data.contentBase64) {
+        // Asset binario (PDF): si decodifica il base64 in byte veri.
+        const binary = atob(data.contentBase64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+        blob = new Blob([bytes], { type: data.asset.mime ?? "application/octet-stream" });
+      } else {
+        const text = data.content ?? JSON.stringify(data.meta, null, 2);
+        blob = new Blob([text], { type: data.asset.mime ?? "text/plain;charset=utf-8" });
+      }
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -599,9 +608,24 @@ ${link}`;
         {copied && <p className="mt-2 text-xs text-success">Link copiato negli appunti.</p>}
         {error && <p className="mt-2 text-xs text-danger">{error}</p>}
         {open && detail && (
-          <pre className="mt-2 max-h-56 overflow-auto rounded-lg border border-secondary/10 bg-bg-primary/60 p-2 font-mono text-[11px] leading-relaxed text-text-secondary">
-            {(detail.content ?? JSON.stringify(detail.meta, null, 2)).slice(0, 4000)}
-          </pre>
+          detail.contentBase64 ? (
+            <div className="mt-2 flex items-center gap-3 rounded-lg border border-secondary/10 bg-bg-primary/60 p-3 text-xs text-text-secondary">
+              <FileText className="h-5 w-5 shrink-0 text-secondary" aria-hidden="true" />
+              <div>
+                <p className="font-medium text-text-primary">
+                  Documento {detail.asset.mime === "application/pdf" ? "PDF" : "binario"} pronto
+                </p>
+                <p>
+                  {Math.round((detail.contentBase64.length * 3) / 4 / 1024)} KB · scaricalo con il pulsante qui a
+                  destra.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <pre className="mt-2 max-h-56 overflow-auto rounded-lg border border-secondary/10 bg-bg-primary/60 p-2 font-mono text-[11px] leading-relaxed text-text-secondary">
+              {(detail.content ?? JSON.stringify(detail.meta, null, 2)).slice(0, 4000)}
+            </pre>
+          )
         )}
       </div>
     </Card>

@@ -208,6 +208,8 @@ export interface LibraryAssetDetail {
     createdAt: string;
   };
   content: string | null;
+  /** Asset binari (es. PDF): byte in base64. */
+  contentBase64?: string | null;
   meta: Record<string, unknown>;
 }
 

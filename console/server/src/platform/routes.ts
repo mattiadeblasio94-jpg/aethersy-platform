@@ -255,6 +255,9 @@ export async function registerPlatformRoutes(app: FastifyInstance): Promise<void
 
     const meta = (asset.meta ?? {}) as Record<string, unknown>;
     const content = typeof meta.content === "string" ? meta.content : null;
+    // Gli asset binari (es. PDF) portano i byte in base64 dentro i metadati:
+    // vengono restituiti cosi' il download e' fedele, non un testo corrotto.
+    const contentBase64 = typeof meta.contentBase64 === "string" ? meta.contentBase64 : null;
     return {
       asset: {
         id: asset.id,
@@ -268,6 +271,7 @@ export async function registerPlatformRoutes(app: FastifyInstance): Promise<void
         createdAt: asset.created_at,
       },
       content,
+      contentBase64,
       meta,
     };
   });

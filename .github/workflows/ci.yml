@@ -39,6 +39,9 @@ jobs:
       - name: Test metering
         working-directory: console/server
         run: npm run test:metering
+      - name: Test PDF deliverable
+        working-directory: console/server
+        run: npm run test:pdf
 
   platform:
     name: platform (typecheck + build, include la Console unificata)

@@ -11,7 +11,8 @@
     "test:metering": "node tools/test-metering.mjs",
     "dev": "node --watch --experimental-strip-types src/index.ts",
     "test:social": "npm run build && node tools/test-social-login.mjs",
-    "test:connectors": "npm run build && node tools/test-connectors.mjs"
+    "test:connectors": "npm run build && node tools/test-connectors.mjs",
+    "test:pdf": "npm run build && node tools/test-pdf.mjs"
   },
   "dependencies": {
     "@fastify/cookie": "^10.0.1",
@@ -24,6 +25,7 @@
     "fastify": "^5.2.0",
     "ioredis": "^6.0.0",
     "minio": "^8.0.7",
+    "pdfkit": "^0.20.2",
     "pg": "^8.23.1",
     "stripe": "^23.1.0",
     "undici": "^8.12.3",
@@ -31,6 +33,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "@types/pdfkit": "^0.17.7",
     "@types/pg": "^8.23.1",
     "typescript": "^5.7.0"
   }
