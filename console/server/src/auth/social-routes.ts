@@ -227,8 +227,8 @@ async function completeSocialLogin(
 
   let profile;
   try {
-    const { accessToken } = await exchangeSocialCode(provider, query.code);
-    profile = await fetchSocialProfile(provider, accessToken);
+    const { accessToken, idToken } = await exchangeSocialCode(provider, query.code);
+    profile = await fetchSocialProfile(provider, accessToken, idToken);
   } catch (err) {
     clearOAuthStateCookie(reply);
     if (err instanceof SocialAuthError) {
@@ -375,5 +375,13 @@ export async function registerSocialRoutes(app: FastifyInstance): Promise<void> 
 
   app.get("/api/auth/social/github/callback", async (request, reply) => {
     return completeSocialLogin("github", request, reply);
+  });
+
+  app.get("/api/auth/social/telegram", async (request, reply) => {
+    return startSocialLogin("telegram", request, reply);
+  });
+
+  app.get("/api/auth/social/telegram/callback", async (request, reply) => {
+    return completeSocialLogin("telegram", request, reply);
   });
 }

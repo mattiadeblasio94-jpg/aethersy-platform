@@ -1,4 +1,5 @@
 import { config } from "../config.js";
+import { verifyTelegramIdToken } from "./telegram-idtoken.js";
 
 // Client OAuth2 dei provider di login sociale (Google, GitHub).
 //
@@ -9,7 +10,7 @@ import { config } from "../config.js";
 //
 // Il `client_secret` non esce mai dal server e non viene scritto in alcun log.
 
-export type SocialProvider = "google" | "github";
+export type SocialProvider = "google" | "github" | "telegram";
 
 export interface SocialProfile {
   providerUserId: string;
@@ -17,6 +18,8 @@ export interface SocialProfile {
   firstName: string;
   lastName: string;
   picture?: string;
+  /** true se l'email e' un identificativo sintetico (Telegram non espone l'email). */
+  syntheticEmail?: boolean;
 }
 
 export interface SocialProviderStatus {
@@ -77,17 +80,35 @@ export function socialProviderSpec(provider: SocialProvider): ProviderSpec {
       scopes: ["openid", "email", "profile"],
     };
   }
+  if (provider === "github") {
+    return {
+      id: "github",
+      label: "GitHub",
+      clientId: config.githubClientId,
+      clientSecret: config.githubClientSecret,
+      redirectUri: config.githubRedirectUri,
+      authorizeUrl: envUrl("GITHUB_AUTHORIZE_URL", "https://github.com/login/oauth/authorize"),
+      tokenUrl: envUrl("GITHUB_TOKEN_URL", "https://github.com/login/oauth/access_token"),
+      userinfoUrl: envUrl("GITHUB_USERINFO_URL", "https://api.github.com/user"),
+      emailsUrl: envUrl("GITHUB_USER_EMAILS_URL", "https://api.github.com/user/emails"),
+      scopes: ["read:user", "user:email"],
+    };
+  }
+  // Telegram Login: OpenID Connect su oauth.telegram.org. Client ID e Client
+  // Secret arrivano da @BotFather -> Login Widget. Non esiste un endpoint
+  // userinfo: i dati dell'utente sono nel JWT `id_token`, firmato da Telegram
+  // (RS256) e verificato contro il JWKS ufficiale.
   return {
-    id: "github",
-    label: "GitHub",
-    clientId: config.githubClientId,
-    clientSecret: config.githubClientSecret,
-    redirectUri: config.githubRedirectUri,
-    authorizeUrl: envUrl("GITHUB_AUTHORIZE_URL", "https://github.com/login/oauth/authorize"),
-    tokenUrl: envUrl("GITHUB_TOKEN_URL", "https://github.com/login/oauth/access_token"),
-    userinfoUrl: envUrl("GITHUB_USERINFO_URL", "https://api.github.com/user"),
-    emailsUrl: envUrl("GITHUB_USER_EMAILS_URL", "https://api.github.com/user/emails"),
-    scopes: ["read:user", "user:email"],
+    id: "telegram",
+    label: "Telegram",
+    clientId: config.telegramClientId,
+    clientSecret: config.telegramClientSecret,
+    redirectUri: config.telegramRedirectUri,
+    authorizeUrl: envUrl("TELEGRAM_AUTHORIZE_URL", "https://oauth.telegram.org/auth"),
+    tokenUrl: envUrl("TELEGRAM_TOKEN_URL", "https://oauth.telegram.org/token"),
+    userinfoUrl: envUrl("TELEGRAM_JWKS_URL", "https://oauth.telegram.org/.well-known/jwks.json"),
+    emailsUrl: null,
+    scopes: ["openid", "profile"],
   };
 }
 
@@ -116,6 +137,9 @@ export function socialAuthorizeUrl(
     query.set("nonce", params.nonce);
     query.set("prompt", "select_account");
     query.set("include_granted_scopes", "true");
+  } else if (provider === "telegram") {
+    // Telegram e' un issuer OIDC: il nonce lega l'id_token alla richiesta.
+    query.set("nonce", params.nonce);
   } else {
     query.set("allow_signup", "true");
   }
@@ -221,16 +245,31 @@ export async function exchangeSocialCode(
             redirect_uri: spec.redirectUri,
           }),
         }
-      : {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify({
-            client_id: spec.clientId,
-            client_secret: spec.clientSecret,
-            code,
-            redirect_uri: spec.redirectUri,
-          }),
-        },
+      : provider === "telegram"
+        ? {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+              // Telegram accetta `client_secret_basic` (documentazione OIDC).
+              Authorization: `Basic ${Buffer.from(`${spec.clientId}:${spec.clientSecret}`).toString("base64")}`,
+            },
+            body: new URLSearchParams({
+              client_id: spec.clientId,
+              code,
+              grant_type: "authorization_code",
+              redirect_uri: spec.redirectUri,
+            }),
+          }
+        : {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify({
+              client_id: spec.clientId,
+              client_secret: spec.clientSecret,
+              code,
+              redirect_uri: spec.redirectUri,
+            }),
+          },
   );
 
   const text = await response.text();
@@ -278,8 +317,47 @@ async function readJson(url: string, accessToken: string): Promise<{ status: num
 export async function fetchSocialProfile(
   provider: SocialProvider,
   accessToken: string,
+  idToken?: string | null,
 ): Promise<SocialProfile> {
   const spec = socialProviderSpec(provider);
+
+  if (provider === "telegram") {
+    // Telegram non espone un endpoint userinfo: i dati dell'utente sono
+    // dentro l'id_token (JWT firmato da Telegram con RS256). Il token viene
+    // verificato contro il JWKS ufficiale prima di usarne le dichiarazioni.
+    if (!idToken) {
+      throw new SocialAuthError(
+        provider,
+        "TOKEN_MISSING",
+        "Telegram non ha restituito l'id_token necessario per completare l'accesso.",
+      );
+    }
+    const claims = await verifyTelegramIdToken(idToken);
+    const providerUserId = String(claims.id ?? claims.sub ?? "");
+    if (!providerUserId) {
+      throw new SocialAuthError(
+        provider,
+        "PROFILE_INVALID",
+        "Il profilo Telegram non contiene un identificativo utente.",
+      );
+    }
+    const fullName = typeof claims.name === "string" ? claims.name.trim() : "";
+    const parts = fullName ? fullName.split(/\s+/) : [];
+    const username =
+      typeof claims.preferred_username === "string" ? claims.preferred_username.trim() : "";
+    // Telegram non fornisce l'email: l'identita' della piattaforma e' quindi
+    // sintetica e stabile (username se presente, altrimenti l'id utente).
+    const handle = username || providerUserId;
+    return {
+      providerUserId,
+      email: `tg-${handle.toLowerCase().replace(/[^a-z0-9_.-]/g, "")}@telegram.aethersy.online`,
+      firstName: typeof claims.given_name === "string" ? claims.given_name : (parts[0] ?? ""),
+      lastName: typeof claims.family_name === "string" ? claims.family_name : parts.slice(1).join(" "),
+      picture: typeof claims.picture === "string" ? claims.picture : undefined,
+      syntheticEmail: true,
+    };
+  }
+
   const info = await readJson(spec.userinfoUrl, accessToken);
   if (info.status >= 400) {
     throw socialErrorFromPayload(provider, info.status, info.payload, info.text);
@@ -356,5 +434,5 @@ export function socialProviderStatus(): Record<SocialProvider, SocialProviderSta
       lastError: lastErrors.get(provider) ?? null,
     };
   };
-  return { google: build("google"), github: build("github") };
+  return { google: build("google"), github: build("github"), telegram: build("telegram") };
 }

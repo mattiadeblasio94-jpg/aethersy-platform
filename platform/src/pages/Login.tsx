@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { AlertTriangle, ArrowRight, Lock, Mail, Github } from "lucide-react";
+import { AlertTriangle, ArrowRight, Lock, Mail, Github, Send } from "lucide-react";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { useAuthStore } from "@/store/auth";
@@ -85,14 +85,14 @@ export default function Login() {
     }
   }
 
-  async function handleSocialLogin(provider: "google" | "github") {
+  async function handleSocialLogin(provider: "google" | "github" | "telegram") {
     setError(null);
     // Redirect al BFF per avviare il flusso OAuth del provider. `target` dice al
     // BFF dove tornare dopo il login (allowlist: platform | console).
     window.location.href = `/api/auth/social/${provider}?target=platform`;
   }
 
-  const providerHint = (provider: "google" | "github"): string | null => {
+  const providerHint = (provider: "google" | "github" | "telegram"): string | null => {
     const status = providers[provider];
     if (!status) return null;
     if (!status.configured) return `${status.label} non e' ancora configurato su questo ambiente.`;
@@ -241,6 +241,22 @@ export default function Login() {
               </Button>
               {providerHint("github") ? (
                 <p className="mt-1 text-xs text-text-muted">{providerHint("github")}</p>
+              ) : null}
+            </div>
+
+            <div>
+              <Button
+                size="lg"
+                fullWidth
+                disabled={providers.telegram ? !providers.telegram.configured : false}
+                onClick={() => handleSocialLogin("telegram")}
+                className="flex items-center justify-center gap-2"
+              >
+                <Send className="h-4 w-4" aria-hidden="true" />
+                Continua con Telegram
+              </Button>
+              {providerHint("telegram") ? (
+                <p className="mt-1 text-xs text-text-muted">{providerHint("telegram")}</p>
               ) : null}
             </div>
           </div>

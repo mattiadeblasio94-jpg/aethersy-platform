@@ -21,10 +21,16 @@ CREATE TABLE IF NOT EXISTS auth.identity_credential (
   ap_password_enc text,
   created_at      timestamptz NOT NULL DEFAULT now(),
   updated_at      timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT identity_credential_provider CHECK (provider IN ('email', 'google', 'github'))
+  CONSTRAINT identity_credential_provider CHECK (provider IN ('email', 'google', 'github', 'telegram'))
 );
+-- La tabella esiste gia' in produzione con il vincolo a tre provider: il CHECK
+-- viene allargato a 'telegram' (login Telegram Login / OIDC).
+ALTER TABLE auth.identity_credential DROP CONSTRAINT IF EXISTS identity_credential_provider;
+ALTER TABLE auth.identity_credential
+  ADD CONSTRAINT identity_credential_provider CHECK (provider IN ('email', 'google', 'github', 'telegram'));
 CREATE INDEX IF NOT EXISTS identity_credential_provider_idx
   ON auth.identity_credential(provider);
+
 
 -- Profilo utente ----------------------------------------------------------------
 -- Dati che l'utente compila (nome, azienda, ruolo, fuso orario, lingua). Non

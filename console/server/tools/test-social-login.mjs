@@ -13,9 +13,30 @@
 //   npm run test:social   (compila il BFF e gira i test sul dist)
 
 import http from "node:http";
+import crypto from "node:crypto";
 import assert from "node:assert/strict";
 
 // --- Provider finto ----------------------------------------------------------
+
+// Chiave RSA del bot Telegram di test: serve a firmare un id_token valido e a
+// pubblicare il JWKS corrispondente, cosi' la verifica server-side e' provata
+// davvero (non un token finto non verificabile).
+const telegramKeys = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
+const telegramPublicJwk = telegramKeys.publicKey.export({ format: "jwk" });
+telegramPublicJwk.kid = "test-kid";
+telegramPublicJwk.alg = "RS256";
+telegramPublicJwk.use = "sig";
+
+function b64url(buf) {
+  return buf.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function signTelegramIdToken(claims) {
+  const header = b64url(Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT", kid: "test-kid" })));
+  const payload = b64url(Buffer.from(JSON.stringify(claims)));
+  const signature = crypto.sign("RSA-SHA256", Buffer.from(`${header}.${payload}`), telegramKeys.privateKey);
+  return `${header}.${payload}.${b64url(signature)}`;
+}
 
 const stub = http.createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
@@ -72,6 +93,36 @@ const stub = http.createServer((req, res) => {
     ]);
   }
 
+  if (url.pathname === "/telegram/token") {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      const params = new URLSearchParams(body);
+      if (params.get("code") !== "good-telegram") {
+        return json(400, { error: "invalid_grant", error_description: "Invalid code." });
+      }
+      return json(200, {
+        access_token: "tok-telegram",
+        token_type: "Bearer",
+        id_token: signTelegramIdToken({
+          iss: "https://oauth.telegram.org",
+          aud: process.env.TELEGRAM_CLIENT_ID,
+          sub: "771234567",
+          id: 771234567,
+          name: "Ada Lovelace",
+          preferred_username: "ada",
+          picture: "https://example.com/ada.png",
+          exp: Math.floor(Date.now() / 1000) + 3600,
+        }),
+      });
+    });
+    return;
+  }
+
+  if (url.pathname === "/telegram/jwks") {
+    return json(200, { keys: [telegramPublicJwk] });
+  }
+
   json(404, { error: "not_found" });
 });
 
@@ -94,6 +145,11 @@ process.env.GOOGLE_USERINFO_URL = `${stubBase}/google/userinfo`;
 process.env.GITHUB_TOKEN_URL = `${stubBase}/github/token`;
 process.env.GITHUB_USERINFO_URL = `${stubBase}/github/user`;
 process.env.GITHUB_USER_EMAILS_URL = `${stubBase}/github/user/emails`;
+process.env.TELEGRAM_CLIENT_ID ??= "telegram-client-id";
+process.env.TELEGRAM_CLIENT_SECRET ??= "telegram-client-secret";
+process.env.TELEGRAM_REDIRECT_URI ??= "https://platform.aethersy.online/api/auth/social/telegram/callback";
+process.env.TELEGRAM_TOKEN_URL = `${stubBase}/telegram/token`;
+process.env.TELEGRAM_JWKS_URL = `${stubBase}/telegram/jwks`;
 
 const { socialAuthorizeUrl, exchangeSocialCode, fetchSocialProfile, socialProviderStatus, SocialAuthError } =
   await import("../dist/auth/social.js");
@@ -179,6 +235,63 @@ await check("profilo GitHub: email nascosta letta da /user/emails", async () => 
   assert.equal(profile.email, "ada@example.com");
   assert.equal(profile.firstName, "Ada");
   assert.equal(profile.lastName, "Lovelace");
+});
+
+// --- Telegram (OIDC) ---------------------------------------------------------
+
+await check("authorize Telegram: issuer OIDC, scope openid profile e nonce", () => {
+  const url = new URL(socialAuthorizeUrl("telegram", { state: "st", nonce: "no" }));
+  assert.equal(url.origin + url.pathname, "https://oauth.telegram.org/auth");
+  assert.equal(url.searchParams.get("client_id"), "telegram-client-id");
+  assert.equal(url.searchParams.get("redirect_uri"), process.env.TELEGRAM_REDIRECT_URI);
+  assert.equal(url.searchParams.get("response_type"), "code");
+  assert.equal(url.searchParams.get("scope"), "openid profile");
+  assert.equal(url.searchParams.get("nonce"), "no");
+  assert.equal(url.searchParams.get("state"), "st");
+});
+
+await check("scambio codice Telegram: id_token ricevuto", async () => {
+  const { accessToken, idToken } = await exchangeSocialCode("telegram", "good-telegram");
+  assert.equal(accessToken, "tok-telegram");
+  assert.ok(idToken?.split(".").length === 3, "id_token non e' un JWT");
+});
+
+await check("profilo Telegram: claims letti dall'id_token con firma verificata", async () => {
+  const { idToken } = await exchangeSocialCode("telegram", "good-telegram");
+  const profile = await fetchSocialProfile("telegram", "tok-telegram", idToken);
+  assert.equal(profile.providerUserId, "771234567");
+  assert.equal(profile.firstName, "Ada");
+  assert.equal(profile.lastName, "Lovelace");
+  // Telegram non espone l'email: l'identita' e' sintetica ma stabile.
+  assert.equal(profile.syntheticEmail, true);
+  assert.equal(profile.email, "tg-ada@telegram.aethersy.online");
+});
+
+await check("profilo Telegram: id_token mancante rifiutato", async () => {
+  await assert.rejects(
+    () => fetchSocialProfile("telegram", "tok-telegram", null),
+    (err) => {
+      assert.ok(err instanceof SocialAuthError);
+      assert.equal(err.code, "TOKEN_MISSING");
+      return true;
+    },
+  );
+});
+
+await check("id_token Telegram con firma manipolata rifiutato", async () => {
+  const { idToken } = await exchangeSocialCode("telegram", "good-telegram");
+  const parts = idToken.split(".");
+  const tampered = `${parts[0]}.${parts[1]}.${parts[2].slice(0, -4)}AAAA`;
+  await assert.rejects(
+    () => fetchSocialProfile("telegram", "tok-telegram", tampered),
+    /firma dell'id_token Telegram non valida/,
+  );
+});
+
+await check("stato dei provider: telegram configurato quando ha client_id e secret", () => {
+  const status = socialProviderStatus();
+  assert.equal(status.telegram.configured, true);
+  assert.equal(status.telegram.label, "Telegram");
 });
 
 // --- Protezione anti-CSRF ----------------------------------------------------

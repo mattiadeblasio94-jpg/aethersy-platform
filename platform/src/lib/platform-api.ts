@@ -357,7 +357,7 @@ export interface UsageResponse {
 // --- API --------------------------------------------------------------------
 
 export interface SocialProviderStatus {
-  id: "google" | "github";
+  id: "google" | "github" | "telegram";
   label: string;
   /** true se il provider e' configurato lato server (client_id/secret). */
   configured: boolean;
@@ -370,7 +370,7 @@ export interface SocialProviderStatus {
 export const platformApi = {
   // --- Sessione (auth cookie Console) --------------------------------------
   getSession: () => http.get<SessionUser>("/api/auth/session"),
-  /** Stato dei provider di login sociale (Google, GitHub). */
+  /** Stato dei provider di login sociale (Google, GitHub, Telegram). */
   getSocialProviders: () =>
     http.get<{ providers: Record<string, SocialProviderStatus> }>("/api/auth/social/providers"),
   login: (email: string, password: string) =>

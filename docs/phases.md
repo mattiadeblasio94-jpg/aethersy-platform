@@ -1433,3 +1433,38 @@ health check non rispondeva.
 **Verifica**: riproduzione del bug (loop infinito) prima del fix e output
 corretto dopo; deploy `console`+`platform` con health check ok e login
 funzionante; risposta a `/api/health` in 100 ms.
+
+### Fase 28 — Login con Telegram (OIDC) (09/11/2026)
+
+**Cosa e' cambiato**
+
+- `console/server/src/auth/telegram-idtoken.ts` (nuovo): verifica server-side
+  dell'`id_token` Telegram — firma RS256 contro il JWKS ufficiale
+  (`https://oauth.telegram.org/.well-known/jwks.json`, cache 10 min), controllo di
+  `iss`, `aud` (Client ID del bot) e `exp`. Senza questa verifica un token
+  fabbricato da terzi permetterebbe di impersonare un utente qualsiasi.
+- `console/server/src/auth/social.ts`: terzo provider `telegram`
+  (`oauth.telegram.org/auth`, scambio codice con `client_secret_basic`). Telegram
+  non espone un endpoint userinfo e non fornisce l'email: il profilo viene letto
+  dalle dichiarazioni dell'`id_token` e l'identita' di piattaforma e' sintetica
+  e stabile (`tg-<username>@telegram.aethersy.online`).
+- `console/server/src/auth/social-routes.ts`: rotte `/api/auth/social/telegram` e
+  `/api/auth/social/telegram/callback`.
+- `console/server/src/auth/schema.sql` + `identity-store.ts`: il provider
+  `telegram` e' ammesso in `auth.identity_credential` (CHECK allargato in modo
+  idempotente).
+- `console/server/src/config.ts`, `docker-compose.yml`, `.env.example`: variabili
+  `TELEGRAM_CLIENT_ID`, `TELEGRAM_CLIENT_SECRET`, `TELEGRAM_REDIRECT_URI`.
+- `platform/src/pages/Login.tsx` + `platform/src/lib/platform-api.ts`: bottone
+  "Continua con Telegram" (attivo solo se il provider e' configurato, con lo
+  stesso messaggio d'errore degli altri provider).
+
+**Verifica**: `npm run test:social` -> **25/25** (6 casi nuovi: URL di
+autorizzazione OIDC, scambio codice, lettura del profilo dall'id_token con
+firma verificata, id_token mancante rifiutato, id_token con firma manipolata
+rifiutato, stato del provider). Build BFF + platform OK.
+
+**Nota operativa**: il Client ID e il Client Secret sono nel `.env` del VPS
+(mai nel repo). In BotFather -> Login Widget deve essere registrato come
+Allowed URL `https://platform.aethersy.online/api/auth/social/telegram/callback`
+e `https://platform.aethersy.online` come origine del widget.

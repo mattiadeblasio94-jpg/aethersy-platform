@@ -13,7 +13,7 @@ import { decryptSecret, encryptSecret, hasSecretsKey } from "../pipeline/secrets
 // (pipeline/secrets.ts). Se la chiave non e' configurata l'archivio resta
 // disabilitato e il login social apre una sessione senza token Activepieces.
 
-export type IdentityProvider = "email" | "google" | "github";
+export type IdentityProvider = "email" | "google" | "github" | "telegram";
 
 export interface StoredIdentity {
   email: string;
