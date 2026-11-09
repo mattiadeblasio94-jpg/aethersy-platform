@@ -24,6 +24,7 @@ import {
   type SocialProvider,
 } from "./social.js";
 import { connectorById } from "../connectors/catalog.js";
+import { googleConsentHint } from "../connectors/oauth.js";
 import { completeConnectorAuthorization } from "../connectors/complete.js";
 import {
   CONNECTOR_STATE_COOKIE,
@@ -315,10 +316,16 @@ async function completeConnectorLogin(
 
   if (query.error) {
     clearConnectorCookie();
+    // Google blocca il consenso in due casi frequenti: scope non valido per il
+    // progetto (`invalid_scope`) e app non verificata (servono gli utenti di
+    // test): in entrambi i casi il messaggio deve dire cosa fare.
+    const hint =
+      provider === "google" ? googleConsentHint(query.error, query.error_description) : null;
     const message =
-      query.error === "access_denied"
+      hint ??
+      (query.error === "access_denied"
         ? "Accesso annullato."
-        : `Il provider ha rifiutato il collegamento: ${query.error_description ?? query.error}.`;
+        : `Il provider ha rifiutato il collegamento: ${query.error_description ?? query.error}.`);
     return reply.redirect(
       back({ connect: spec.id, error: "CONNECTOR_ACCESS_DENIED", message }),
     );

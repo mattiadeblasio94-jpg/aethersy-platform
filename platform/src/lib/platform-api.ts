@@ -672,6 +672,13 @@ export interface ConnectorEntry {
   notice: string | null;
   /** Console del provider (schermata di consenso OAuth). */
   consoleUrl: string | null;
+  /** Come si attiva il collegamento per tutti gli utenti della piattaforma. */
+  distribution: {
+    mode: "platform" | "self_serve" | "review" | "byo";
+    requirement: string;
+    /** L'app OAuth e' della piattaforma: l'utente non registra nulla. */
+    platformApp: boolean;
+  };
 }
 
 export interface ConnectorCatalog {

@@ -261,6 +261,16 @@ export default function Login() {
               Scopri Aethersy
             </Link>
           </p>
+
+          <p className="mt-1 text-center text-xs text-text-muted">
+            <Link to="/privacy" className="hover:text-text-secondary">
+              Privacy Policy
+            </Link>
+            <span className="mx-2">·</span>
+            <Link to="/terms" className="hover:text-text-secondary">
+              Termini di servizio
+            </Link>
+          </p>
         </div>
       </main>
     </div>

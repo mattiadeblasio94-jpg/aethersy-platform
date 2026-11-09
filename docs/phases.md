@@ -1293,3 +1293,48 @@ OAuth" -> stato pubblicazione **In test** -> "Utenti di test" -> aggiungi `matti
 Da quel momento Gmail, Calendar, Docs, Sheets, YouTube, Ads si collegano con un solo accesso (in modalita' test il
 refresh token scade dopo 7 giorni: la piattaforma riusa il token finche' e' valido). Alternativa a lungo termine:
 richiedere la verifica dell'app.
+
+### Fase 25 — Modello "app di piattaforma": l'utente non deve creare app OAuth (08/11/2026)
+
+**Domanda del committente**: "serve avere la console? posso avere tutto sulla piattaforma? gli utenti che useranno
+la piattaforma devono fare tutto sto casino o si collegano tramite le mie API?"
+
+**Risposta implementata**: l'utente finale **non crea piu' app**. Per ogni provider la piattaforma dichiara come si
+attiva il collegamento e l'utente vede solo il pulsante di login/consenso. La creazione dell'app e' un lavoro
+una-tantum della piattaforma (non degli utenti).
+
+**Cosa e' cambiato**
+
+- `console/server/src/connectors/catalog.ts`: nuovo `CONNECTOR_DISTRIBUTION` con 4 stati di attivazione:
+  - `platform` — l'app di piattaforma e' gia' attiva (GitHub): l'utente collega con un clic;
+  - `self_serve` — l'app di piattaforma si registra in pochi minuti nella console del provider (Slack, Notion,
+    Linear, Outlook/Microsoft Teams, Salesforce): una volta sola, poi tutti collegano con un clic;
+  - `review` — il provider chiede la revisione dell'app (Google, Meta, LinkedIn, TikTok, X, Reddit, Stripe,
+    PayPal, Zoom, Canva, Wix, Figma, YouTube/Ads/Analytics): giorni o settimane, ma **una volta sola**;
+  - `byo` — il provider non offre app multi-tenant (Telegram, WhatsApp, Cloudflare, Supabase, ElevenLabs,
+    Mailchimp, DataForSEO, GoDaddy, WordPress, Activepieces): l'utente inserisce la credenziale del proprio account,
+    unico caso in cui l'utente deve fare qualcosa.
+  Il campo `platformApp` marca i provider con app di proprieta' della piattaforma (Google e i suoi 10 servizi,
+  GitHub): sono gli unici in cui l'utente e' davvero "plug-and-play".
+- `console/server/src/connectors/routes.ts` e `platform/src/lib/platform-api.ts`: il catalogo espone `distribution`
+  (modo + requisito + `platformApp`).
+- `platform/src/pages/Connectors.tsx`: ogni card mostra lo stato di attivazione, il requisito e la frase
+  "L'app e' di Aethersy: devi solo fare login e consenso". Il pulsante "Registra l'app" diventa **"Porta la tua app
+  (opzionale)"** ed e' visibile solo quando la piattaforma non ha ancora l'app del provider: resta un fallback
+  avanzato, non il percorso predefinito.
+- `platform/src/pages/Legal.tsx` (nuovo) + rotte pubbliche `/privacy` e `/terms`: la Console Google richiede una
+  privacy policy pubblica per la verifica dell'app. Il testo elenca i dati realmente trattati (profilo del provider,
+  contenuti dei servizi autorizzati, token cifrati, deliverable, crediti), il passaggio ai provider AI
+  (OpenRouter/Venice) e i diritti dell'interessato. Link nel footer di `Login.tsx`.
+- `console/server/src/auth/social-routes.ts`: il callback unificato usa `googleConsentHint()` anche per il login
+  sociale (modifica inclusa in questo commit, gia' presente nel build deployato della fase 24).
+
+**Verifica**: `npm run test:connectors` -> **40/40 verdi** (3 nuovi test: ogni connettore dichiara come si attiva,
+`platformApp` coerente con il tipo di auth, i connettori a credenziale sono `byo`), `npm run test:social` -> **19/19**,
+build BFF e platform OK.
+
+**Azione utente (una volta sola, ~2 minuti)**: Google Cloud Console -> progetto AIFORGE -> "Schermata di consenso
+OAuth" -> stato **In test** -> "Utenti di test" -> aggiungi `mattiadeblasio94@gmail.com`. Da quel momento Gmail,
+Calendar, Docs, Sheets, YouTube e Ads si collegano con un solo accesso (in test il refresh token scade dopo 7
+giorni). Per gli altri provider: creare l'app di piattaforma una volta sola (stato `self_serve`) e avviare la
+revisione per quelli in `review`.

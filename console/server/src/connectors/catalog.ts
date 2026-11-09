@@ -166,6 +166,258 @@ export const GOOGLE_CONSOLE_URL = "https://console.cloud.google.com/apis/credent
 export const GOOGLE_TEST_USER_NOTICE =
   "L'app Google non e' ancora verificata: gli ambiti sensibili (Gmail, Calendar, Docs, YouTube, Ads) si concedono solo agli utenti di test. Aggiungi il tuo account in Google Cloud Console -> Schermata di consenso OAuth -> Utenti di test. Drive funziona subito (ambito non sensibile).";
 
+/**
+ * Come si attiva il collegamento per TUTTI gli utenti della piattaforma.
+ *
+ *   - "platform"   -> l'app di piattaforma esiste gia': ogni utente collega
+ *                     con un clic (nessun passaggio per l'utente);
+ *   - "self_serve" -> l'app di piattaforma si registra in pochi minuti nella
+ *                     console del provider: una volta sola, poi tutti gli
+ *                     utenti collegano con un clic;
+ *   - "review"     -> il provider chiede la revisione dell'app (giorni o
+ *                     settimane): una volta sola per la piattaforma, poi tutti
+ *                     gli utenti collegano con un clic;
+ *   - "byo"        -> il provider non offre un'app multi-tenant: ogni utente
+ *                     inserisce la credenziale del proprio account (unico
+ *                     caso in cui l'utente deve fare qualcosa).
+ *
+ * In nessun caso l'utente finale deve creare un'app: quello e' compito della
+ * piattaforma.
+ */
+export type ConnectorDistributionMode = "platform" | "self_serve" | "review" | "byo";
+
+export interface ConnectorDistribution {
+  mode: ConnectorDistributionMode;
+  /** Cosa serve perche' tutti gli utenti colleghino con un clic. */
+  requirement: string;
+  /**
+   * L'app OAuth e' di proprieta' della piattaforma: l'utente finale non
+   * registra nulla, si limita a fare login e consenso.
+   */
+  platformApp: boolean;
+}
+
+const DISTRIBUTION_BASE: Record<string, Omit<ConnectorDistribution, "platformApp">> = {
+  google: {
+    mode: "review",
+    requirement:
+      "Verifica dell'app Google (schermata di consenso OAuth): senza verifica gli ambiti sensibili restano riservati agli utenti di test. Servono dominio verificato e privacy policy (gia' predisposta su /privacy).",
+  },
+  github: {
+    mode: "platform",
+    requirement: "App di piattaforma gia' attiva: ogni utente collega con un clic.",
+  },
+  slack: {
+    mode: "self_serve",
+    requirement:
+      "App di piattaforma: si crea una volta sola in api.slack.com/apps; ogni utente la installa dal pulsante 'Accedi con Slack' nel proprio workspace.",
+  },
+  notion: {
+    mode: "self_serve",
+    requirement:
+      "App di piattaforma: integrazione pubblica creata una volta sola su notion.so/my-integrations; ogni utente autorizza dal pulsante.",
+  },
+  linear: {
+    mode: "self_serve",
+    requirement:
+      "App di piattaforma: OAuth app creata una volta sola in linear.app/settings/api.",
+  },
+  outlook: {
+    mode: "self_serve",
+    requirement:
+      "App di piattaforma: registrazione Entra multi-tenant (entra.microsoft.com); l'utente autorizza e l'amministratore del tenant approva.",
+  },
+  "microsoft-teams": {
+    mode: "self_serve",
+    requirement:
+      "Stessa app Entra di piattaforma, con i permessi Chat e ChannelMessage aggiunti.",
+  },
+  salesforce: {
+    mode: "self_serve",
+    requirement:
+      "App di piattaforma: Connected App creata una volta sola su developer.salesforce.com; l'utente che autorizza deve essere amministratore Salesforce.",
+  },
+  figma: {
+    mode: "review",
+    requirement:
+      "L'app Figma va pubblicata (revisione di Figma) per essere usata da altri team: una volta sola per la piattaforma.",
+  },
+  instagram: {
+    mode: "review",
+    requirement:
+      "Meta richiede revisione dell'app e verifica del business: una volta sola per la piattaforma (developers.facebook.com).",
+  },
+  facebook: {
+    mode: "review",
+    requirement:
+      "Meta richiede revisione dell'app e verifica del business: una volta sola per la piattaforma (developers.facebook.com).",
+  },
+  "meta-ads": {
+    mode: "review",
+    requirement:
+      "Meta Ads richiede la revisione dell'app con ads_management: una volta sola per la piattaforma.",
+  },
+  linkedin: {
+    mode: "review",
+    requirement:
+      "LinkedIn richiede la revisione dell'app (linkedin.com/developers/apps): una volta sola per la piattaforma.",
+  },
+  tiktok: {
+    mode: "review",
+    requirement:
+      "TikTok richiede la revisione dell'app (developers.tiktok.com): una volta sola per la piattaforma.",
+  },
+  "tiktok-ads": {
+    mode: "review",
+    requirement:
+      "TikTok Business API richiede la revisione dell'app: una volta sola per la piattaforma.",
+  },
+  x: {
+    mode: "review",
+    requirement:
+      "X richiede un developer account con API a pagamento e revisione dell'app: una volta sola per la piattaforma.",
+  },
+  reddit: {
+    mode: "review",
+    requirement:
+      "Reddit approva le app di tipo 'script' (reddit.com/prefs/apps): una volta sola per la piattaforma.",
+  },
+  wix: {
+    mode: "review",
+    requirement:
+      "Wix richiede la revisione dell'app (dev.wix.com/apps): una volta sola per la piattaforma.",
+  },
+  paypal: {
+    mode: "review",
+    requirement:
+      "PayPal richiede la revisione dell'app REST (developer.paypal.com): una volta sola per la piattaforma.",
+  },
+  stripe: {
+    mode: "review",
+    requirement:
+      "Stripe Connect richiede la revisione dell'app (dashboard.stripe.com/connect/apps): una volta sola per la piattaforma.",
+  },
+  zoom: {
+    mode: "review",
+    requirement:
+      "Zoom richiede la revisione dell'app (marketplace.zoom.us): una volta sola per la piattaforma.",
+  },
+  canva: {
+    mode: "review",
+    requirement:
+      "Canva richiede l'approvazione dell'integrazione (canva.com/developers/integrations): una volta sola per la piattaforma.",
+  },
+  youtube: {
+    mode: "review",
+    requirement:
+      "YouTube API: l'app va sottoposta a revisione e le API devono essere abilitate nel progetto Google: una volta sola per la piattaforma.",
+  },
+  "google-analytics": {
+    mode: "review",
+    requirement:
+      "Analytics Data API: l'app va sottoposta a revisione: una volta sola per la piattaforma.",
+  },
+  "google-ads": {
+    mode: "review",
+    requirement:
+      "Google Ads API: l'app va sottoposta a revisione e serve un token sviluppatore: una volta sola per la piattaforma.",
+  },
+  telegram: {
+    mode: "byo",
+    requirement:
+      "Telegram non offre un login OAuth: ogni utente incolla il token del proprio bot (unico passaggio previsto dal provider).",
+  },
+  whatsapp: {
+    mode: "byo",
+    requirement:
+      "Meta non consente il login diretto su WhatsApp Business: ogni utente incolla il token permanente della propria Cloud API.",
+  },
+  cloudflare: {
+    mode: "byo",
+    requirement:
+      "Cloudflare usa API Token: ogni utente incolla il proprio token (previsto dal provider).",
+  },
+  supabase: {
+    mode: "byo",
+    requirement:
+      "Supabase usa Personal Access Token: ogni utente incolla il proprio token (previsto dal provider).",
+  },
+  elevenlabs: {
+    mode: "byo",
+    requirement: "ElevenLabs usa API key: ogni utente incolla la propria chiave.",
+  },
+  mailchimp: {
+    mode: "byo",
+    requirement: "Mailchimp usa API key: ogni utente incolla la propria chiave e il prefisso server.",
+  },
+  dataforseo: {
+    mode: "byo",
+    requirement: "DataForSEO usa credenziali account: ogni utente incolla le proprie.",
+  },
+  godaddy: {
+    mode: "byo",
+    requirement: "GoDaddy usa API key + secret: ogni utente incolla le proprie.",
+  },
+  wordpress: {
+    mode: "byo",
+    requirement: "WordPress usa le Application Password: ogni utente incolla le proprie.",
+  },
+  activepieces: {
+    mode: "byo",
+    requirement: "Activepieces usa API key dello stack: ogni utente incolla la propria.",
+  },
+};
+
+/**
+ * Provider per cui la piattaforma possiede gia' (o deve possedere) l'app
+ * OAuth: l'utente finale non deve mai registrarne una.
+ */
+const PLATFORM_APP_PROVIDERS = new Set([
+  "google",
+  "gmail",
+  "google-drive",
+  "google-calendar",
+  "google-sheets",
+  "google-slides",
+  "google-docs",
+  "google-tasks",
+  "youtube",
+  "google-analytics",
+  "google-ads",
+  "github",
+]);
+
+/** I servizi Google ereditano lo stato di attivazione del master Google. */
+const GOOGLE_SERVICES = [
+  "gmail",
+  "google-drive",
+  "google-calendar",
+  "google-sheets",
+  "google-slides",
+  "google-docs",
+  "google-tasks",
+  "youtube",
+  "google-analytics",
+  "google-ads",
+] as const;
+
+for (const id of GOOGLE_SERVICES) {
+  if (!DISTRIBUTION_BASE[id]) {
+    DISTRIBUTION_BASE[id] = {
+      mode: "review",
+      requirement:
+        "Verifica dell'app Google (schermata di consenso OAuth): senza verifica gli ambiti sensibili restano riservati agli utenti di test. Servono dominio verificato e privacy policy (gia' predisposta su /privacy).",
+    };
+  }
+}
+
+export const CONNECTOR_DISTRIBUTION: Record<string, ConnectorDistribution> = Object.fromEntries(
+  Object.entries(DISTRIBUTION_BASE).map(([id, value]) => [
+    id,
+    { ...value, platformApp: PLATFORM_APP_PROVIDERS.has(id) },
+  ]),
+);
+
 export const CONNECTORS: ConnectorSpec[] = [
   // ------------------------------------------------- Google: un solo accesso --
   // "master": un unico login Google, con il consenso unificato, attiva tutti

@@ -70,6 +70,7 @@ const {
   connectorById,
   CONNECTOR_CATEGORY_LABELS,
   CONNECTOR_SIGNUP_URLS,
+  CONNECTOR_DISTRIBUTION,
   googleMasterSpec,
   googleServicesForScopes,
 } = await import("../dist/connectors/catalog.js");
@@ -111,6 +112,42 @@ await check("catalogo: almeno 40 provider reali", () => {
 await check("catalogo: id univoci", () => {
   const ids = CONNECTORS.map((connector) => connector.id);
   assert.equal(new Set(ids).size, ids.length);
+});
+
+await check("catalogo: ogni connettore dichiara come si attiva per gli utenti", () => {
+  const modes = new Set(["platform", "self_serve", "review", "byo"]);
+  for (const connector of CONNECTORS) {
+    const distribution = CONNECTOR_DISTRIBUTION[connector.id];
+    assert.ok(distribution, `${connector.id} senza stato di attivazione`);
+    assert.ok(modes.has(distribution.mode), `${connector.id} modalita' ${distribution.mode}`);
+    assert.ok(distribution.requirement.length > 20, `${connector.id} senza requisito`);
+  }
+});
+
+await check("catalogo: l'app di piattaforma e' gia' attiva solo per i provider con app", () => {
+  for (const connector of CONNECTORS) {
+    const distribution = CONNECTOR_DISTRIBUTION[connector.id];
+    assert.ok(distribution, `${connector.id} senza stato di attivazione`);
+    const expected = connector.auth === "google" || connector.auth === "github";
+    assert.equal(
+      distribution.platformApp,
+      expected,
+      `${connector.id}: platformApp=${distribution.platformApp}, atteso ${expected}`,
+    );
+  }
+  assert.equal(CONNECTOR_DISTRIBUTION.google?.mode, "review");
+  assert.equal(CONNECTOR_DISTRIBUTION.github?.mode, "platform");
+});
+
+await check("catalogo: i connettori a credenziale sono per forza 'byo'", () => {
+  for (const connector of CONNECTORS) {
+    if (connector.auth !== "api_key") continue;
+    assert.equal(
+      CONNECTOR_DISTRIBUTION[connector.id]?.mode,
+      "byo",
+      `${connector.id} e' a credenziale ma non e' 'byo'`,
+    );
+  }
 });
 
 await check("catalogo: i connettori Google sono 10 e usano l'app Google", () => {

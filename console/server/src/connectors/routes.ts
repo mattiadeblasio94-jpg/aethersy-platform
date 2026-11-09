@@ -10,6 +10,7 @@ import {
 import {
   CONNECTOR_CATEGORY_LABELS,
   CONNECTORS,
+  CONNECTOR_DISTRIBUTION,
   CONNECTOR_SIGNUP_URLS,
   GOOGLE_CONSOLE_URL,
   GOOGLE_TEST_USER_NOTICE,
@@ -126,6 +127,13 @@ interface CatalogEntry {
   notice: string | null;
   /** Console del provider (schermata di consenso OAuth). */
   consoleUrl: string | null;
+  /** Come si attiva il collegamento per tutti gli utenti della piattaforma. */
+  distribution: {
+    mode: "platform" | "self_serve" | "review" | "byo";
+    requirement: string;
+    /** L'app OAuth e' della piattaforma: l'utente non registra nulla. */
+    platformApp: boolean;
+  };
 }
 
 export async function registerConnectorRoutes(app: FastifyInstance): Promise<void> {
@@ -194,6 +202,14 @@ export async function registerConnectorRoutes(app: FastifyInstance): Promise<voi
             : (spec.notice ?? null),
         consoleUrl:
           spec.auth === "google" ? GOOGLE_CONSOLE_URL : (spec.consoleUrl ?? null),
+        distribution: CONNECTOR_DISTRIBUTION[spec.id] ?? {
+          mode: spec.auth === "api_key" ? "byo" : "self_serve",
+          requirement:
+            spec.auth === "api_key"
+              ? "Ogni utente inserisce la credenziale del proprio account."
+              : "App di piattaforma: si registra una volta sola, poi tutti gli utenti collegano con un clic.",
+          platformApp: false,
+        },
       });
     }
 

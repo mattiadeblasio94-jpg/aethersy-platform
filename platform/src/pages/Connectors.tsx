@@ -44,6 +44,18 @@ const AUTH_BADGE: Record<ConnectorEntry["auth"], { label: string; variant: "info
   api_key: { label: "Credenziale", variant: "warning" },
 };
 
+// Stato di attivazione per gli utenti finali: l'app di piattaforma serve una
+// volta sola, poi ognuno collega il proprio account con un clic.
+const DISTRIBUTION_BADGE: Record<
+  ConnectorEntry["distribution"]["mode"],
+  { label: string; variant: "success" | "info" | "warning" | "default" }
+> = {
+  platform: { label: "Attivo per tutti", variant: "success" },
+  self_serve: { label: "App di piattaforma in preparazione", variant: "info" },
+  review: { label: "In revisione presso il provider", variant: "warning" },
+  byo: { label: "Credenziale personale", variant: "default" },
+};
+
 export default function Connectors() {
   const { toast } = useToast();
   const [params, setParams] = useSearchParams();
@@ -364,6 +376,18 @@ export default function Connectors() {
                   </p>
                 ) : null}
 
+                <div className="flex flex-col gap-1 rounded-lg border border-secondary/20 bg-bg-hover px-3 py-2 text-xs text-text-secondary">
+                  <Badge variant={DISTRIBUTION_BADGE[entry.distribution.mode].variant}>
+                    {DISTRIBUTION_BADGE[entry.distribution.mode].label}
+                  </Badge>
+                  <p>{entry.distribution.requirement}</p>
+                  {entry.distribution.platformApp ? (
+                    <p className="font-medium text-text-primary">
+                      L&apos;app e&apos; di Aethersy: devi solo fare login e consenso.
+                    </p>
+                  ) : null}
+                </div>
+
                 {!entry.configured && entry.missingReason ? (
                   <p className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
                     {entry.missingReason}
@@ -422,7 +446,7 @@ export default function Connectors() {
                             setAppValues({ clientId: "", clientSecret: "" });
                           }}
                         >
-                          Registra l'app
+                          Porta la tua app
                         </Button>
                       ) : null}
                       <Button
@@ -435,41 +459,45 @@ export default function Connectors() {
                         Scollega
                       </Button>
                     </>
+                  ) : entry.auth === "provider" && !entry.configured ? (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      leftIcon={<KeyRound className="h-4 w-4" aria-hidden="true" />}
+                      onClick={() => {
+                        setAppTarget(entry);
+                        setAppValues({ clientId: "", clientSecret: "" });
+                      }}
+                    >
+                      Porta la tua app (opzionale)
+                    </Button>
                   ) : (
-                    <>
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        disabled={!entry.configured && entry.auth !== "provider"}
-                        leftIcon={
-                          entry.auth === "api_key" ? (
-                            <KeyRound className="h-4 w-4" aria-hidden="true" />
-                          ) : entry.auth === "provider" && !entry.configured ? (
-                            <KeyRound className="h-4 w-4" aria-hidden="true" />
-                          ) : (
-                            <Link2 className="h-4 w-4" aria-hidden="true" />
-                          )
-                        }
-                        onClick={() => handleConnect(entry)}
-                      >
-                        {entry.auth === "api_key"
-                          ? "Inserisci credenziale"
-                          : entry.auth === "provider" && !entry.configured
-                            ? "Registra l'app"
-                            : entry.loginLabel}
-                      </Button>
-                      {entry.appRegistered ? (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          loading={deleteApp.isPending && deleteApp.variables === entry.id}
-                          onClick={() => handleDeleteApp(entry)}
-                        >
-                          Rimuovi app
-                        </Button>
-                      ) : null}
-                    </>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      disabled={!entry.configured}
+                      leftIcon={
+                        entry.auth === "api_key" ? (
+                          <KeyRound className="h-4 w-4" aria-hidden="true" />
+                        ) : (
+                          <Link2 className="h-4 w-4" aria-hidden="true" />
+                        )
+                      }
+                      onClick={() => handleConnect(entry)}
+                    >
+                      {entry.auth === "api_key" ? "Inserisci credenziale" : entry.loginLabel}
+                    </Button>
                   )}
+                  {entry.appRegistered ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      loading={deleteApp.isPending && deleteApp.variables === entry.id}
+                      onClick={() => handleDeleteApp(entry)}
+                    >
+                      Rimuovi la tua app
+                    </Button>
+                  ) : null}
                 </div>
               </Card>
             );

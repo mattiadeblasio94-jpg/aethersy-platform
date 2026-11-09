@@ -16,6 +16,7 @@ import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import Onboarding from "@/pages/Onboarding";
 import Dashboard from "@/pages/Dashboard";
+import { Privacy, Terms } from "@/pages/Legal";
 import { APP_ROUTES, componentFor } from "@/pages/routes";
 
 /** Fallback mostrato mentre il chunk di una pagina viene scaricato. */
@@ -39,6 +40,9 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
       <Route path="/onboarding" element={<Onboarding />} />
+      {/* Pagine legali pubbliche: richieste dalla verifica dell'app Google. */}
+      <Route path="/privacy" element={<Privacy />} />
+      <Route path="/terms" element={<Terms />} />
 
       {/* --- Area autenticata --------------------------------------------- */}
       <Route
