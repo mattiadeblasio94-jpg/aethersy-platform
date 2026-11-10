@@ -35,13 +35,40 @@ export function hasOutboundChannel(): boolean {
  * Risolve l'URL del webhook Slack: prima la credenziale del tenant, poi il
  * fallback di stack. La credenziale del tenant ha priorita' cosi' un cliente
  * puo' ricevere i propri lead sul proprio canale.
+ *
+ * La credenziale del tenant puo' essere di due forme:
+ *   - un pacchetto OAuth Slack (JSON con `access_token` e magari
+ *     `incoming_webhook`): non e' un URL, non puo' essere usato come webhook;
+ *     si usa l'`incoming_webhook` se presente, altrimenti si ricade sul canale
+ *     di stack;
+ *   - un URL di webhook (Incoming Webhook): viene usato direttamente.
+ *
+ * Prima del fix il pacchetto OAuth veniva passato a `fetch()` come URL e la
+ * notifica falliva con "Failed to parse URL from {...}".
  */
 async function resolveSlackWebhook(tenantId: string): Promise<{ url: string; channel: "tenant" | "env" } | null> {
   try {
     const cred = await findActiveIntegrationCredential(tenantId, SLACK_PROVIDER);
     if (cred) {
-      const url = decryptSecret(cred.secret_enc).trim();
-      if (url) return { url, channel: "tenant" };
+      const raw = decryptSecret(cred.secret_enc).trim();
+      if (raw) {
+        // Pacchetto JSON (OAuth): si cerca l'URL del webhook dentro.
+        if (raw.startsWith("{")) {
+          try {
+            const bundle = JSON.parse(raw) as {
+              incoming_webhook?: string | { url?: string };
+              extra?: { incoming_webhook?: string | { url?: string } };
+            };
+            const hook = bundle.incoming_webhook ?? bundle.extra?.incoming_webhook;
+            const url = typeof hook === "string" ? hook : hook?.url;
+            if (url && /^https?:\/\//i.test(url)) return { url, channel: "tenant" };
+          } catch {
+            // JSON non valido: si prosegue con il fallback di stack.
+          }
+        } else if (/^https?:\/\//i.test(raw)) {
+          return { url: raw, channel: "tenant" };
+        }
+      }
     }
   } catch (err) {
     // Chiave assente o blob corrotto: si prova comunque il fallback di stack.

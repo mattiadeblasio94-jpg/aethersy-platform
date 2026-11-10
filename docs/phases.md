@@ -1485,3 +1485,16 @@ che restituiscono liste passano da `apList()`. Anche la creazione di un flow
 **Verifica**: `npm run test:social` 25/25, `npm run test:connectors` 40/40,
 `npm run test:pdf` 9/9; build BFF OK; verifica live post-deploy delle quattro
 rotte con `projectId` reale.
+
+### Fase 28c — Fix notifica Slack: il pacchetto OAuth non e' un URL (09/11/2026)
+
+**Problema**: durante il test reale, la creazione di un lead loggava
+`notifica lead non inviata: Failed to parse URL from {"access_token":"xoxb-..."}`.
+La credenziale Slack del tenant e' un pacchetto OAuth (JSON) e veniva passato a
+`fetch()` come se fosse un URL di webhook.
+
+**Correzione**: `resolveSlackWebhook` distingue le forme della credenziale:
+- pacchetto OAuth JSON -> si usa l'`incoming_webhook` se presente, altrimenti si
+  ricade sul webhook di stack;
+- URL di webhook (Incoming Webhook) -> usato direttamente.
+Il resto del canale (timeout 5 s, nessun retry, fire-and-forget) resta invariato.
