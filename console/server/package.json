@@ -12,7 +12,8 @@
     "dev": "node --watch --experimental-strip-types src/index.ts",
     "test:social": "npm run build && node tools/test-social-login.mjs",
     "test:connectors": "npm run build && node tools/test-connectors.mjs",
-    "test:pdf": "npm run build && node tools/test-pdf.mjs"
+    "test:pdf": "npm run build && node tools/test-pdf.mjs",
+    "test:research": "npm run build && node tools/test-research.mjs"
   },
   "dependencies": {
     "@fastify/cookie": "^10.0.1",

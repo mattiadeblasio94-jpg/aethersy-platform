@@ -367,6 +367,31 @@ export interface SocialProviderStatus {
   lastError: { code: string; message: string; at: string } | null;
 }
 
+export interface ResearchSource {
+  title: string;
+  url: string;
+  snippet: string;
+  provider: string;
+}
+
+export interface ResearchReport {
+  topic: string;
+  markdown: string;
+  sources: ResearchSource[];
+  provider: string;
+  degraded: boolean;
+  note: string | null;
+}
+
+export interface ResearchSearchResult {
+  query: string;
+  provider: string;
+  answer: string | null;
+  sources: ResearchSource[];
+  degraded: boolean;
+  note: string | null;
+}
+
 export const platformApi = {
   // --- Sessione (auth cookie Console) --------------------------------------
   getSession: () => http.get<SessionUser>("/api/auth/session"),
@@ -429,6 +454,14 @@ export const platformApi = {
   submitAsset: (assetId: string) => http.post<PipelineAsset>(`/api/pipeline/assets/${assetId}/submit`),
   decideAsset: (assetId: string, decision: "approved" | "rejected") =>
     http.post<PipelineAsset>(`/api/pipeline/assets/${assetId}/decide`, { decision }),
+
+  // --- Ricerca web reale ----------------------------------------------------
+  /** Report citato: sintesi operativa con l'elenco delle fonti reali. */
+  researchReport: (query: string, questions?: string[]) =>
+    http.post<ResearchReport>("/api/platform/research", { query, mode: "report", questions }),
+  /** SERP: link ed estratti dei risultati reali. */
+  researchSearch: (query: string, limit = 6) =>
+    http.post<ResearchSearchResult>("/api/platform/research", { query, mode: "search", limit }),
 
   // --- Libreria -------------------------------------------------------------
   getLibrary: () => http.get<LibraryData>("/api/platform/library"),

@@ -1529,3 +1529,41 @@ console unificata (pulse, flussi, run, crediti), libreria, bottone Telegram.
 parser markdown (Fase 27b), HTTP 500 sulle liste Activepieces per l'envelope
 `{data:[...]}` (Fase 28b), notifica Slack con pacchetto OAuth usato come URL
 (Fase 28c).
+
+### Fase 29 — Motore di ricerca web reale (10/11/2026)
+
+**Problema**: la piattaforma non aveva alcuna ricerca. Ogni dato verificabile
+(prezzi, benchmark, "fonti verificabili") era prodotto dal modello e quindi
+inventato: era il buco piu' grave per un prodotto che deve "realizzare idee".
+
+**Provider reali verificati live** (nessuna simulazione):
+- **Perplexity Sonar via OpenRouter** (`perplexity/sonar`): ricerca web con
+  risposta citata. Le fonti arrivano in `message.annotations` (`url_citation`
+  con URL e titolo reali).
+- **DuckDuckGo** (SERP HTML e lite): nessuna chiave. Il provider e' sensibile
+  alle richieste (con header troppo "completi" risponde 202 anti-bot): per
+  questo si prova l'endpoint HTML e, se non rende, quello `lite`.
+- **Wikipedia (it)**: fallback documentale, nessuna chiave.
+- **Verifica DNS dei domini**: `research/domain.ts` interroga i resolver e
+  distingue "gia' registrato" da "probabilmente libero".
+
+**Modifiche**:
+- `console/server/src/research/search.ts` — catena di provider, metratura della
+  chiamata Perplexity come normale consumo di token.
+- `console/server/src/research/report.ts` — report markdown citato, cache 15
+  minuti per topic, `topicFromBrief()` per ricavare il tema dal brief.
+- `console/server/src/research/domain.ts` — verifica DNS reale dei domini.
+- `console/server/src/pipeline/executor.ts` — i task di ricerca (scout, vault,
+  benchmark, fonti, mercato) interrogano il web e consegnano le fonti; gli
+  altri task (copy, SEO, piano editoriale) ricevono il contesto di ricerca
+  come grounding; i task visuali generano l'immagine reale (Venice ->
+  Replicate -> fal) e la registrano come asset binario.
+- `console/server/src/routes.ts` — `POST /api/platform/research` (mode `report`
+  o `search`) e `GET /api/platform/research/providers`.
+- `platform/src/pages/Research.tsx` — pagina "Ricerca": report con fonti
+  cliccabili; `platform/src/lib/platform-api.ts`, `pages/routes.tsx`,
+  `components/layout/Drawer.tsx` (voce di menu).
+- `console/server/tools/test-research.mjs` — 5 test (SERP, decompressione URL,
+  catena di provider, DNS, estrazione tema dal brief) + script `test:research`.
+
+**Esito**: build OK, `test:research` 5/5, `test:social` 25/25, `test:pdf` 9/9.

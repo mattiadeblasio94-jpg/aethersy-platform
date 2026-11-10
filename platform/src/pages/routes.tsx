@@ -43,6 +43,7 @@ const Members = lazy(() => import("./Members"));
 const Payouts = lazy(() => import("./Payouts"));
 const Account = lazy(() => import("./Account"));
 const Connectors = lazy(() => import("./Connectors"));
+const Research = lazy(() => import("./Research"));
 
 export interface RouteSpec {
   path: string;
@@ -65,6 +66,13 @@ export const APP_ROUTES: RouteSpec[] = [
     description:
       "La regia degli agenti: scrivi una richiesta e guarda gli specialisti produrre lavoro reale.",
     component: Studio,
+  },
+  {
+    path: "research",
+    title: "Ricerca",
+    description:
+      "Ricerca web reale: report citati e fonti cliccabili da usare nel lavoro degli agenti.",
+    component: Research,
   },
   {
     path: "agents",

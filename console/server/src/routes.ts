@@ -657,6 +657,84 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     return { stages: STAGES };
   });
 
+  // --- Ricerca web reale (Fase 29) ------------------------------------------
+  //   POST /api/platform/research  -> ricerca SERP + report citato
+  //   GET  /api/platform/research/providers -> stato dei provider disponibili
+  app.get("/api/platform/research/providers", async (request, reply) => {
+    if (!(await pipelineTenant(request, reply))) return;
+    const { config } = await import("./config.js");
+    return {
+      providers: [
+        {
+          id: "perplexity",
+          label: "Perplexity Sonar (OpenRouter)",
+          available: Boolean(config.openRouterKey),
+          detail: "Ricerca con risposta citata: le fonti arrivano in message.annotations.",
+        },
+        {
+          id: "duckduckgo",
+          label: "DuckDuckGo (SERP)",
+          available: true,
+          detail: "SERP reale senza chiave: link e estratti dei risultati.",
+        },
+        {
+          id: "wikipedia",
+          label: "Wikipedia (it)",
+          available: true,
+          detail: "Riferimenti enciclopedici, nessuna chiave richiesta.",
+        },
+      ],
+      model: config.researchModel,
+    };
+  });
+
+  app.post("/api/platform/research", async (request, reply) => {
+    const tenant = await pipelineTenant(request, reply);
+    if (!tenant) return;
+    const body = (request.body ?? {}) as {
+      query?: string;
+      mode?: "search" | "report";
+      limit?: number;
+      questions?: string[];
+    };
+    const query = (body.query ?? "").trim().slice(0, 400);
+    if (query.length < 3) {
+      return reply.code(400).send({
+        code: "BAD_REQUEST",
+        message: "Indica una domanda o un tema di ricerca (almeno 3 caratteri).",
+      });
+    }
+
+    const { webSearch } = await import("./research/search.js");
+    const { researchReport } = await import("./research/report.js");
+
+    if ((body.mode ?? "report") === "search") {
+      const result = await webSearch(query, Math.min(Number(body.limit) || 6, 12)).catch((err) => {
+        reply.code(502).send({
+          code: "RESEARCH_UNAVAILABLE",
+          message: `Ricerca non disponibile: ${(err as Error).message}`,
+        });
+        return null;
+      });
+      if (!result) return;
+      return result;
+    }
+
+    const { reserveResearch, releaseResearch } = await import("./research/search.js");
+    const requestId = `research:api:${Date.now().toString(36)}`;
+    const meter = await reserveResearch(tenant, requestId, 1500);
+    try {
+      const report = await researchReport(query, { questions: body.questions ?? [], meter });
+      return report;
+    } catch (err) {
+      await releaseResearch(meter, "research api failed");
+      return reply.code(502).send({
+        code: "RESEARCH_UNAVAILABLE",
+        message: `Ricerca non disponibile: ${(err as Error).message}`,
+      });
+    }
+  });
+
   app.post("/api/pipeline/runs", async (request, reply) => {
     const tenant = await pipelineTenant(request, reply);
     if (!tenant) return;

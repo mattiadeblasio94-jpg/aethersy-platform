@@ -56,6 +56,12 @@ export const config = {
   // il ragionamento prima di produrre il testo finale.
   nvidiaMaxTokens: Number(process.env.NVIDIA_MAX_TOKENS ?? 8192),
 
+  // --- Ricerca web reale (Fase 29) -------------------------------------------
+  // Modello con ricerca integrata: risponde usando il web e restituisce le
+  // fonti in `message.annotations`. Fallback senza chiave: DuckDuckGo + Wikipedia.
+  researchModel: process.env.RESEARCH_MODEL ?? "perplexity/sonar",
+  researchTimeoutMs: Number(process.env.RESEARCH_TIMEOUT_MS ?? 60_000),
+
   // --- Metering / billing (schema Postgres `metering`, vedi docs) -------------
   // Kill-switch: se `false` il metering e' disattivato (nessuna scrittura DB).
   meteringEnabled: (process.env.METERING_ENABLED ?? "false") === "true",
