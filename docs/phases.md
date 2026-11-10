@@ -1468,3 +1468,20 @@ rifiutato, stato del provider). Build BFF + platform OK.
 (mai nel repo). In BotFather -> Login Widget deve essere registrato come
 Allowed URL `https://platform.aethersy.online/api/auth/social/telegram/callback`
 e `https://platform.aethersy.online` come origine del widget.
+
+### Fase 28b — Fix 500 sulle liste Activepieces (09/11/2026)
+
+**Problema**: nel test reale end-to-end, `/api/ap/flows`, `/api/ap/runs` e
+`/api/ap/connections` rispondevano **HTTP 500** (`flows.map is not a function`).
+Activepieces (>= 0.92) risponde alle liste con l'envelope `{ data: [...] }`,
+mentre le rotte BFF trattavano la risposta come array: la console unificata
+(pagine Flows, Runs, Connections, Dashboard) non poteva mostrare nulla.
+
+**Correzione**: `console/server/src/ap.ts` espone `apList()`, che normalizza
+entrambe le forme (array piatto o envelope `data`); tutte le rotte `/api/ap/*`
+che restituiscono liste passano da `apList()`. Anche la creazione di un flow
+(`POST /api/ap/flows`) e' stata normalizzata.
+
+**Verifica**: `npm run test:social` 25/25, `npm run test:connectors` 40/40,
+`npm run test:pdf` 9/9; build BFF OK; verifica live post-deploy delle quattro
+rotte con `projectId` reale.

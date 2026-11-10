@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { apFetch, ApError, toFlowView, toRunView } from "./ap.js";
+import { apFetch, ApError, apList, toFlowView, toRunView } from "./ap.js";
 import { config } from "./config.js";
 import { clearSessionCookie, getSession, setSessionCookie, type Session } from "./session.js";
 import { meteringActive } from "./metering/db.js";
@@ -183,7 +183,8 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     if (!session) return;
     const token = requireApToken(session, reply);
     if (!token) return;
-    return apFetch<any[]>("/api/v1/projects", { token });
+    const projects = await apFetch<any>("/api/v1/projects", { token });
+    return apList<any>(projects);
   });
 
   app.get("/api/ap/flows", async (request, reply) => {
@@ -193,10 +194,10 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     if (!projectId) return reply.code(400).send({ code: "BAD_REQUEST", message: "projectId richiesto" });
     const token = requireApToken(session, reply);
     if (!token) return;
-    const flows = await apFetch<any[]>(`/api/v1/flows?projectId=${encodeURIComponent(projectId)}`, {
+    const flows = await apFetch<any>(`/api/v1/flows?projectId=${encodeURIComponent(projectId)}`, {
       token,
     });
-    return flows.map(toFlowView);
+    return apList<any>(flows).map(toFlowView);
   });
 
   app.post("/api/ap/flows", async (request, reply) => {
@@ -216,7 +217,9 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       token,
       body: JSON.stringify({ projectId, displayName }),
     });
-    return toFlowView(flow);
+    // La creazione risponde con l'oggetto (eventualmente dentro l'envelope).
+    const created = flow && typeof flow === "object" && "data" in flow ? flow.data : flow;
+    return toFlowView(created);
   });
 
   app.get("/api/ap/runs", async (request, reply) => {
@@ -229,15 +232,17 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     if (!token) return;
 
     const [runs, flows] = await Promise.all([
-      apFetch<any[]>(`/api/v1/flow-runs?projectId=${encodeURIComponent(projectId)}`, {
+      apFetch<any>(`/api/v1/flow-runs?projectId=${encodeURIComponent(projectId)}`, {
         token,
       }),
-      apFetch<any[]>(`/api/v1/flows?projectId=${encodeURIComponent(projectId)}`, {
+      apFetch<any>(`/api/v1/flows?projectId=${encodeURIComponent(projectId)}`, {
         token,
       }).catch(() => []),
     ]);
-    const names = new Map<string, string>(flows.map((f) => [f.id, f.displayName ?? "(senza nome)"]));
-    return runs.map((r) => toRunView(r, names));
+    const names = new Map<string, string>(
+      apList<any>(flows).map((f) => [f.id, f.displayName ?? "(senza nome)"]),
+    );
+    return apList<any>(runs).map((r) => toRunView(r, names));
   });
 
   app.get("/api/ap/runs/count", async (request, reply) => {
@@ -247,9 +252,11 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     if (!projectId) return reply.code(400).send({ code: "BAD_REQUEST", message: "projectId richiesto" });
     const token = requireApToken(session, reply);
     if (!token) return;
-    return apFetch<any[]>(`/api/v1/flow-runs/count-by-status?projectId=${encodeURIComponent(projectId)}`, {
-      token,
-    }).catch(() => []);
+    const counts = await apFetch<any>(
+      `/api/v1/flow-runs/count-by-status?projectId=${encodeURIComponent(projectId)}`,
+      { token },
+    ).catch(() => []);
+    return apList<any>(counts);
   });
 
   app.get("/api/ap/connections", async (request, reply) => {
@@ -259,10 +266,10 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     if (!projectId) return reply.code(400).send({ code: "BAD_REQUEST", message: "projectId richiesto" });
     const token = requireApToken(session, reply);
     if (!token) return;
-    const conns = await apFetch<any[]>(`/api/v1/app-connections?projectId=${encodeURIComponent(projectId)}`, {
+    const conns = await apFetch<any>(`/api/v1/app-connections?projectId=${encodeURIComponent(projectId)}`, {
       token,
     });
-    return conns.map((c) => ({
+    return apList<any>(conns).map((c) => ({
       id: c.id,
       displayName: c.displayName,
       pieceName: c.pieceName,

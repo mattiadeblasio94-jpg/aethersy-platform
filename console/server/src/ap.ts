@@ -48,6 +48,21 @@ function safeJson(text: string): any {
 
 // --- Adapter: forma delle risposte Activepieces -> forma attesa dal frontend --
 
+/**
+ * Activepieces (>= 0.92) risponde alle liste con un envelope `{ data: [...] }`,
+ * mentre le rotte BFF e il frontend si aspettano un array. La funzione
+ * normalizza entrambe le forme: senza questo passaggio `/api/ap/flows` (e le
+ * altre liste) crashano con "flows.map is not a function".
+ */
+export function apList<T>(payload: unknown): T[] {
+  if (Array.isArray(payload)) return payload as T[];
+  if (payload && typeof payload === "object") {
+    const data = (payload as { data?: unknown }).data;
+    if (Array.isArray(data)) return data as T[];
+  }
+  return [];
+}
+
 interface ApFlow {
   id: string;
   displayName?: string;
