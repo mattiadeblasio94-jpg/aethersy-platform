@@ -1498,3 +1498,34 @@ La credenziale Slack del tenant e' un pacchetto OAuth (JSON) e veniva passato a
   ricade sul webhook di stack;
 - URL di webhook (Incoming Webhook) -> usato direttamente.
 Il resto del canale (timeout 5 s, nessun retry, fire-and-forget) resta invariato.
+
+### Test reale end-to-end di tutti i servizi (09-10/11/2026)
+
+Harness fuori repo: `C:\Users\PC\AppData\Local\Temp\opencode\qa-all-services.mjs`
+(login reale, 73 controlli su ogni servizio) e `qa-ui-full.mjs` (browser headless,
+11 controlli di UI) + `qa-pdf-download.mjs` (download PDF dal browser).
+
+**Risultato API: 73/73 controlli superati.** Coperti: sessione e login; stato dei
+provider social; 39 rotte GET di lettura (panoramica, account, profilo,
+preferenze, catalogo droid, roster, task, obiettivi, memoria, prodotti,
+opportunita', kanban, agenda, notifiche, libreria, chat, canali social, post
+social, webhook, FAQ, business, stadi pipeline, run, asset, famiglie asset,
+lead, integrazioni, connettori, builder, Activepieces, catalogo/saldo/consumo
+AI); scritture con pulizia (obiettivo, memoria, prodotto, lead, agenda, preview
+cron); chiamata AI reale (risposta NVIDIA + 1 credito addebitato); run di
+pipeline reale (5/5 task, 230 crediti, 10 asset prodotti di cui 5 PDF);
+approvazione e consegna del run; consumo misurato (10 richieste, 235 crediti,
+0,023 EUR); redirect OAuth reali verso Google e GitHub; test del connettore
+Telegram (bot "Lara Aethersy AI" rispondente).
+
+**Risultato UI: 11/11 passati, 0 errori console, 0 richieste fallite.** Login
+reale dal form, dashboard, studio, connettori (badge di distribuzione),
+console unificata (pulse, flussi, run, crediti), libreria, bottone Telegram.
+
+**Download PDF dal browser**: `05-mappa-linking-interno.pdf`, 3.273 byte, header
+`%PDF-` e marker `%%EOF` presenti: il file scaricato e' un PDF valido.
+
+**Bug trovati e corretti durante il test**: blackout API da loop infinito nel
+parser markdown (Fase 27b), HTTP 500 sulle liste Activepieces per l'envelope
+`{data:[...]}` (Fase 28b), notifica Slack con pacchetto OAuth usato come URL
+(Fase 28c).
