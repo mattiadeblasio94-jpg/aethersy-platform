@@ -353,7 +353,7 @@ function renderSection(section: SiteSection, options: RenderOptions, index: numb
 function renderNav(document: SiteDocument, current: SitePage, options: RenderOptions): string {
   const links = document.pages
     .map((page) => {
-      const href = page.slug === "home" ? `/${options.slug}` : `/${options.slug}/${page.slug}`;
+      const href = page.slug === "home" ? `/s/${options.slug}` : `/s/${options.slug}/${page.slug}`;
       const currentAttr = page.slug === current.slug ? ' aria-current="page"' : "";
       return `<a href="${esc(href)}"${currentAttr}>${esc(page.navLabel)}</a>`;
     })
@@ -400,7 +400,7 @@ export function renderSitePageHtml(
     .join("\n");
   const title = page.seoTitle || `${page.title} | ${document.brand.name}`;
   const description = page.seoDescription || document.brand.tagline || "";
-  const canonical = `${options.canonicalBase}/${options.slug}${page.slug === "home" ? "" : `/${page.slug}`}`;
+  const canonical = `${options.canonicalBase}/s/${options.slug}${page.slug === "home" ? "" : `/${page.slug}`}`;
 
   return `<!doctype html>
 <html lang="it">
@@ -423,7 +423,7 @@ export function renderSitePageHtml(
 <a class="skip" href="#main">Vai al contenuto</a>
 <header class="site">
   <div class="wrap site-bar">
-    <a class="brand" href="/${esc(options.slug)}"><span class="brand-mark" aria-hidden="true"></span>${esc(document.brand.name)}</a>
+    <a class="brand" href="/s/${esc(options.slug)}"><span class="brand-mark" aria-hidden="true"></span>${esc(document.brand.name)}</a>
     <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav">Menu</button>
     ${renderNav(document, page, options)}
   </div>
