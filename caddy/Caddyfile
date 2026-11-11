@@ -144,6 +144,17 @@
 		}
 	}
 
+	# /s/* -> siti pubblicati dal BFF (Fase 31): pagine HTML statiche, sitemap
+	# e form lead. Nessuna sessione richiesta.
+	@sites path /s/*
+	handle @sites {
+		reverse_proxy console:3000 {
+			header_up Host {host}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
 	# Tutto il resto -> SPA statica.
 	handle {
 		reverse_proxy platform:80 {

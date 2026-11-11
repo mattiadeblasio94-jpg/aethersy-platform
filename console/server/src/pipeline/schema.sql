@@ -233,3 +233,25 @@ CREATE TABLE IF NOT EXISTS pipeline.webhook_delivery (
 );
 CREATE INDEX IF NOT EXISTS webhook_delivery_tenant_time
   ON pipeline.webhook_delivery(tenant_id, received_at DESC);
+
+-- Siti pubblicati (Fase 31) ---------------------------------------------------
+-- Snapshot delle pagine HTML servite pubblicamente su /s/<slug>. Il documento
+-- (brand + pagine) e' salvato come jsonb: la resa e' deterministica e non
+-- richiede piu' di richiamare il modello a ogni visita.
+CREATE TABLE IF NOT EXISTS pipeline.published_site (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id    uuid NOT NULL REFERENCES metering.tenant(id) ON DELETE CASCADE,
+  run_id       uuid NOT NULL UNIQUE REFERENCES pipeline.pipeline_run(id) ON DELETE CASCADE,
+  slug         text NOT NULL UNIQUE,
+  title        text NOT NULL DEFAULT '',
+  description  text NOT NULL DEFAULT '',
+  brand        jsonb NOT NULL DEFAULT '{}'::jsonb,
+  pages        jsonb NOT NULL DEFAULT '[]'::jsonb,
+  assets       jsonb NOT NULL DEFAULT '[]'::jsonb,
+  status       text NOT NULL DEFAULT 'published',
+  published_at timestamptz NOT NULL DEFAULT now(),
+  updated_at   timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT published_site_status CHECK (status IN ('published', 'unpublished'))
+);
+CREATE INDEX IF NOT EXISTS published_site_tenant_time
+  ON pipeline.published_site(tenant_id, published_at DESC);

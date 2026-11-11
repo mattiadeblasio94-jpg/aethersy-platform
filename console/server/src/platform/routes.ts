@@ -35,6 +35,11 @@ import { CronError, isValidCron, nextRunFor } from "./cron.js";
 // Tutte richiedono il metering attivo (gli schemi vivono li').
 
 export async function registerPlatformRoutes(app: FastifyInstance): Promise<void> {
+  // Rotte pubbliche del sito ( Fase 31 ): servono su /s/<slug> e non
+  // richiedono sessione. Registrate per prime cosi' hanno precedenza.
+  const { registerPublicSiteRoutes } = await import("./public-site-routes.js");
+  await registerPublicSiteRoutes(app);
+
   // ---------------------------------------------------------- catalogo ----
   app.get("/api/platform/catalog", async (request, reply) => {
     const tenant = await requireMeteredTenant(request, reply);
@@ -274,6 +279,50 @@ export async function registerPlatformRoutes(app: FastifyInstance): Promise<void
       contentBase64,
       meta,
     };
+  });
+
+  // --- Sito pubblicato (Fase 31) --------------------------------------------
+  //   POST /api/platform/sites/:runId/publish -> costruisce e pubblica il sito
+  //   GET  /api/platform/sites                 -> siti pubblicati dal tenant
+  //   POST /api/platform/sites/:slug/unpublish -> ritira il sito
+  app.post<{ Params: { runId: string } }>("/api/platform/sites/:runId/publish", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+    const { buildAndPublishSite } = await import("./site-build.js");
+    const { publicBaseUrl } = await import("../public-url.js");
+    try {
+      const result = await buildAndPublishSite({
+        tenantId: tenant.tenantId,
+        runId: request.params.runId,
+        baseUrl: publicBaseUrl(),
+      });
+      return reply.code(201).send(result);
+    } catch (err) {
+      return reply.code(400).send({
+        code: "SITE_BUILD_FAILED",
+        message: (err as Error).message,
+      });
+    }
+  });
+
+  app.get("/api/platform/sites", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+    const { listPublishedSites } = await import("./site-repo.js");
+    const { publicBaseUrl } = await import("../public-url.js");
+    const sites = await listPublishedSites(tenant.tenantId, publicBaseUrl());
+    return { sites };
+  });
+
+  app.post<{ Params: { slug: string } }>("/api/platform/sites/:slug/unpublish", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+    const { unpublishSite } = await import("./site-repo.js");
+    const ok = await unpublishSite(tenant.tenantId, request.params.slug);
+    if (!ok) {
+      return reply.code(404).send({ code: "NOT_FOUND", message: "Sito non trovato" });
+    }
+    return { ok: true };
   });
 
   // Sito pubblico del run "website": HTML reale servito dal BFF, ricavato dai

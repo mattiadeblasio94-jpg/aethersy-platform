@@ -519,6 +519,17 @@ export const platformApi = {
     http.post<ResearchSearchResult>("/api/platform/research", { query, mode: "search", limit }),
 
 
+  // --- Sito pubblicato (Fase 31) ---------------------------------------------
+  /** Costruisce e pubblica il sito del run: URL pubblico pronto da condividere. */
+  publishSite: (runId: string) =>
+    http.post<PublishedSiteBuild>(`/api/platform/sites/${encodeURIComponent(runId)}/publish`, {}),
+  /** Elenco dei siti gia' pubblicati dal tenant. */
+  listPublishedSites: () =>
+    http.get<{ sites: PublishedSite[] }>("/api/platform/sites"),
+  /** Ritira un sito pubblicato. */
+  unpublishSite: (slug: string) =>
+    http.post<{ ok: boolean }>(`/api/platform/sites/${encodeURIComponent(slug)}/unpublish`, {}),
+
   // --- Libreria -------------------------------------------------------------
   getLibrary: () => http.get<LibraryData>("/api/platform/library"),
   getLibraryAsset: (id: string) =>

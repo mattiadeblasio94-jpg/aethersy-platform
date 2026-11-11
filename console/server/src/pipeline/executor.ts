@@ -14,6 +14,7 @@ import { renderDeliverablePdf } from "./pdf.js";
 import { researchContext, researchReport, topicFromBrief } from "../research/report.js";
 import { checkDomains, formatDomainChecks } from "../research/domain.js";
 import { releaseResearch, reserveResearch } from "../research/search.js";
+import { meteredText } from "./metered-chat.js";
 
 // Esecutore REALE dei task di pipeline (P2.1).
 //
@@ -311,36 +312,13 @@ async function generateRealImage(
  * settle di `chat()`; in caso di errore rilascia la prenotazione (nessun addebito).
  */
 async function meteredChat(tenant: TenantContext, ctx: TaskContext, prompt: string): Promise<string> {
-  const requestId = `task:${ctx.task.id}:${crypto.randomUUID().slice(0, 8)}`;
-  const est = Math.max(1, Math.ceil(prompt.length / 4));
-
-  const estimate = await estimateCredits(tenant, {
-    capability: "text",
-    model: "*",
-    provider: "openrouter",
-    units: ["token_in", "token_out"],
-    counts: { token_in: est, token_out: est },
+  const result = await meteredText({
+    tenant,
+    prompt,
+    preferFree: true,
+    requestId: `task:${ctx.task.id}:${crypto.randomUUID().slice(0, 8)}`,
+    flowRunId: ctx.flowRunId ?? null,
+    suffix: "task",
   });
-
-  const reservation = await reserveCredits(tenant.tenantId, requestId, estimate);
-  const reserved = reservation.ok ? reservation.reserved : 0;
-
-  try {
-    const result = await chat({
-      capability: "text",
-      prompt,
-      preferFree: true,
-      meter: {
-        tenant,
-        requestId,
-        reservation: reserved,
-        flowRunId: ctx.flowRunId ?? null,
-        degraded: false,
-      },
-    });
-    return result.answer;
-  } catch (err) {
-    await releaseReservation(tenant.tenantId, requestId, reserved, "task executor failed").catch(() => {});
-    throw err;
-  }
+  return result.answer;
 }

@@ -12,7 +12,7 @@
 // =============================================================================
 
 import { useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircle2,
   ExternalLink,
@@ -21,6 +21,7 @@ import {
   Rocket,
   Search,
   Send,
+  Upload,
   XCircle,
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
@@ -114,6 +115,28 @@ export default function Website() {
   const websiteRuns = useQuery({
     queryKey: ["real", "runs", "stage", "website"],
     queryFn: () => platformApi.listRuns({ stage: "website" }),
+  });
+  const publishedSites = useQuery({
+    queryKey: ["real", "sites", "published"],
+    queryFn: () => platformApi.listPublishedSites(),
+  });
+  const publishSite = useMutation({
+    mutationFn: (runId: string) => platformApi.publishSite(runId),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["real", "sites", "published"] });
+      toast({
+        kind: result.fallback ? "warning" : "success",
+        title: result.fallback ? "Sito pubblicato (versione ricostruita)" : "Sito pubblicato",
+        description: `${result.url} — ${result.pages} pagine, ${result.images} immagini.${result.warning ? ` ${result.warning}` : ""}`,
+      });
+    },
+    onError: (error) => {
+      toast({
+        kind: "error",
+        title: "Pubblicazione non riuscita",
+        description: error instanceof Error ? error.message : String(error),
+      });
+    },
   });
   const leads = useLeads();
   const decideAsset = useDecideAsset();
@@ -394,6 +417,15 @@ export default function Website() {
                         <Badge variant={RUN_STATUS_VARIANT[run.status] ?? "default"}>
                           {RUN_STATUS_LABEL[run.status] ?? run.status}
                         </Badge>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          leftIcon={<Upload className="h-3.5 w-3.5" aria-hidden="true" />}
+                          loading={publishSite.isPending && publishSite.variables === run.id}
+                          onClick={() => publishSite.mutate(run.id)}
+                        >
+                          Pubblica sito
+                        </Button>
                         <a
                           href={`/api/platform/sites/${run.id}`}
                           target="_blank"
@@ -401,13 +433,64 @@ export default function Website() {
                           className="inline-flex items-center gap-1.5 rounded-lg border border-secondary/20 px-2.5 py-1 text-xs font-medium text-secondary transition-colors hover:bg-secondary/10"
                         >
                           <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-                          Apri sito
+                          Bozza
                         </a>
                       </div>
                     </div>
                     <span className="text-xs text-text-muted">
                       aggiornata {formatDate(run.updated_at)}
                     </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+
+          <Card
+            header={
+              <>
+                <h2 className="text-base font-semibold text-text-primary">Siti pubblicati</h2>
+                <span className="text-xs text-text-muted">
+                  {(publishedSites.data?.sites ?? []).length} online
+                </span>
+              </>
+            }
+            bodyClassName="p-0"
+          >
+            {publishedSites.isLoading ? (
+              <div className="p-5">
+                <Skeleton lines={3} />
+              </div>
+            ) : (publishedSites.data?.sites ?? []).length === 0 ? (
+              <div className="p-5">
+                <EmptyState
+                  icon={<Globe className="h-5 w-5" aria-hidden="true" />}
+                  title="Nessun sito pubblicato"
+                  description="Pubblica uno dei run qui sopra: il sito viene generato, reso multi-pagina e reso disponibile su un URL pubblico da condividere con i clienti."
+                />
+              </div>
+            ) : (
+              <ul className="divide-y divide-secondary/10">
+                {(publishedSites.data?.sites ?? []).map((site) => (
+                  <li key={site.id} className="flex flex-col gap-2 px-5 py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="min-w-0 truncate text-sm font-medium text-text-primary">
+                        {site.title}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="success">{site.pageCount} pagine</Badge>
+                        <a
+                          href={site.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-secondary/20 px-2.5 py-1 text-xs font-medium text-secondary transition-colors hover:bg-secondary/10"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                          Apri
+                        </a>
+                      </div>
+                    </div>
+                    <span className="truncate text-xs text-text-muted">{site.url}</span>
                   </li>
                 ))}
               </ul>
