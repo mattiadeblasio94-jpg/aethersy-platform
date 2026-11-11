@@ -1567,3 +1567,66 @@ inventato: era il buco piu' grave per un prodotto che deve "realizzare idee".
   catena di provider, DNS, estrazione tema dal brief) + script `test:research`.
 
 **Esito**: build OK, `test:research` 5/5, `test:social` 25/25, `test:pdf` 9/9.
+
+### Fase 30 — Specialisti eseguibili (11/11/2026)
+
+**Problema**: i 12 "droid" erano solo una persona descritta in un prompt: il
+tasto per avviarli non esisteva e ogni task produceva una risposta in chat.
+
+**Modifiche**:
+- `console/server/src/agents/droid-runner.ts` — cosa fa davvero ogni reparto
+  (azioni, input attesi, stage) e `runDroid()`: apre un run mirato ed esegue
+  i task di quel reparto, restituendo l'esito task per task.
+- `console/server/src/pipeline/orchestrator.ts` — `OrchestrateOptions.onlyDroid`
+  per eseguire un solo reparto.
+- `console/server/src/routes.ts` — `GET /api/platform/droids/actions` e
+  `POST /api/platform/droids/:id/run`.
+- `platform/src/pages/Specialists.tsx` — pagina "Specialisti": scheda del
+  reparto, istruzione da eseguire, esito reale (task, deliverable, errori).
+
+**Esito**: build OK; live `GET /api/platform/droids/actions` -> 12 azioni
+(12 reparti), `POST /api/platform/droids/:id/run` esegue i task del reparto.
+
+### Fase 31 — Sito professionale pubblicato (11/11/2026)
+
+**Problema**: il sito era una pagina sola ricavata con regex da un markdown,
+senza URL pubblico, senza navigazione e senza meta.
+
+**Modifiche**:
+- `console/server/src/platform/site-schema.ts` — documento strutturato
+  (brand, pagine, sezioni hero/features/split/stats/testimonial/pricing/faq/
+  gallery/cta/text), parsing del JSON del modello con sanificazione dei link.
+- `console/server/src/platform/site-render.ts` — renderer professionale: design
+  system (palette dal brand), nav, meta SEO/OG/canonical, skip-link,
+  `:focus-visible`, `prefers-reduced-motion`, nav mobile, reveal on scroll,
+  form lead.
+- `console/server/src/platform/site-build.ts` — `buildAndPublishSite()`: brief +
+  contesto di ricerca reale -> JSON schema -> documento -> fallback ricostruito
+  dai deliverable del run -> slug univoco -> pubblicazione; le immagini reali
+  del run diventano hero/gallery.
+- `console/server/src/platform/site-repo.ts` + `pipeline/schema.sql` — tabella
+  `pipeline.published_site` (documento, asset, slug, stato).
+- `console/server/src/platform/public-site-routes.ts` — sito pubblico:
+  `/s/<slug>` (home), `/s/<slug>/<pagina>`, `sitemap.xml`, `robots.txt`,
+  `POST /s/<slug>/lead` (il lead entra nella piattaforma e viene notificato).
+- `console/server/src/platform/routes.ts` — `POST /api/platform/sites/:runId/
+  publish`, `GET /api/platform/sites`, `POST /api/platform/sites/:slug/unpublish`.
+- `console/server/src/public-url.ts` — base URL pubblica (canonical, sitemap).
+- `caddy/Caddyfile` — instradamento `/s/*` verso il BFF (nessuna sessione).
+- `platform/src/pages/Website.tsx` — pulsante "Pubblica sito" e card "Siti
+  pubblicati" con gli URL condivisibili.
+
+**Esito**: build OK; live: pubblicazione 201 (4 pagine), sito pubblico 200
+(14,5 KB, nav/footer/form/meta), `sitemap.xml` con 4 URL, `robots.txt`
+corretto, slug inesistente 404, lead dal sito pubblico 201 e presente in
+piattaforma.
+
+### Fix — tetto di token per le chat OpenRouter (11/11/2026)
+
+OpenRouter rifiuta (402) le richieste che richiedono piu' token di quanto il
+saldo residuo consente; senza `max_tokens` il default e' 16384 e la chiamata
+falliva anche con modelli utilizzabili. Ora `AI_MAX_OUTPUT_TOKENS` (default
+4096) fissa il tetto e l'errore riporta il dettaglio di ogni modello tentato.
+
+**Esito**: la pubblicazione del sito e' tornata a usare la generazione AI
+(fallback `false`, 1 credito) invece del fallback ricostruito.
