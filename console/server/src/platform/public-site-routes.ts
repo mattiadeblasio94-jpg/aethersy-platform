@@ -35,7 +35,8 @@ function notFoundPage(): string {
 }
 
 export async function registerPublicSiteRoutes(app: FastifyInstance): Promise<void> {
-  app.get<{ Params: { slug: string; page?: string } }>("/s/:slug/:page", async (request, reply) => {
+  // Pagina interna del sito: /s/<slug>/<pagina>
+  app.get<{ Params: { slug: string; page: string } }>("/s/:slug/:page", async (request, reply) => {
     const site = (await getPublishedSite(request.params.slug)) as PublicSiteRow | null;
     if (!site) {
       return reply
@@ -57,10 +58,77 @@ export async function registerPublicSiteRoutes(app: FastifyInstance): Promise<vo
       },
     };
 
-    const wanted = request.params.page ?? "home";
-    const page = site.pages.find((item) => item.slug === wanted) ?? site.pages[0];
+    // sitemap.xml e robots.txt vivono sotto lo stesso slug.
+    if (request.params.page === "sitemap.xml") {
+      const urls = site.pages
+        .map((page) => {
+          const path = page.slug === "home" ? "" : `/${page.slug}`;
+          return `  <url><loc>${base}/s/${site.slug}${path}</loc></url>`;
+        })
+        .join("\n");
+      return reply
+        .header("content-type", "application/xml; charset=utf-8")
+        .send(
+          `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>`,
+        );
+    }
+
+    if (request.params.page === "robots.txt") {
+      return reply
+        .header("content-type", "text/plain; charset=utf-8")
+        .send(`User-agent: *\nAllow: /\nSitemap: ${base}/s/${site.slug}/sitemap.xml\n`);
+    }
+
+    const page = site.pages.find((item) => item.slug === request.params.page);
     if (!page) {
-      return reply.code(404).header("content-type", "text/html; charset=utf-8").send(notFoundPage());
+      return reply
+        .code(404)
+        .header("content-type", "text/html; charset=utf-8")
+        .send(notFoundPage());
+    }
+
+    const html = renderSitePageHtml(document, page, {
+      brandName: site.title,
+      canonicalBase: base,
+      images: Array.isArray(site.assets) ? site.assets : [],
+      slug: site.slug,
+    });
+
+    return reply
+      .header("content-type", "text/html; charset=utf-8")
+      .header("cache-control", "public, max-age=300")
+      .send(html);
+  });
+
+  // Home del sito: /s/<slug>
+  app.get<{ Params: { slug: string } }>("/s/:slug", async (request, reply) => {
+    const site = (await getPublishedSite(request.params.slug)) as PublicSiteRow | null;
+    if (!site) {
+      return reply
+        .code(404)
+        .header("content-type", "text/html; charset=utf-8")
+        .send(notFoundPage());
+    }
+
+    const base = publicBaseUrl();
+    const document: SiteDocument = {
+      brand: site.brand,
+      pages: site.pages,
+      contact: site.brand.contact ?? {
+        heading: "Contatti",
+        text: "",
+        email: "",
+        phone: "",
+        address: "",
+      },
+    };
+
+    const page = site.pages.find((item) => item.slug === "home") ?? site.pages[0];
+    if (!page) {
+      return reply
+        .code(404)
+        .header("content-type", "text/html; charset=utf-8")
+        .send(notFoundPage());
     }
 
     const html = renderSitePageHtml(document, page, {
