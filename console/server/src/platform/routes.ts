@@ -281,6 +281,64 @@ export async function registerPlatformRoutes(app: FastifyInstance): Promise<void
     };
   });
 
+  // --- "Realizza la mia idea" (Fase 32) --------------------------------------
+  //   POST /api/platform/ideas -> brief strutturato, run reali, sito online.
+  // L'esecuzione parte in background: la risposta e' immediata e la UI
+  // segue i run (GET /api/pipeline/runs/:runId) fino al risultato.
+  app.post("/api/platform/ideas", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const { planIdea, createIdeaRuns, executeIdeaRun, publishIdeaSite } = await import("./idea.js");
+
+    let plan;
+    try {
+      plan = await planIdea(tenant.tenantId, {
+        objective: typeof body.objective === "string" ? body.objective : "",
+        audience: typeof body.audience === "string" ? body.audience : undefined,
+        sector: typeof body.sector === "string" ? body.sector : undefined,
+        brand: typeof body.brand === "string" ? body.brand : undefined,
+        tone: typeof body.tone === "string" ? body.tone : undefined,
+        language: typeof body.language === "string" ? body.language : undefined,
+        location: typeof body.location === "string" ? body.location : undefined,
+        domain: typeof body.domain === "string" ? body.domain : undefined,
+        references: Array.isArray(body.references)
+          ? body.references.filter((item): item is string => typeof item === "string")
+          : undefined,
+        outputs: Array.isArray(body.outputs)
+          ? body.outputs.filter((item): item is string => typeof item === "string")
+          : undefined,
+      });
+    } catch (err) {
+      return reply.code(400).send({ code: "INVALID_INPUT", message: (err as Error).message });
+    }
+
+    const runs = await createIdeaRuns(tenant.tenantId, plan.title, plan.brief, plan.stages);
+
+    // Esecuzione in background: il modello lavora, la UI guarda i run.
+    const background = (async () => {
+      for (const planRun of runs) {
+        try {
+          await executeIdeaRun(tenant.tenantId, planRun.runId);
+          if (planRun.stage === "website") {
+            await publishIdeaSite(tenant.tenantId, planRun.runId);
+          }
+        } catch (err) {
+          console.error(`[idea] run ${planRun.runId} fallito:`, (err as Error).message);
+        }
+      }
+    })();
+    background.catch(() => undefined);
+
+    return reply.code(202).send({
+      title: plan.title,
+      brief: plan.brief,
+      runs,
+      warnings: plan.warnings,
+      site: null,
+    });
+  });
+
   // --- Sito pubblicato (Fase 31) --------------------------------------------
   //   POST /api/platform/sites/:runId/publish -> costruisce e pubblica il sito
   //   GET  /api/platform/sites                 -> siti pubblicati dal tenant

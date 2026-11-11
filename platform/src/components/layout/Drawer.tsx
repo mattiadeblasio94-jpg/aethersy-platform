@@ -28,6 +28,7 @@ import {
   Zap,
   Bell,
   Plug,
+  Rocket,
   Search,
 } from "lucide-react";
 import { useUiStore } from "@/store/ui";
@@ -90,6 +91,7 @@ export const Drawer = memo(function Drawer({ variant }: DrawerProps) {
           { to: "/dashboard", label: "Home", icon: Home },
           { to: "/overview", label: "Panoramica", icon: LayoutDashboard },
           { to: "/studio", label: "Studio", icon: Zap },
+          { to: "/idea", label: "Realizza l'idea", icon: Rocket },
           { to: "/research", label: "Ricerca", icon: Search },
           { to: "/specialisti", label: "Specialisti", icon: Sparkles },
           { to: "/agents", label: "Agenti", icon: Bot, badge: activeAgents },

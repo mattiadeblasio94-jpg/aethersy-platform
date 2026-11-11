@@ -437,6 +437,22 @@ export interface PublishedSiteBuild {
   images: number;
 }
 
+/** Piano di realizzazione di un'idea: i reparti (run) che partono. */
+export interface IdeaRun {
+  runId: string;
+  stage: string;
+  title: string;
+  tasks: number;
+}
+
+export interface IdeaPlan {
+  title: string;
+  brief: Record<string, unknown>;
+  runs: IdeaRun[];
+  warnings: string[];
+  site: { slug: string; url: string; pages: number } | null;
+}
+
 export const platformApi = {
   // --- Sessione (auth cookie Console) --------------------------------------
   getSession: () => http.get<SessionUser>("/api/auth/session"),
@@ -520,6 +536,18 @@ export const platformApi = {
 
 
   // --- Sito pubblicato (Fase 31) ---------------------------------------------
+  /** Avvia la realizzazione di un'idea: crea i reparti e li mette al lavoro. */
+  createIdea: (input: {
+    objective: string;
+    brand?: string;
+    audience?: string;
+    sector?: string;
+    tone?: string;
+    location?: string;
+    domain?: string;
+    references?: string[];
+    outputs?: string[];
+  }) => http.post<IdeaPlan>("/api/platform/ideas", input),
   /** Costruisce e pubblica il sito del run: URL pubblico pronto da condividere. */
   publishSite: (runId: string) =>
     http.post<PublishedSiteBuild>(`/api/platform/sites/${encodeURIComponent(runId)}/publish`, {}),

@@ -45,6 +45,7 @@ const Account = lazy(() => import("./Account"));
 const Connectors = lazy(() => import("./Connectors"));
 const Research = lazy(() => import("./Research"));
 const Specialists = lazy(() => import("./Specialists"));
+const Idea = lazy(() => import("./Idea"));
 
 export interface RouteSpec {
   path: string;
@@ -60,6 +61,13 @@ export const APP_ROUTES: RouteSpec[] = [
     title: "Home",
     description: "Polso dell'attività: balance, aree dell'attività e feed recente.",
     component: Pulse,
+  },
+  {
+    path: "idea",
+    title: "Realizza la tua idea",
+    description:
+      "Descrivi il risultato che vuoi: la piattaforma crea i reparti, cerca sul web reale e pubblica il sito.",
+    component: Idea,
   },
   {
     path: "studio",
