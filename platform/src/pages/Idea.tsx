@@ -8,7 +8,7 @@
 // online su /s/<slug>.
 // =============================================================================
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ExternalLink, Loader2, Rocket, Sparkles } from "lucide-react";
@@ -52,6 +52,7 @@ export default function Idea() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [plan, setPlan] = useState<IdeaPlan | null>(null);
+  const waitStarted = useRef(0);
 
   const runIds = useMemo(() => (plan?.runs ?? []).map((run) => run.runId), [plan]);
 
@@ -72,17 +73,31 @@ export default function Idea() {
     },
   });
 
-  const sites = useQuery({
-    queryKey: ["real", "sites", "published"],
-    queryFn: () => platformApi.listPublishedSites(),
-  });
-
   const finished = (runs.data ?? []).every(
     (item) => item.run.status !== "draft" && item.run.status !== "in_progress",
   );
   const activeRun = (runs.data ?? []).find(
     (item) => item.run.status === "draft" || item.run.status === "in_progress",
   );
+
+  const sites = useQuery({
+    queryKey: ["real", "sites", "published"],
+    queryFn: () => platformApi.listPublishedSites(),
+    // La pubblicazione del sito avviene dopo l'ultimo task: finche' il sito
+    // non compare, la lista va riletta (qualche decina di secondi). Dopo due
+    // minuti di attesa il polling si ferma: la pubblicazione e' fallita.
+    refetchInterval: (query) => {
+      const items = query.state.data?.sites ?? [];
+      const hasSite = runIds.some((id) => items.some((site) => site.runId === id));
+      if (!finished || runIds.length === 0 || hasSite) {
+        waitStarted.current = 0;
+        return false;
+      }
+      if (!waitStarted.current) waitStarted.current = Date.now();
+      return Date.now() - waitStarted.current < 120_000 ? 5000 : false;
+    },
+  });
+
   const websiteSite = (sites.data?.sites ?? []).find(
     (site) => runIds.includes(site.runId),
   ) as PublishedSite | undefined;
