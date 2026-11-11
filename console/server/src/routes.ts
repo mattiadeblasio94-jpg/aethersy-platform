@@ -1625,6 +1625,54 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
+  // --- Specialisti eseguibili (Fase 30) -------------------------------------
+  //   GET  /api/platform/droids/actions -> cosa fa ogni specialista
+  //   POST /api/platform/droids/:id/run -> avvia lo specialista (azione reale)
+  app.get("/api/platform/droids/actions", async (request, reply) => {
+    if (!(await pipelineTenant(request, reply))) return;
+    const { droidActions } = await import("./agents/droid-runner.js");
+    const { droidProfile } = await import("./platform/catalog.js");
+    return {
+      actions: droidActions().map((action) => {
+        const profile = droidProfile(action.droid);
+        return {
+          ...action,
+          name: profile?.name ?? action.droid,
+          role: profile?.role ?? "",
+          department: profile?.department ?? "",
+          tagline: profile?.tagline ?? "",
+        };
+      }),
+    };
+  });
+
+  app.post("/api/platform/droids/:id/run", async (request, reply) => {
+    const tenant = await pipelineTenant(request, reply);
+    if (!tenant) return;
+    const { id } = request.params as { id: string };
+    const body = (request.body ?? {}) as {
+      instruction?: string;
+      stage?: string;
+      context?: unknown;
+    };
+    const { runDroid } = await import("./agents/droid-runner.js");
+    try {
+      const result = await runDroid({
+        tenantId: tenant.tenantId,
+        droidId: id,
+        instruction: body.instruction ?? "",
+        stage: body.stage as never,
+        context: body.context,
+      });
+      return reply.code(201).send(result);
+    } catch (err) {
+      return reply.code(400).send({
+        code: "DROID_RUN_FAILED",
+        message: (err as Error).message,
+      });
+    }
+  });
+
   // ------------------------------------------- Piattaforma (Business Pulse) ----
   // Modello pazi.ai adattato: overview, opportunita', roster, agenda. Vive sotto
   // /api/platform/* e legge le entita' reali della pipeline (nessun nuovo schema

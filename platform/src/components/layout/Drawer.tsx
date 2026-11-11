@@ -91,6 +91,7 @@ export const Drawer = memo(function Drawer({ variant }: DrawerProps) {
           { to: "/overview", label: "Panoramica", icon: LayoutDashboard },
           { to: "/studio", label: "Studio", icon: Zap },
           { to: "/research", label: "Ricerca", icon: Search },
+          { to: "/specialisti", label: "Specialisti", icon: Sparkles },
           { to: "/agents", label: "Agenti", icon: Bot, badge: activeAgents },
           { to: "/opportunities", label: "Opportunità", icon: Target, badge: counters?.runs.open ?? 0 },
           { to: "/library", label: "Libreria", icon: FolderOpen },

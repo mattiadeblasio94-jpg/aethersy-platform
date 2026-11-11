@@ -392,6 +392,51 @@ export interface ResearchSearchResult {
   note: string | null;
 }
 
+export interface DroidAction {
+  droid: string;
+  name: string;
+  role: string;
+  department: string;
+  tagline: string;
+  stage: string;
+  capability: string;
+  does: string;
+}
+
+export interface DroidRunResult {
+  droid: string;
+  runId: string;
+  stage: string;
+  title: string;
+  credits: number;
+  failed: boolean;
+  message: string;
+  outcomes: { taskId: string; droid: string; status: string; assets: number; error: string | null }[];
+}
+
+export interface PublishedSite {
+  id: string;
+  runId: string;
+  slug: string;
+  title: string;
+  description: string;
+  pageCount: number;
+  status: string;
+  publishedAt: string;
+  url: string;
+}
+
+export interface PublishedSiteBuild {
+  slug: string;
+  url: string;
+  title: string;
+  pages: number;
+  fallback: boolean;
+  warning: string | null;
+  credits: number;
+  images: number;
+}
+
 export const platformApi = {
   // --- Sessione (auth cookie Console) --------------------------------------
   getSession: () => http.get<SessionUser>("/api/auth/session"),
@@ -455,6 +500,16 @@ export const platformApi = {
   decideAsset: (assetId: string, decision: "approved" | "rejected") =>
     http.post<PipelineAsset>(`/api/pipeline/assets/${assetId}/decide`, { decision }),
 
+  // --- Specialisti eseguibili (Fase 30) -------------------------------------
+  /** Cosa fa davvero ogni reparto operativo. */
+  getDroidActions: () => http.get<{ actions: DroidAction[] }>("/api/platform/droids/actions"),
+  /** Avvia uno specialista: esegue i suoi task e produce i deliverable. */
+  runDroid: (droid: string, instruction: string, stage?: string) =>
+    http.post<DroidRunResult>(`/api/platform/droids/${encodeURIComponent(droid)}/run`, {
+      instruction,
+      stage,
+    }),
+
   // --- Ricerca web reale ----------------------------------------------------
   /** Report citato: sintesi operativa con l'elenco delle fonti reali. */
   researchReport: (query: string, questions?: string[]) =>
@@ -462,6 +517,7 @@ export const platformApi = {
   /** SERP: link ed estratti dei risultati reali. */
   researchSearch: (query: string, limit = 6) =>
     http.post<ResearchSearchResult>("/api/platform/research", { query, mode: "search", limit }),
+
 
   // --- Libreria -------------------------------------------------------------
   getLibrary: () => http.get<LibraryData>("/api/platform/library"),

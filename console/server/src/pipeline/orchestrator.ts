@@ -70,6 +70,12 @@ export interface OrchestrateOptions {
   meter?: boolean;
   /** Esegue i task in sequenza ma non si ferma al primo fallimento. */
   continueOnError?: boolean;
+  /**
+   * Esegue SOLO i task di questo specialista (droid). Serve al comando
+   * "avvia lo specialista X": gli altri reparti dello stadio restano in
+   * attesa, lanciati esplicitamente o dalla chat.
+   */
+  onlyDroid?: string;
 }
 
 export interface TaskOutcome {
@@ -133,7 +139,11 @@ export async function orchestrateRun(
   }
 
   const tasks = await listTasks(tenantId, runId);
-  const pending = tasks.filter((t) => t.status === "pending" || t.status === "failed");
+  const pending = tasks.filter(
+    (t) =>
+      (t.status === "pending" || t.status === "failed") &&
+      (!opts.onlyDroid || t.droid === opts.onlyDroid),
+  );
 
   let totalCredits = 0;
   let failed = false;
