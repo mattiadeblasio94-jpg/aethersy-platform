@@ -59,26 +59,121 @@ function isColor(value: string): boolean {
   return /^#[0-9a-f]{3,8}$/i.test(value) || /^hsl\(/i.test(value) || /^rgb\(/i.test(value);
 }
 
+/** Colore in RGB, se riconosciuto (hex, rgb(), hsl()). */
+function parseColor(value: string): { r: number; g: number; b: number } | null {
+  const text = value.trim();
+  const hex = text.match(/^#([0-9a-f]{3,8})$/i);
+  if (hex) {
+    let digits = hex[1];
+    if (digits.length === 3 || digits.length === 4) {
+      digits = digits
+        .slice(0, 3)
+        .split("")
+        .map((char) => char + char)
+        .join("");
+    }
+    if (digits.length < 6) return null;
+    return {
+      r: parseInt(digits.slice(0, 2), 16),
+      g: parseInt(digits.slice(2, 4), 16),
+      b: parseInt(digits.slice(4, 6), 16),
+    };
+  }
+
+  const rgb = text.match(/^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/i);
+  if (rgb) {
+    return { r: Number(rgb[1]), g: Number(rgb[2]), b: Number(rgb[3]) };
+  }
+
+  const hsl = text.match(/^hsla?\(\s*([\d.]+)(?:deg)?[\s,]+([\d.]+)%[\s,]+([\d.]+)%/i);
+  if (hsl) {
+    const h = Number(hsl[1]) / 360;
+    const s = Number(hsl[2]) / 100;
+    const l = Number(hsl[3]) / 100;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs(((h * 6) % 2) - 1));
+    const m = l - c / 2;
+    const sector = Math.floor(h * 6) % 6;
+    const table: [number, number, number][] = [
+      [c, x, 0],
+      [x, c, 0],
+      [0, c, x],
+      [0, x, c],
+      [x, 0, c],
+      [c, 0, x],
+    ];
+    const [r, g, b] = table[sector];
+    return {
+      r: Math.round((r + m) * 255),
+      g: Math.round((g + m) * 255),
+      b: Math.round((b + m) * 255),
+    };
+  }
+
+  return null;
+}
+
+/** Luminanza relativa WCAG: serve a scegliere un tema leggibile. */
+function luminance(color: string): number {
+  const rgb = parseColor(color);
+  if (!rgb) return 0;
+  const channel = (value: number) => {
+    const normalized = value / 255;
+    return normalized <= 0.03928
+      ? normalized / 12.92
+      : ((normalized + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b);
+}
+
+/** Tema chiaro o scuro in base allo sfondo: il testo deve essere leggibile. */
+function themeFor(background: string): "light" | "dark" {
+  return luminance(background) > 0.32 ? "light" : "dark";
+}
+
 export function siteCss(brand: SiteDocument["brand"]): string {
   const fallback = fallbackPalette(brand.name);
   const primary = isColor(brand.primary) ? brand.primary : fallback.primary;
   const accent = isColor(brand.accent) ? brand.accent : fallback.accent;
   const background = isColor(brand.background) ? brand.background : fallback.background;
   const secondary = isColor(brand.secondary) ? brand.secondary : accent;
+
+  // Il tema segue lo sfondo del brand: su uno sfondo chiaro il testo diventa
+  // scuro (prima era sempre chiaro: testo illeggibile sui brand chiari).
+  const theme = themeFor(background);
+  const light = theme === "light";
+  const text = light ? "#111827" : "#f2f6ff";
+  const muted = light ? "#4b5670" : "#a8b4d0";
+  const surface = light
+    ? `color-mix(in srgb, ${background} 28%, white 72%)`
+    : `color-mix(in srgb, ${background} 82%, white 18%)`;
+  const surface2 = light
+    ? `color-mix(in srgb, ${background} 45%, white 55%)`
+    : `color-mix(in srgb, ${background} 72%, white 28%)`;
+  const inputBg = light
+    ? `color-mix(in srgb, ${background} 20%, white 80%)`
+    : `color-mix(in srgb, ${background} 60%, black 40%)`;
+  const shadow = light ? "0 18px 48px rgba(16,24,40,.14)" : "0 18px 48px rgba(0,0,0,.28)";
+  const accentText = luminance(accent) > 0.45 ? `color-mix(in srgb, ${accent} 62%, black)` : accent;
+  const buttonText = luminance(primary) > 0.45 ? "#111827" : "#05080f";
+
   return `
 :root {
   --primary:${primary};
   --accent:${accent};
+  --accent-text:${accentText};
   --secondary:${secondary};
   --bg:${background};
-  --surface:color-mix(in srgb, ${background} 82%, white 18%);
-  --surface-2:color-mix(in srgb, ${background} 72%, white 28%);
-  --text:#f2f6ff;
-  --muted:#a8b4d0;
+  --surface:${surface};
+  --surface-2:${surface2};
+  --input-bg:${inputBg};
+  --button-text:${buttonText};
+  --text:${text};
+  --muted:${muted};
   --line:color-mix(in srgb, ${primary} 28%, transparent);
   --radius:18px;
   --maxw:1180px;
-  --shadow:0 18px 48px rgba(0,0,0,.28);
+  --shadow:${shadow};
 }
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
@@ -111,7 +206,7 @@ p{margin:0 0 14px;color:var(--muted);max-width:72ch}
 .hero h1{max-width:16ch}
 .hero-media{border-radius:calc(var(--radius) + 6px);overflow:hidden;border:1px solid var(--line);box-shadow:var(--shadow);background:var(--surface)}
 .hero-media img{width:100%;height:100%;object-fit:cover;aspect-ratio:4/3}
-.btn{display:inline-flex;align-items:center;gap:9px;padding:14px 26px;border-radius:999px;border:0;cursor:pointer;font:inherit;font-weight:700;text-decoration:none;background:linear-gradient(120deg,var(--primary),var(--accent));color:#05080f;transition:transform .18s,filter .18s}
+.btn{display:inline-flex;align-items:center;gap:9px;padding:14px 26px;border-radius:999px;border:0;cursor:pointer;font:inherit;font-weight:700;text-decoration:none;background:linear-gradient(120deg,var(--primary),var(--accent));color:var(--button-text, #05080f);transition:transform .18s,filter .18s}
 .btn:hover{transform:translateY(-2px);filter:brightness(1.07)}
 .btn.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
 .actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:26px}
@@ -119,7 +214,7 @@ p{margin:0 0 14px;color:var(--muted);max-width:72ch}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:26px;transition:transform .2s,border-color .2s}
 .card:hover{transform:translateY(-4px);border-color:color-mix(in srgb,var(--primary) 55%,transparent)}
 .card p{margin:0;font-size:.96rem}
-.card .icon{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;margin-bottom:14px;background:color-mix(in srgb,var(--primary) 22%,transparent);color:var(--accent);font-weight:800}
+.card .icon{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;margin-bottom:14px;background:color-mix(in srgb,var(--primary) 22%,transparent);color:var(--accent-text);font-weight:800}
 .split{display:grid;grid-template-columns:1fr 1fr;gap:48px;align-items:center}
 .split.reverse .split-media{order:-1}
 .split-media{border-radius:var(--radius);overflow:hidden;border:1px solid var(--line);box-shadow:var(--shadow)}
@@ -154,7 +249,7 @@ p{margin:0 0 14px;color:var(--muted);max-width:72ch}
 .contact-grid{display:grid;grid-template-columns:1fr 1fr;gap:46px;align-items:start}
 form.lead{display:grid;gap:14px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:26px}
 form.lead label{display:grid;gap:6px;font-size:.9rem;color:var(--muted)}
-form.lead input,form.lead textarea{background:color-mix(in srgb,var(--bg) 60%,black 40%);border:1px solid var(--line);border-radius:12px;color:var(--text);padding:12px 14px;font:inherit}
+form.lead input,form.lead textarea{background:var(--input-bg);border:1px solid var(--line);border-radius:12px;color:var(--text);padding:12px 14px;font:inherit}
 form.lead .full{grid-column:1/-1}
 form.lead .hp{position:absolute;left:-9999px}
 .form-status{margin:0;min-height:1.3em;font-size:.92rem}
