@@ -212,6 +212,78 @@ function fallbackDocument(input: {
 }
 
 /**
+ * Normalizza la home: il modello puo' disperdere le sezioni-cardinali sulle
+ * pagine interne, lasciando una home con solo hero e contatti. Qui la home
+ * viene completata con le sezioni che mancano, riusando il contenuto reale
+ * del documento (nessun testo inventato).
+ */
+function normalizeHome(document: SiteDocument): SiteDocument {
+  const home = document.pages.find((page) => page.slug === "home") ?? document.pages[0];
+  if (!home) return document;
+
+  const has = (type: SiteDocument["pages"][number]["sections"][number]["type"]) =>
+    home.sections.some((section) => section.type === type);
+
+  // Le features: riuse quelle di un'altra pagina, altrimenti i punti chiave
+  // delle pagine interne come voci della griglia.
+  if (!has("features")) {
+    const elsewhere = document.pages
+      .flatMap((page) => page.sections)
+      .find((section) => section.type === "features" && section.features.length > 0);
+    const features =
+      elsewhere?.features.map((feature) => ({ ...feature })) ??
+      document.pages
+        .filter((page) => page.slug !== home.slug)
+        .slice(0, 4)
+        .map((page) => ({
+          title: page.navLabel || page.title,
+          text: page.seoDescription || page.seoTitle || "",
+          icon: "",
+        }));
+    if (features.length > 0) {
+      home.sections.splice(1, 0, {
+        type: "features",
+        eyebrow: "Cosa offriamo",
+        heading: "I punti di forza",
+        text: "",
+        cta: null,
+        secondaryCta: null,
+        items: [],
+        features,
+        plans: [],
+        faq: [],
+        stats: [],
+        testimonial: null,
+        image: false,
+        reverse: false,
+      });
+    }
+  }
+
+  // La fascia CTA finale: sempre, con il contatto come destinazione.
+  if (!has("cta")) {
+    home.sections.splice(home.sections.length - 1, 0, {
+      type: "cta",
+      eyebrow: "",
+      heading: document.brand.tagline || "Parliamo del tuo progetto",
+      text: "",
+      cta: { label: "Contattaci", href: "#contatti" },
+      secondaryCta: null,
+      items: [],
+      features: [],
+      plans: [],
+      faq: [],
+      stats: [],
+      testimonial: null,
+      image: false,
+      reverse: false,
+    });
+  }
+
+  return document;
+}
+
+/**
  * Costruisce il sito del run e lo pubblica. Restituisce slug e URL pubblico.
  */
 export async function buildAndPublishSite(input: {
@@ -271,6 +343,7 @@ export async function buildAndPublishSite(input: {
   if (!document) {
     document = fallbackDocument({ brand: brandName, topic, copy, sitemap });
   }
+  document = normalizeHome(document);
 
   // Le immagini reali del run alimentano hero e gallery.
   const images = assetImages(loaded.assets as { kind: string; meta: unknown }[]);

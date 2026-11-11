@@ -88,6 +88,11 @@ export const STAGES: StageSpec[] = [
       { kind: "document", name: "robots.txt" },
       { kind: "document", name: "sitemap.xml" },
       { kind: "document", name: "tracking-plan.md" },
+      // L'asset visivo del sito e' un'immagine reale (generata e consegnata
+      // come file), non una descrizione: senza questo deliverable il task
+      // "Asset visivi del sito" resterebbe solo testuale e il sito online
+      // sarebbe senza immagini.
+      { kind: "image", name: "asset-visivi-del-sito.png" },
     ],
     capabilities: ["text", "img_out"],
     intensity: "media",
