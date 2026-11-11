@@ -3,7 +3,7 @@
 > Aggiornare dopo **ogni** fase con: data/ora, esito, comandi di verifica, note.
 > Stati ammessi: `DONE`, `BLOCKED: input #N`, `NOTE`.
 >
-> Ultima revisione: 2026-11-08 (fasi 0–12 `DONE`; **fasi 13–22** implementate e deployate: CI, IA nel platform, **platform a dati reali senza mock + UI cyber + agenti builder eseguibili + sito pubblicabile dal run pipeline**, **login sociale reale Google/GitHub**, **connettori reali con login ai provider (43 provider, niente connessioni finte)**; restano azioni utente per la rotazione credenziali, Stripe e le app OAuth dei provider)
+> Ultima revisione: 2026-11-11 (fasi 0–12 `DONE`; **fasi 13–22** implementate e deployate: CI, IA nel platform, **platform a dati reali senza mock + UI cyber + agenti builder eseguibili + sito pubblicabile dal run pipeline**, **login sociale reale Google/GitHub**, **connettori reali con login ai provider (43 provider, niente connessioni finte)**; **fasi 30–32**: specialisti eseguibili, sito professionale pubblicato multi-pagina, flusso "Realizza la tua idea" che produce deliverable e sito online; QA 73/73 API e 11/11 UI); restano azioni utente per la rotazione credenziali, Stripe e le app OAuth dei provider)
 
 ## Stato sintetico
 
@@ -1630,3 +1630,60 @@ falliva anche con modelli utilizzabili. Ora `AI_MAX_OUTPUT_TOKENS` (default
 
 **Esito**: la pubblicazione del sito e' tornata a usare la generazione AI
 (fallback `false`, 1 credito) invece del fallback ricostruito.
+
+### Fase 32 — Flusso "Realizza la tua idea" (11/11/2026)
+
+**Problema**: la piattaforma sapeva eseguire task e pubblicare siti, ma non
+aveva un punto di ingresso unico che partisse da un'idea in linguaggio
+naturale e arrivasse a un risultato pubblicabile senza intervento manuale.
+
+**Modifiche**:
+- `console/server/src/platform/idea.ts` — `planIdea()` (brief strutturato:
+  obiettivo, brand, pubblico, settore, localita', dominio, tono, riferimenti,
+  output richiesti; obiettivo obbligatorio con almeno 10 caratteri),
+  `createIdeaRuns()` (un run per stadio), `executeIdeaRun()` (esecuzione reale
+  dei reparti con `buildAiExecutor`), `publishIdeaSite()` (pubblicazione del
+  sito a fine run `website`).
+- `console/server/src/platform/routes.ts` — `POST /api/platform/ideas`
+  (202 Accepted, validazione del brief e esecuzione in background).
+- `platform/src/pages/Idea.tsx` — pagina "Realizza l'idea": form strutturato,
+  esito per run/stadio, polling dei task e attesa della pubblicazione del
+  sito (fino a 120 s) con link al sito online.
+- `platform/src/pages/routes.tsx` + `platform/src/components/layout/Drawer.tsx`
+  — rotta `/idea` e voce di menu "Realizza l'idea".
+- `platform/src/lib/platform-api.ts` — `createIdea()` e i tipi `IdeaPlan`,
+  `IdeaRun`.
+
+**Esito** (live, end-to-end): brief vago -> 400 con messaggio esplicito;
+brief concreto -> 202, run `website` con 7/7 task `done`, 14 deliverable reali
+(.md, .pdf e immagine generata), sito pubblicato con 4 pagine
+(`/s/<slug>` 200, 129.572 byte con immagine reale inline), form lead inviato
+dal browser -> "Richiesta inviata", 0 errori console e 0 richieste fallite,
+canonical e link interni con prefisso `/s/` corretti.
+
+### Fix — sito leggibile: tema automatico, immagine reale, home completa (11/11/2026)
+
+- `console/server/src/platform/site-render.ts` — il tema del sito (chiaro o
+  scuro) viene deciso dal colore del brand tramite `parseColor()` e
+  `luminance()` (WCAG): il testo, i pulsanti e i campi dei form usano sempre
+  token con contrasto sufficiente, anche su sfondi chiari. Il paragrafo di
+  apertura (`.lead`) segue lo stesso tema.
+- `console/server/src/pipeline/catalog.ts` — lo stadio `website` dichiara il
+  deliverable `asset-visivi-del-sito.png`: il task di `prism` genera
+  l'immagine reale, che finisce inline (data URI) nel sito pubblicato.
+- `console/server/src/platform/site-build.ts` — `normalizeHome()` garantisce
+  che la home contenga sempre sezione features e CTA, anche quando il
+  modello restituisce un documento incompleto.
+
+**Esito**: sito pubblicato con hero su immagine reale (129.572 byte), home con
+features e CTA, tema chiaro su brand chiaro con testo leggibile, layout
+mobile verificato (menu hamburger, colonne impilate, testo e CTA leggibili).
+
+### Verifica di regressione (11/11/2026)
+
+- API: `qa-all-services.mjs` -> **73/73 controlli superati, 0 falliti**
+  (sessione e autenticazione, lettura di tutti i servizi, scrittura e run
+  reali con AI, asset e PDF scaricabili, export, approvazione e consegna,
+  consumo misurato, connettori, area operativa unificata).
+- UI: `qa-ui-full.mjs` -> **11/11 passati, 0 falliti** (0 errori console,
+  0 richieste fallite, anteprima PDF e download, login Telegram presente).
