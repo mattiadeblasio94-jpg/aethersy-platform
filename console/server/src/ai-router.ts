@@ -388,6 +388,10 @@ export async function chat(params: {
             messages: [
               { role: "user", content: params.capability === "text" ? params.prompt : parts },
             ],
+            // Senza max_tokens OpenRouter ne richiede 16384: con un saldo
+            // OpenRouter basso la richiesta viene rifiutata (402) anche se il
+            // modello e' utilizzabile. Il limite e' configurabile.
+            max_tokens: config.aiMaxOutputTokens,
           }),
         });
         body = await res.json();
@@ -432,7 +436,12 @@ export async function chat(params: {
     };
   }
 
-  throw new Error(lastError);
+  // Nessun candidato ha risposto: l'errore riporta il dettaglio di ogni
+  // tentativo, per capire se il problema e' crediti, provider o modello.
+  const detail = attempts
+    .map((attempt) => `${attempt.model}: ${attempt.error}`)
+    .join(" | ");
+  throw new Error(detail ? `${lastError} [${detail}]` : lastError);
 }
 
 /**

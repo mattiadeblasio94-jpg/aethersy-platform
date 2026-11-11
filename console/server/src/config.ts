@@ -55,6 +55,11 @@ export const config = {
   // Tetto di token per la chat: i modelli "reasoning" consumano il budget con
   // il ragionamento prima di produrre il testo finale.
   nvidiaMaxTokens: Number(process.env.NVIDIA_MAX_TOKENS ?? 8192),
+  // Tetto di token per le chat via OpenRouter. Senza questo parametro
+  // OpenRouter ne richiede 16384 e rigetta la richiesta (402) quando il saldo
+  // residuo e' inferiore: il testo viene prodotto lo stesso, con un tetto
+  // coerente con la lunghezza attesa dei deliverable.
+  aiMaxOutputTokens: Number(process.env.AI_MAX_OUTPUT_TOKENS ?? 4096),
 
   // --- Ricerca web reale (Fase 29) -------------------------------------------
   // Modello con ricerca integrata: risponde usando il web e restituisce le
