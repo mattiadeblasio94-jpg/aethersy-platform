@@ -200,7 +200,7 @@ h1{font-size:clamp(2.1rem,5.4vw,4rem);line-height:1.08;margin:0 0 18px;letter-sp
 h2{font-size:clamp(1.5rem,3vw,2.35rem);line-height:1.18;margin:0 0 14px;letter-spacing:-.01em}
 h3{font-size:1.06rem;margin:0 0 8px}
 p{margin:0 0 14px;color:var(--muted);max-width:72ch}
-.lead{font-size:1.1rem;color:#d8e2f7}
+.lead{font-size:1.1rem;color:var(--text);opacity:.86}
 .hero{padding:104px 0 88px;background:radial-gradient(1100px 460px at 12% -12%,color-mix(in srgb,var(--primary) 30%,transparent),transparent 62%),radial-gradient(760px 380px at 92% 8%,color-mix(in srgb,var(--accent) 24%,transparent),transparent 60%)}
 .hero-grid{display:grid;grid-template-columns:1.08fr .92fr;gap:52px;align-items:center}
 .hero h1{max-width:16ch}
