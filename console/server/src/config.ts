@@ -131,11 +131,9 @@ export const config = {
   wixMcpClientId: process.env.WIX_MCP_CLIENT_ID ?? "",
   wixMcpClientSecret: process.env.WIX_MCP_CLIENT_SECRET ?? "",
   wixMcpScope: process.env.WIX_MCP_SCOPE ?? "offline_access",
-  // Token REST Wix (istanza/account) per le API REST dirette. Vive solo nel
-  // .env del VPS: nessun segreto nel repo.
-  wixApiToken: process.env.WIX_API_TOKEN ?? "",
+  // Site ID del sito Wix su cui operare. Facoltativo: se assente o non valido,
+  // la piattaforma lo rileva dall'account collegato (ListWixSites).
   wixSiteId: process.env.WIX_SITE_ID ?? "",
-  wixApiBase: (process.env.WIX_API_BASE ?? "https://www.wixapis.com").replace(/\/$/, ""),
 
   // Canale di notifica outbound (P0.6): webhook Slack a livello di stack.
   // Usato come fallback quando il tenant non ha un canale dedicato salvato in

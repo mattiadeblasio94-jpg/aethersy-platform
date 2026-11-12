@@ -30,6 +30,7 @@ import {
   Plug,
   Rocket,
   Search,
+  BookOpen,
 } from "lucide-react";
 import { useUiStore } from "@/store/ui";
 import { useAuthStore } from "@/store/auth";
@@ -89,6 +90,7 @@ export const Drawer = memo(function Drawer({ variant }: DrawerProps) {
         title: "Operazioni",
         items: [
           { to: "/dashboard", label: "Home", icon: Home },
+          { to: "/guida", label: "Guida", icon: BookOpen },
           { to: "/overview", label: "Panoramica", icon: LayoutDashboard },
           { to: "/studio", label: "Studio", icon: Zap },
           { to: "/idea", label: "Realizza l'idea", icon: Rocket },

@@ -2,7 +2,7 @@
 
 Infrastruttura self-hosted per **aethersy**: [Activepieces](https://www.activepieces.com/) brandizzato, su un VPS Aruba (Ubuntu 24.04), con TLS automatico, Postgres + Redis, worker separato, provider AI **OpenRouter** (primario) / **Venice.ai**, endpoint **MCP** su un hostname dedicato e la **Aethersy Console** (frontend proprietario + BFF con AI Router).
 
-Specifica operativa completa: [`AGENTS.md`](AGENTS.md). Stato e log delle fasi: [`docs/phases.md`](docs/phases.md).
+Specifica operativa completa: [`AGENTS.md`](AGENTS.md). Stato e log delle fasi: [`docs/phases.md`](docs/phases.md). Percorso utente passo-passo: [`docs/guida-passo-passo.md`](docs/guida-passo-passo.md) (stessa guida in app: pagina **Guida**).
 
 ## Domini
 

@@ -16,14 +16,18 @@ import {
   ExternalLink,
   Link2,
   Plug,
+  PlusCircle,
   RefreshCw,
   Search,
   ShieldCheck,
+  ShoppingBag,
+  TrendingUp,
   Unplug,
+  Users,
+  Wallet,
   Wrench,
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
-import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Skeleton } from "@/components/ui/Skeleton";
@@ -32,13 +36,6 @@ import { EmptyState, KpiCard, PageHeader } from "@/components/common/PageElement
 import { platformApi } from "@/lib/platform-api";
 import type { WixTool } from "@/lib/platform-api";
 
-function statusVariant(status: number): "success" | "warning" | "error" | "default" {
-  if (status >= 200 && status < 300) return "success";
-  if (status === 0 || status >= 500) return "error";
-  if (status === 401 || status === 403) return "warning";
-  return "default";
-}
-
 export default function Wix() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -46,6 +43,9 @@ export default function Wix() {
   const [selected, setSelected] = useState<WixTool | null>(null);
   const [argsText, setArgsText] = useState("{}");
   const [result, setResult] = useState<unknown>(null);
+  const [productName, setProductName] = useState("");
+  const [productPrice, setProductPrice] = useState("");
+  const [productDescription, setProductDescription] = useState("");
 
   const status = useQuery({
     queryKey: ["real", "wix", "status"],
@@ -58,10 +58,38 @@ export default function Wix() {
     enabled: Boolean(status.data?.connected),
   });
 
-  const insights = useQuery({
-    queryKey: ["real", "wix", "insights"],
-    queryFn: () => platformApi.getWixInsights(),
+  const business = useQuery({
+    queryKey: ["real", "wix", "business"],
+    queryFn: () => platformApi.getWixBusiness(),
     enabled: Boolean(status.data?.connected),
+  });
+
+  const createProduct = useMutation({
+    mutationFn: (input: { name: string; price: number; description?: string }) =>
+      platformApi.createWixProduct(input),
+    onSuccess: (data) => {
+      setProductName("");
+      setProductPrice("");
+      setProductDescription("");
+      queryClient.invalidateQueries({ queryKey: ["real", "wix"] });
+      // Wix indicizza il nuovo prodotto con qualche secondo di ritardo: si
+      // ricarica il business poco dopo per mostrarlo nel catalogo.
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ["real", "wix"] });
+      }, 9000);
+      toast({
+        kind: "success",
+        title: "Prodotto creato in catalogo",
+        description: data.product.name ?? undefined,
+      });
+    },
+    onError: (error) => {
+      toast({
+        kind: "error",
+        title: "Creazione del prodotto non riuscita",
+        description: error instanceof Error ? error.message : undefined,
+      });
+    },
   });
 
   const disconnect = useMutation({
@@ -136,8 +164,25 @@ export default function Wix() {
     runTool.mutate({ name: selected.name, args });
   }
 
+  function submitProduct() {
+    const name = productName.trim();
+    const price = Number.parseFloat(productPrice.replace(",", "."));
+    if (!name || name.length < 2) {
+      toast({ kind: "error", title: "Indica il nome del prodotto" });
+      return;
+    }
+    if (!Number.isFinite(price) || price <= 0) {
+      toast({ kind: "error", title: "Indica un prezzo maggiore di zero" });
+      return;
+    }
+    createProduct.mutate({
+      name,
+      price,
+      description: productDescription.trim() || undefined,
+    });
+  }
+
   const connected = Boolean(status.data?.connected);
-  const restChecks = status.data?.rest.checks ?? [];
 
   return (
     <div className="flex flex-col gap-6">
@@ -188,14 +233,20 @@ export default function Wix() {
           hint="dal server MCP di Wix"
         />
         <KpiCard
-          label="Famiglie di tool"
-          value={String(status.data?.mcp.summary.groups.length ?? 0)}
-          hint="gruppi per prefisso"
+          label="Siti nell'account"
+          value={String(status.data?.site.sites.length ?? 0)}
+          icon={<ShieldCheck className="h-5 w-5 text-secondary" aria-hidden="true" />}
+          hint={status.data?.site.source === "discovered" ? "rilevati via MCP" : "configurati"}
         />
         <KpiCard
-          label="API REST"
-          value={status.data?.rest.configured ? "Attive" : "Non configurate"}
-          hint={status.data?.rest.siteId ?? "nessun site id"}
+          label="Sito Wix"
+          value={status.data?.site.name ?? (status.data?.site.id ? "Collegato" : "Nessuno")}
+          icon={<ShoppingBag className="h-5 w-5 text-secondary" aria-hidden="true" />}
+          hint={
+            status.data?.site.source === "discovered"
+              ? "rilevato dall'account collegato"
+              : (status.data?.site.id ?? "nessun site id")
+          }
         />
       </section>
 
@@ -222,11 +273,245 @@ export default function Wix() {
         </Card>
       )}
 
+      {connected && (
+        <section aria-label="Business Wix" className="flex flex-col gap-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-base font-semibold text-text-primary">
+              Business del sito {status.data?.site.name ? `"${status.data.site.name}"` : ""}
+            </h2>
+            <Button
+              variant="ghost"
+              leftIcon={<RefreshCw className="h-4 w-4" aria-hidden="true" />}
+              onClick={() => {
+                queryClient.invalidateQueries({ queryKey: ["real", "wix"] });
+              }}
+            >
+              Aggiorna
+            </Button>
+          </div>
+
+          {business.isLoading ? (
+            <Card>
+              <Skeleton lines={3} />
+            </Card>
+          ) : business.isError ? (
+            <Card>
+              <EmptyState
+                icon={<RefreshCw className="h-5 w-5" aria-hidden="true" />}
+                title="Dati commerciali non disponibili"
+                description={
+                  business.error instanceof Error ? business.error.message : "Riprova l'aggiornamento."
+                }
+              />
+            </Card>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+              <KpiCard
+                label="Ricavi"
+                value={`${business.data?.snapshot.revenue.toFixed(2) ?? "0.00"} ${
+                  business.data?.snapshot.currency ?? "EUR"
+                }`}
+                icon={<TrendingUp className="h-5 w-5 text-secondary" aria-hidden="true" />}
+                hint="ordini non annullati"
+              />
+              <KpiCard
+                label="Ordini"
+                value={String(business.data?.snapshot.ordersCount ?? 0)}
+                icon={<ShoppingBag className="h-5 w-5 text-secondary" aria-hidden="true" />}
+                hint="totali dal sito"
+              />
+              <KpiCard
+                label="Scontrino medio"
+                value={`${business.data?.snapshot.averageOrderValue.toFixed(2) ?? "0.00"} ${
+                  business.data?.snapshot.currency ?? "EUR"
+                }`}
+                icon={<Wallet className="h-5 w-5 text-secondary" aria-hidden="true" />}
+                hint="per ordine"
+              />
+              <KpiCard
+                label="Prodotti in catalogo"
+                value={String(business.data?.snapshot.productsCount ?? 0)}
+                hint="e-commerce attivo"
+              />
+              <KpiCard
+                label="Contatti"
+                value={String(business.data?.snapshot.contactsCount ?? 0)}
+                icon={<Users className="h-5 w-5 text-secondary" aria-hidden="true" />}
+                hint="anagrafica CRM"
+              />
+            </div>
+          )}
+        </section>
+      )}
+
       <div className="grid gap-6 xl:grid-cols-[2fr_1fr]">
-        <Card
-          header={
-            <>
-              <h2 className="text-base font-semibold text-text-primary">Tool Wix</h2>
+        <div className="flex flex-col gap-6">
+          <Card
+            header={
+              <>
+                <h2 className="text-base font-semibold text-text-primary">Catalogo prodotti</h2>
+                <span className="text-xs text-text-muted">
+                  {business.data?.snapshot.productsCount ?? 0} prodotti
+                </span>
+              </>
+            }
+            bodyClassName="p-0"
+          >
+            {(business.data?.snapshot.products ?? []).length === 0 ? (
+              <div className="p-5">
+                <EmptyState
+                  icon={<ShoppingBag className="h-5 w-5" aria-hidden="true" />}
+                  title="Catalogo non disponibile"
+                  description="Collega il tuo account Wix per leggere i prodotti reali del sito e gestirli da qui."
+                />
+              </div>
+            ) : (
+              <ul className="divide-y divide-secondary/10">
+                {(business.data?.snapshot.products ?? []).map((product, index) => (
+                  <li
+                    key={product.id ?? `${product.name}-${index}`}
+                    className="flex items-center justify-between gap-4 px-5 py-3"
+                  >
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-secondary/10">
+                        {product.imageUrl ? (
+                          <img
+                            src={product.imageUrl}
+                            alt=""
+                            className="h-full w-full object-cover"
+                            loading="lazy"
+                            referrerPolicy="no-referrer"
+                            onError={(event) => {
+                              event.currentTarget.style.display = "none";
+                            }}
+                          />
+                        ) : null}
+                      </span>
+                      <div className="min-w-0">
+                        <span className="block truncate text-sm font-medium text-text-primary">
+                          {product.name ?? "Prodotto senza nome"}
+                        </span>
+                        <span className="block truncate text-xs text-text-muted">
+                          {product.productType ?? "-"}
+                          {product.availability ? ` · ${product.availability}` : ""}
+                          {product.visible === false ? " · nascosto" : ""}
+                        </span>
+                      </div>
+                    </div>
+                    <span className="shrink-0 text-sm font-medium text-text-primary">
+                      {product.price ?? "-"} {product.currency ?? ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+
+          <Card
+            header={
+              <>
+                <h2 className="text-base font-semibold text-text-primary">Ordini recenti</h2>
+                <span className="text-xs text-text-muted">
+                  {business.data?.snapshot.ordersCount ?? 0} ordini
+                </span>
+              </>
+            }
+            bodyClassName="p-0"
+          >
+            {(business.data?.snapshot.orders ?? []).length === 0 ? (
+              <div className="p-5">
+                <EmptyState
+                  icon={<ShoppingBag className="h-5 w-5" aria-hidden="true" />}
+                  title="Nessun ordine registrato"
+                  description="Gli ordini del sito Wix compariranno qui non appena ci saranno acquisti: e' il dato reale, non una stima."
+                />
+              </div>
+            ) : (
+              <ul className="divide-y divide-secondary/10">
+                {(business.data?.snapshot.orders ?? []).map((order, index) => (
+                  <li
+                    key={order.id ?? `${order.number}-${index}`}
+                    className="flex items-center justify-between gap-4 px-5 py-3"
+                  >
+                    <div className="min-w-0">
+                      <span className="block truncate text-sm font-medium text-text-primary">
+                        {order.number ?? order.id ?? "Ordine"}
+                      </span>
+                      <span className="block truncate text-xs text-text-muted">
+                        {order.customer ?? "cliente non indicato"}
+                        {order.status ? ` · ${order.status}` : ""}
+                      </span>
+                    </div>
+                    <span className="shrink-0 text-sm font-medium text-text-primary">
+                      {order.total ?? "-"} {order.currency ?? ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+
+          <Card
+            header={
+              <>
+                <h2 className="text-base font-semibold text-text-primary">Crea un prodotto</h2>
+                <span className="text-xs text-text-muted">scrittura reale su Wix</span>
+              </>
+            }
+          >
+            <div className="flex flex-col gap-3">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="flex flex-col gap-1 text-xs text-text-muted" htmlFor="wix-product-name">
+                  Nome del prodotto
+                  <Input
+                    id="wix-product-name"
+                    value={productName}
+                    onChange={(event) => setProductName(event.target.value)}
+                    placeholder="Corso di formazione base"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-text-muted" htmlFor="wix-product-price">
+                  Prezzo (EUR)
+                  <Input
+                    id="wix-product-price"
+                    value={productPrice}
+                    onChange={(event) => setProductPrice(event.target.value)}
+                    placeholder="299.00"
+                    inputMode="decimal"
+                  />
+                </label>
+              </div>
+              <label
+                className="flex flex-col gap-1 text-xs text-text-muted"
+                htmlFor="wix-product-description"
+              >
+                Descrizione
+                <textarea
+                  id="wix-product-description"
+                  value={productDescription}
+                  onChange={(event) => setProductDescription(event.target.value)}
+                  rows={3}
+                  placeholder="Cosa include e a chi e' rivolto"
+                  className="w-full rounded-lg border border-secondary/20 bg-background px-3 py-2 text-sm text-text-primary outline-none focus:border-secondary/60"
+                />
+              </label>
+              <div>
+                <Button
+                  variant="primary"
+                  leftIcon={<PlusCircle className="h-4 w-4" aria-hidden="true" />}
+                  loading={createProduct.isPending}
+                  onClick={submitProduct}
+                >
+                  Crea nel catalogo Wix
+                </Button>
+              </div>
+            </div>
+          </Card>
+
+          <Card
+            header={
+              <>
+                <h2 className="text-base font-semibold text-text-primary">Tool Wix</h2>
               <span className="text-xs text-text-muted">{toolRows.length} strumenti</span>
             </>
           }
@@ -278,6 +563,7 @@ export default function Wix() {
             </ul>
           )}
         </Card>
+        </div>
 
         <div className="flex flex-col gap-6">
           <Card
@@ -330,85 +616,6 @@ export default function Wix() {
                 Scegli un tool dall'elenco per eseguirlo con argomenti reali: la chiamata va
                 direttamente al server MCP di Wix.
               </p>
-            )}
-          </Card>
-
-          <Card
-            header={
-              <>
-                <h2 className="text-base font-semibold text-text-primary">Insights commerciali</h2>
-                <span className="text-xs text-text-muted">
-                  {(insights.data?.groups ?? []).length} famiglie
-                </span>
-              </>
-            }
-            bodyClassName="p-0"
-          >
-            {insights.isLoading ? (
-              <div className="p-5">
-                <Skeleton lines={3} />
-              </div>
-            ) : (insights.data?.groups ?? []).length === 0 ? (
-              <div className="p-5">
-                <EmptyState
-                  icon={<RefreshCw className="h-5 w-5" aria-hidden="true" />}
-                  title="Nessun dato commerciale disponibile"
-                  description="Gli snapshot (ricavi, ordini, catalogo, clienti, traffico) vengono letti dai tool di sola lettura del server MCP: compariranno qui dopo il collegamento."
-                />
-              </div>
-            ) : (
-              <ul className="divide-y divide-secondary/10">
-                {(insights.data?.groups ?? []).map((group) => (
-                  <li key={group.key} className="flex flex-col gap-2 px-5 py-3">
-                    <span className="text-sm font-medium text-text-primary">{group.label}</span>
-                    {group.tools.map((row) => (
-                      <details key={row.name} className="rounded-lg border border-secondary/10 px-3 py-2">
-                        <summary className="cursor-pointer font-mono text-xs text-text-secondary">
-                          {row.name}
-                        </summary>
-                        <pre className="mt-2 max-h-56 overflow-auto text-xs text-text-muted">
-                          {row.error ??
-                            (typeof row.content === "string"
-                              ? row.content
-                              : JSON.stringify(row.content, null, 2))}
-                        </pre>
-                      </details>
-                    ))}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-
-          <Card
-            header={
-              <>
-                <h2 className="text-base font-semibold text-text-primary">API REST</h2>
-                <span className="text-xs text-text-muted">token di istanza</span>
-              </>
-            }
-            bodyClassName="p-0"
-          >
-            {restChecks.length === 0 ? (
-              <div className="p-5">
-                <EmptyState
-                  icon={<Plug className="h-5 w-5" aria-hidden="true" />}
-                  title="Token REST non configurato"
-                  description="Il collegamento MCP e' sufficiente per usare Wix; il token REST e' facoltativo e abilita le chiamate dirette alle API del sito."
-                />
-              </div>
-            ) : (
-              <ul className="divide-y divide-secondary/10">
-                {restChecks.map((check) => (
-                  <li key={check.path} className="flex flex-col gap-1 px-5 py-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="font-mono text-xs text-text-primary">{check.name}</span>
-                      <Badge variant={statusVariant(check.status)}>{check.status || "errore"}</Badge>
-                    </div>
-                    <span className="truncate text-xs text-text-muted">{check.path}</span>
-                  </li>
-                ))}
-              </ul>
             )}
           </Card>
 

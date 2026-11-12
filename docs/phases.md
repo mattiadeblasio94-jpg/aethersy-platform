@@ -3,7 +3,7 @@
 > Aggiornare dopo **ogni** fase con: data/ora, esito, comandi di verifica, note.
 > Stati ammessi: `DONE`, `BLOCKED: input #N`, `NOTE`.
 >
-> Ultima revisione: 2026-11-11 (fasi 0–12 `DONE`; **fasi 13–22** implementate e deployate: CI, IA nel platform, **platform a dati reali senza mock + UI cyber + agenti builder eseguibili + sito pubblicabile dal run pipeline**, **login sociale reale Google/GitHub**, **connettori reali con login ai provider (43 provider, niente connessioni finte)**; **fasi 30–32**: specialisti eseguibili, sito professionale pubblicato multi-pagina, flusso "Realizza la tua idea" che produce deliverable e sito online; QA 73/73 API e 11/11 UI); restano azioni utente per la rotazione credenziali, Stripe e le app OAuth dei provider)
+> Ultima revisione: 2026-11-12 (fasi 0–12 `DONE`; **fasi 13–22** implementate e deployate: CI, IA nel platform, **platform a dati reali senza mock + UI cyber + agenti builder eseguibili + sito pubblicabile dal run pipeline**, **login sociale reale Google/GitHub**, **connettori reali con login ai provider (43 provider, niente connessioni finte)**; **fasi 30–32**: specialisti eseguibili, sito professionale pubblicato multi-pagina, flusso "Realizza la tua idea" che produce deliverable e sito online; **fasi 33–34**: integrazione Wix via server MCP (collegamento OAuth reale, 32 tool) con **business reale** (ordini, ricavi, catalogo, contatti) e **creazione prodotti in catalogo**, piu' **guida passo-passo** in UI e docs; QA 73/73 API, 11/11 UI, 16/16 business Wix, 14/14 guida); restano azioni utente per la rotazione credenziali, Stripe e le app OAuth dei provider)
 
 ## Stato sintetico
 
@@ -1724,6 +1724,74 @@ token di istanza), `GET /api/platform/wix/connect` 302 verso
 `mcp.wix.com/authorize` con `client_id` registrato dinamicamente e PKCE
 S256, `/api/platform/wix/tools` 409 con messaggio esplicito quando l'account
 non e' collegato, pagina `/wix` 200.
+
+### Fase 34 — Business Wix reale + guida passo-passo (12/11/2026)
+
+**Obiettivo**: chiudere il collegamento Wix con dati veri (il "problema" segnalato
+era un site id sbagliato, non l'autorizzazione) e rendere il percorso della
+piattaforma leggibile da chi arriva per la prima volta.
+
+**Diagnosi del collegamento**: l'account era gia' autorizzato (32 tool MCP
+disponibili), ma il `WIX_SITE_ID` configurato era un *meta-site* del pannello
+Wix (`16811122-850c-409e-a5af-6cbf6063413f`), non il sito restituito da
+`ListWixSites`. Il sito reale e' **`f6ea2c3a-6c16-4649-a50b-d3be6a3604da`**
+(nome "Aethersy"): corretto nel `.env` del VPS e, soprattutto, la piattaforma
+ora **rileva da sola** il sito (`ListWixSites`) e usa l'id configurato solo se
+corrisponde a un sito dell'account.
+
+**Dati commerciali reali** (`console/server/src/platform/wix-business.ts`): i
+numeri non arrivano da REST dirette (il token di istanza non ha gli scope) ma
+dal tool MCP `ExecuteWixAPI`, che esegue una funzione JavaScript nel sandbox
+Wix dove `wix.request` parla con le REST del sito con l'identita' dell'utente.
+Gli endpoint sono le `publicUrl` ufficiali rilevate dallo spec Wix con
+`SearchWixAPISpec` (mai inventate), con i `sourceDocUrls` di documentazione
+richiesti dal tool:
+- ordini: `POST https://www.wixapis.com/ecom/v1/orders/search`;
+- catalogo: `POST https://www.wixapis.com/stores/v3/products/query`;
+- contatti: `POST https://www.wixapis.com/contacts/v4/contacts/query`;
+- creazione prodotto: `POST https://www.wixapis.com/stores/v3/products`.
+
+**Creazione prodotto (scrittura reale)**: il body segue lo schema ufficiale
+`CreateProduct` (`variantsInfo.variants[].price.actualPrice`); per
+`productType: PHYSICAL` Wix richiede `physicalProperties` (prezzo per unita' e
+dimensioni), valorizzati con valori neutri (`1 KG`, `10x10x1 CM`). Nota
+verifica: l'enum v3 accetta solo `PHYSICAL` e `DIGITAL` (il valore `SERVICE` e'
+rifiutato dal provider).
+
+**API nuove** (`console/server/src/platform/wix-routes.ts`):
+- `GET /api/platform/wix/sites` -> siti reali dell'account (`ListWixSites`);
+- `GET /api/platform/wix/business` -> snapshot commerciale (ricavi, ordini,
+  scontrino medio, catalogo, contatti, sito, generato il);
+- `POST /api/platform/wix/products` -> creazione prodotto in catalogo.
+
+**UI** (`platform/src/pages/Wix.tsx`): pannello "Business del sito" con KPI
+reali, catalogo prodotti (con immagini e prezzi reali), ordini recenti e form
+"Crea un prodotto"; pannelli superflui rimossi (probe REST con endpoint
+obsoleti, "Insights" basato su euristiche sui nomi dei tool). Dopo la creazione
+il catalogo viene ricaricato: Wix indicizza il nuovo prodotto con qualche
+secondo di ritardo.
+
+**Guida passo-passo**: nuova pagina `/guida` (`platform/src/pages/Guida.tsx`,
+voce di menu "Guida") con i 7 passaggi della piattaforma — idea, sito, Wix,
+business, automazioni, pagamenti, catalogo — ognuno con le azioni concrete e
+il link diretto alla sezione; sezione "Se qualcosa non funziona" in fondo.
+Versione cartacea in `docs/guida-passo-passo.md` (stessi contenuti, piu' mappa
+rapida e troubleshooting tabellare).
+
+**Verifiche live (12/11/2026)**:
+- `GET /api/platform/wix` 200 -> collegato, 32 tool, sito "Aethersy" rilevato;
+- `GET /api/platform/wix/sites` 200 -> 1 sito reale;
+- `GET /api/platform/wix/business` 200 -> 9 prodotti (prezzo e immagine reali:
+  "Certificato Abbonato Pro" 299), 1 contatto, 0 ordini;
+- `POST /api/platform/wix/products` 200 -> prodotto creato davvero in catalogo
+  (9 -> 10), poi rimosso via API reale (10 -> 9): catalogo lasciato com'era;
+- QA visivo `qa-wix-business-ui.mjs` -> **16/16** (KPI, catalogo con immagini
+  reali, creazione prodotto dalla UI, incremento conteggio, pulizia finale),
+  0 errori console, 0 richieste fallite;
+- QA visivo `qa-guida-ui.mjs` -> **14/14** (7 passaggi, link, navigazione verso
+  "Realizza la tua idea"), 0 errori console, 0 richieste fallite.
+
+**Stato**: `DONE`.
 
 ### Verifica di regressione (11/11/2026)
 

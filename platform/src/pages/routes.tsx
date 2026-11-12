@@ -47,6 +47,7 @@ const Connectors = lazy(() => import("./Connectors"));
 const Research = lazy(() => import("./Research"));
 const Specialists = lazy(() => import("./Specialists"));
 const Idea = lazy(() => import("./Idea"));
+const Guida = lazy(() => import("./Guida"));
 
 export interface RouteSpec {
   path: string;
@@ -62,6 +63,13 @@ export const APP_ROUTES: RouteSpec[] = [
     title: "Home",
     description: "Polso dell'attività: balance, aree dell'attività e feed recente.",
     component: Pulse,
+  },
+  {
+    path: "guida",
+    title: "Guida passo-passo",
+    description:
+      "Il percorso completo della piattaforma in sette passaggi: idea, sito, Wix, business, automazioni, pagamenti, catalogo.",
+    component: Guida,
   },
   {
     path: "idea",

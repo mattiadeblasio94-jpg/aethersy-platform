@@ -460,6 +460,44 @@ export interface WixTool {
   inputSchema?: unknown;
 }
 
+export interface WixSite {
+  id: string;
+  name: string;
+}
+
+export interface WixBusinessSnapshot {
+  siteId: string;
+  generatedAt: string;
+  statuses: { orders: number; products: number; contacts: number };
+  ordersCount: number;
+  productsCount: number;
+  contactsCount: number;
+  revenue: number;
+  averageOrderValue: number;
+  currency: string | null;
+  orders: {
+    id: string | null;
+    number: string | null;
+    status: string | null;
+    createdDate: string | null;
+    total: string | null;
+    currency: string | null;
+    customer: string | null;
+    items: { name: string | null; quantity: number | null; price: string | null }[];
+  }[];
+  products: {
+    id: string | null;
+    name: string | null;
+    slug: string | null;
+    productType: string | null;
+    visible: boolean | null;
+    price: string | null;
+    currency: string | null;
+    availability: string | null;
+    imageUrl: string | null;
+  }[];
+}
+
 export interface WixStatus {
   connected: boolean;
   mcp: {
@@ -470,10 +508,11 @@ export interface WixStatus {
     summary: { total: number; names: string[]; groups: { key: string; label: string; count: number }[] };
     error: string | null;
   };
-  rest: {
-    configured: boolean;
-    siteId: string | null;
-    checks: { name: string; path: string; status: number; detail: string }[];
+  site: {
+    id: string | null;
+    name: string | null;
+    source: "configured" | "discovered";
+    sites: WixSite[];
   };
   hint: string | null;
 }
@@ -606,6 +645,30 @@ export const platformApi = {
         tools: { name: string; content: unknown; error: string | null }[];
       }[];
     }>("/api/platform/wix/insights"),
+  /** Siti reali dell'account Wix collegato. */
+  listWixSites: () =>
+    http.get<{ sites: WixSite[]; siteId: string | null; source: "configured" | "discovered" }>(
+      "/api/platform/wix/sites",
+    ),
+  /** Snapshot commerciale reale: ordini, ricavi, catalogo, contatti. */
+  getWixBusiness: () =>
+    http.get<{
+      snapshot: WixBusinessSnapshot;
+      sites: WixSite[];
+      source: "configured" | "discovered";
+    }>("/api/platform/wix/business"),
+  /** Crea un prodotto nel catalogo del sito Wix collegato. */
+  createWixProduct: (input: {
+    name: string;
+    description?: string;
+    price: number;
+    currency?: string;
+    productType?: "PHYSICAL" | "DIGITAL" | "SERVICE";
+  }) =>
+    http.post<{
+      ok: true;
+      product: { created: boolean; status: number; id: string | null; name: string | null; url: string | null };
+    }>("/api/platform/wix/products", input),
   /** Scollega l'account Wix (revoca la credenziale cifrata). */
   disconnectWix: () => http.post<{ ok: boolean; connected: boolean }>("/api/platform/wix/disconnect", {}),
 

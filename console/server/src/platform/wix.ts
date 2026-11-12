@@ -454,50 +454,6 @@ export async function wixCallTool(
   };
 }
 
-export interface WixRestProbe {
-  configured: boolean;
-  siteId: string | null;
-  checks: { name: string; path: string; status: number; detail: string }[];
-}
-
-export async function wixRestProbe(): Promise<WixRestProbe> {
-  const token = config.wixApiToken;
-  const siteId = config.wixSiteId || null;
-  if (!token) {
-    return { configured: false, siteId, checks: [] };
-  }
-  const targets = siteId
-    ? [
-        { name: "blog", path: `blog/v3/sites/${siteId}/posts` },
-        { name: "site-info", path: `site-info/v3/sites/${siteId}/site` },
-        { name: "products", path: `ecom/v1/sites/${siteId}/products` },
-      ]
-    : [{ name: "blog", path: "blog/v3/posts" }];
-  const checks: WixRestProbe["checks"] = [];
-  for (const target of targets) {
-    try {
-      const response = await fetch(`${config.wixApiBase}/${target.path}`, {
-        headers: { Authorization: token, Accept: "application/json" },
-      });
-      const text = await response.text();
-      checks.push({
-        name: target.name,
-        path: target.path,
-        status: response.status,
-        detail: text.slice(0, 160),
-      });
-    } catch (err) {
-      checks.push({
-        name: target.name,
-        path: target.path,
-        status: 0,
-        detail: (err as Error).message,
-      });
-    }
-  }
-  return { configured: true, siteId, checks };
-}
-
 export function wixToolSummary(tools: McpTool[]): {
   total: number;
   names: string[];

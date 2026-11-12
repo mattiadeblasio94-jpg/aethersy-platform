@@ -178,7 +178,6 @@ services:
       - WIX_MCP_CLIENT_ID=${WIX_MCP_CLIENT_ID:-}
       - WIX_MCP_CLIENT_SECRET=${WIX_MCP_CLIENT_SECRET:-}
       - WIX_MCP_SCOPE=${WIX_MCP_SCOPE:-offline_access}
-      - WIX_API_TOKEN=${WIX_API_TOKEN:-}
       - WIX_SITE_ID=${WIX_SITE_ID:-}
       # Notifica di deploy: versione e commit finiscono nella notifica in-app
       # e nel messaggio Slack generati all'avvio del BFF.

@@ -15,20 +15,28 @@ import {
   wixExchangeCode,
   wixListTools,
   wixRedirectUri,
-  wixRestProbe,
   wixStateCookieValue,
   wixToolSummary,
   wixInsights,
   type McpTool,
 } from "./wix.js";
+import {
+  resolveWixSite,
+  wixBusinessSnapshot,
+  wixCreateProduct,
+  type WixProductDraft,
+} from "./wix-business.js";
 
 // Rotte dell'integrazione Wix.
 //
 //   GET  /api/platform/wix              -> stato reale (collegato, tool, REST)
 //   GET  /api/platform/wix/connect      -> avvia il login OAuth (DCR + PKCE)
 //   GET  /api/platform/wix/callback     -> ritorno dal provider: scambio token
+//   GET  /api/platform/wix/sites        -> siti reali dell'account collegato
+//   GET  /api/platform/wix/business     -> snapshot commerciale (ordini, catalogo)
 //   GET  /api/platform/wix/tools        -> catalogo tool reali del server MCP
 //   POST /api/platform/wix/tools/:name  -> esegue un tool Wix
+//   POST /api/platform/wix/products     -> crea un prodotto in catalogo
 //   POST /api/platform/wix/disconnect   -> scollega (revoca la credenziale)
 //
 // I token OAuth vivono cifrati nel database del tenant: il frontend vede solo
@@ -79,11 +87,29 @@ export async function registerWixRoutes(app: FastifyInstance): Promise<void> {
 
     const tokens = await loadWixTokens(tenant.tenantId);
     const connected = Boolean(tokens?.access_token);
-    const rest = await wixRestProbe();
 
     let tools: McpTool[] = [];
     let toolsError: string | null = null;
+    let site: {
+      id: string | null;
+      name: string | null;
+      source: "configured" | "discovered";
+      sites: { id: string; name: string }[];
+    } = { id: config.wixSiteId || null, name: null, source: "configured", sites: [] };
     if (connected) {
+      try {
+        const token = await ensureWixAccessToken(tenant.tenantId);
+        const resolution = await resolveWixSite(token);
+        const match = resolution.sites.find((item) => item.id === resolution.siteId);
+        site = {
+          id: resolution.siteId,
+          name: match?.name ?? null,
+          source: resolution.source,
+          sites: resolution.sites,
+        };
+      } catch (err) {
+        toolsError = (err as Error).message;
+      }
       try {
         tools = await cachedTools(tenant.tenantId);
       } catch (err) {
@@ -101,7 +127,7 @@ export async function registerWixRoutes(app: FastifyInstance): Promise<void> {
         summary: wixToolSummary(tools),
         error: toolsError,
       },
-      rest,
+      site,
       connectedAt: tokens ? null : null,
       hint: connected
         ? toolsError
@@ -225,6 +251,117 @@ export async function registerWixRoutes(app: FastifyInstance): Promise<void> {
     } catch (err) {
       return reply.code(502).send({
         code: "WIX_TOOLS_FAILED",
+        message: (err as Error).message,
+      });
+    }
+  });
+
+  app.get("/api/platform/wix/sites", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+
+    const tokens = await loadWixTokens(tenant.tenantId);
+    if (!tokens?.access_token) {
+      return reply.code(409).send({
+        code: "WIX_NOT_CONNECTED",
+        message: "Account Wix non collegato: autorizza l'accesso per vedere i siti.",
+      });
+    }
+    try {
+      const token = await ensureWixAccessToken(tenant.tenantId);
+      const resolution = await resolveWixSite(token);
+      return { sites: resolution.sites, siteId: resolution.siteId, source: resolution.source };
+    } catch (err) {
+      return reply.code(502).send({
+        code: "WIX_SITES_FAILED",
+        message: (err as Error).message,
+      });
+    }
+  });
+
+  app.get("/api/platform/wix/business", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+
+    const tokens = await loadWixTokens(tenant.tenantId);
+    if (!tokens?.access_token) {
+      return reply.code(409).send({
+        code: "WIX_NOT_CONNECTED",
+        message: "Account Wix non collegato: autorizza l'accesso per leggere i dati.",
+      });
+    }
+    try {
+      const token = await ensureWixAccessToken(tenant.tenantId);
+      const resolution = await resolveWixSite(token);
+      if (!resolution.siteId) {
+        return reply.code(404).send({
+          code: "WIX_SITE_NOT_FOUND",
+          message: "Nessun sito Wix trovato per questo account: collega un account con almeno un sito.",
+        });
+      }
+      const snapshot = await wixBusinessSnapshot(token, resolution.siteId);
+      return { snapshot, sites: resolution.sites, source: resolution.source };
+    } catch (err) {
+      return reply.code(502).send({
+        code: "WIX_BUSINESS_FAILED",
+        message: (err as Error).message,
+      });
+    }
+  });
+
+  app.post("/api/platform/wix/products", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+
+    const body = (request.body ?? {}) as Partial<WixProductDraft>;
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    const price = typeof body.price === "number" ? body.price : Number.parseFloat(String(body.price ?? ""));
+    if (!name || name.length < 2) {
+      return reply.code(400).send({
+        code: "WIX_PRODUCT_NAME_REQUIRED",
+        message: "Indica il nome del prodotto (almeno 2 caratteri).",
+      });
+    }
+    if (!Number.isFinite(price) || price <= 0) {
+      return reply.code(400).send({
+        code: "WIX_PRODUCT_PRICE_REQUIRED",
+        message: "Indica un prezzo maggiore di zero.",
+      });
+    }
+
+    const tokens = await loadWixTokens(tenant.tenantId);
+    if (!tokens?.access_token) {
+      return reply.code(409).send({
+        code: "WIX_NOT_CONNECTED",
+        message: "Account Wix non collegato: autorizza l'accesso per gestire il catalogo.",
+      });
+    }
+    try {
+      const token = await ensureWixAccessToken(tenant.tenantId);
+      const resolution = await resolveWixSite(token);
+      if (!resolution.siteId) {
+        return reply.code(404).send({
+          code: "WIX_SITE_NOT_FOUND",
+          message: "Nessun sito Wix trovato per questo account.",
+        });
+      }
+      const result = await wixCreateProduct(token, resolution.siteId, {
+        name,
+        description: typeof body.description === "string" ? body.description.trim() : undefined,
+        price,
+        currency: typeof body.currency === "string" ? body.currency : undefined,
+        productType: body.productType === "DIGITAL" ? "DIGITAL" : "PHYSICAL",
+      });
+      if (!result.created) {
+        return reply.code(502).send({
+          code: "WIX_PRODUCT_FAILED",
+          message: result.detail ?? `Wix ha rifiutato la creazione del prodotto (HTTP ${result.status}).`,
+        });
+      }
+      return { ok: true, product: result };
+    } catch (err) {
+      return reply.code(502).send({
+        code: "WIX_PRODUCT_FAILED",
         message: (err as Error).message,
       });
     }
