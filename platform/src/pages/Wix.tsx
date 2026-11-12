@@ -58,6 +58,12 @@ export default function Wix() {
     enabled: Boolean(status.data?.connected),
   });
 
+  const insights = useQuery({
+    queryKey: ["real", "wix", "insights"],
+    queryFn: () => platformApi.getWixInsights(),
+    enabled: Boolean(status.data?.connected),
+  });
+
   const disconnect = useMutation({
     mutationFn: () => platformApi.disconnectWix(),
     onSuccess: () => {
@@ -324,6 +330,53 @@ export default function Wix() {
                 Scegli un tool dall'elenco per eseguirlo con argomenti reali: la chiamata va
                 direttamente al server MCP di Wix.
               </p>
+            )}
+          </Card>
+
+          <Card
+            header={
+              <>
+                <h2 className="text-base font-semibold text-text-primary">Insights commerciali</h2>
+                <span className="text-xs text-text-muted">
+                  {(insights.data?.groups ?? []).length} famiglie
+                </span>
+              </>
+            }
+            bodyClassName="p-0"
+          >
+            {insights.isLoading ? (
+              <div className="p-5">
+                <Skeleton lines={3} />
+              </div>
+            ) : (insights.data?.groups ?? []).length === 0 ? (
+              <div className="p-5">
+                <EmptyState
+                  icon={<RefreshCw className="h-5 w-5" aria-hidden="true" />}
+                  title="Nessun dato commerciale disponibile"
+                  description="Gli snapshot (ricavi, ordini, catalogo, clienti, traffico) vengono letti dai tool di sola lettura del server MCP: compariranno qui dopo il collegamento."
+                />
+              </div>
+            ) : (
+              <ul className="divide-y divide-secondary/10">
+                {(insights.data?.groups ?? []).map((group) => (
+                  <li key={group.key} className="flex flex-col gap-2 px-5 py-3">
+                    <span className="text-sm font-medium text-text-primary">{group.label}</span>
+                    {group.tools.map((row) => (
+                      <details key={row.name} className="rounded-lg border border-secondary/10 px-3 py-2">
+                        <summary className="cursor-pointer font-mono text-xs text-text-secondary">
+                          {row.name}
+                        </summary>
+                        <pre className="mt-2 max-h-56 overflow-auto text-xs text-text-muted">
+                          {row.error ??
+                            (typeof row.content === "string"
+                              ? row.content
+                              : JSON.stringify(row.content, null, 2))}
+                        </pre>
+                      </details>
+                    ))}
+                  </li>
+                ))}
+              </ul>
             )}
           </Card>
 

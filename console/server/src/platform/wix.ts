@@ -517,4 +517,59 @@ export function wixToolSummary(tools: McpTool[]): {
   };
 }
 
+const WRITE_HINTS = /(create|update|delete|remove|publish|add|set|post|insert|send|revoke|disconnect|cancel|refund)/i;
+const READ_HINTS = /(list|get|fetch|query|read|report|stats|statistic|analytics|search|find|show|export|retrieve)/i;
+
+export interface WixInsightGroup {
+  key: string;
+  label: string;
+  tools: { name: string; content: unknown; error: string | null }[];
+}
+
+/** Famiglie di tool che alimentano la parte commerciale della piattaforma. */
+const INSIGHT_FAMILIES: { key: string; label: string; match: RegExp }[] = [
+  { key: "revenue", label: "Ricavi e vendite", match: /(revenue|sales|order|payment|checkout|invoice|transaction)/i },
+  { key: "catalog", label: "Catalogo prodotti", match: /(product|catalog|collection|inventory|stock|price)/i },
+  { key: "customers", label: "Clienti", match: /(customer|contact|lead|subscriber|member)/i },
+  { key: "traffic", label: "Traffico e analytics", match: /(analytic|traffic|page.?view|visitor|conversion|session|activity|report)/i },
+  { key: "content", label: "Contenuti", match: /(blog|post|page|media|content)/i },
+];
+
+/**
+ * Estrae gli snapshot commerciali dai tool di sola lettura del server MCP.
+ *
+ * Il catalogo dei tool cambia con l'account e con i prodotti Wix attivi: qui
+ * si selezionano i tool che leggono dati (e si escludono quelli che scrivono),
+ * poi si chiamano senza argomenti per ottenere i dati reali.
+ */
+export async function wixInsights(
+  accessToken: string,
+  tools: McpTool[],
+): Promise<WixInsightGroup[]> {
+  const readOnly = tools.filter((tool) => {
+    if (WRITE_HINTS.test(tool.name)) return false;
+    return READ_HINTS.test(tool.name) || INSIGHT_FAMILIES.some((family) => family.match.test(tool.name));
+  });
+  const groups: WixInsightGroup[] = [];
+  for (const family of INSIGHT_FAMILIES) {
+    const matches = readOnly.filter((tool) => family.match.test(tool.name)).slice(0, 3);
+    if (!matches.length) continue;
+    const rows: WixInsightGroup["tools"] = [];
+    for (const tool of matches) {
+      try {
+        const result = await wixCallTool(accessToken, tool.name, {});
+        rows.push({
+          name: tool.name,
+          content: result.ok ? result.content : null,
+          error: result.ok ? null : (result.error ?? "tool non riuscito"),
+        });
+      } catch (err) {
+        rows.push({ name: tool.name, content: null, error: (err as Error).message });
+      }
+    }
+    groups.push({ key: family.key, label: family.label, tools: rows });
+  }
+  return groups;
+}
+
 export { MCP_PROVIDER_ID };

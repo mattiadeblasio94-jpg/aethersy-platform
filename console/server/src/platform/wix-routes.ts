@@ -18,6 +18,7 @@ import {
   wixRestProbe,
   wixStateCookieValue,
   wixToolSummary,
+  wixInsights,
   type McpTool,
 } from "./wix.js";
 
@@ -224,6 +225,30 @@ export async function registerWixRoutes(app: FastifyInstance): Promise<void> {
     } catch (err) {
       return reply.code(502).send({
         code: "WIX_TOOLS_FAILED",
+        message: (err as Error).message,
+      });
+    }
+  });
+
+  app.get("/api/platform/wix/insights", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+
+    const tokens = await loadWixTokens(tenant.tenantId);
+    if (!tokens?.access_token) {
+      return reply.code(409).send({
+        code: "WIX_NOT_CONNECTED",
+        message: "Account Wix non collegato: autorizza l'accesso per leggere i dati.",
+      });
+    }
+    try {
+      const token = await ensureWixAccessToken(tenant.tenantId);
+      const tools = await cachedTools(tenant.tenantId);
+      const groups = await wixInsights(token, tools);
+      return { groups };
+    } catch (err) {
+      return reply.code(502).send({
+        code: "WIX_INSIGHTS_FAILED",
         message: (err as Error).message,
       });
     }

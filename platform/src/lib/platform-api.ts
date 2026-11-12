@@ -597,6 +597,15 @@ export const platformApi = {
       `/api/platform/wix/tools/${encodeURIComponent(name)}`,
       { arguments: args },
     ),
+  /** Snapshot commerciali reali (ricavi, catalogo, clienti, traffico). */
+  getWixInsights: () =>
+    http.get<{
+      groups: {
+        key: string;
+        label: string;
+        tools: { name: string; content: unknown; error: string | null }[];
+      }[];
+    }>("/api/platform/wix/insights"),
   /** Scollega l'account Wix (revoca la credenziale cifrata). */
   disconnectWix: () => http.post<{ ok: boolean; connected: boolean }>("/api/platform/wix/disconnect", {}),
 
