@@ -100,6 +100,7 @@ export const Drawer = memo(function Drawer({ variant }: DrawerProps) {
           { to: "/outreach", label: "Outreach", icon: Send },
           { to: "/social-media", label: "Social Media", icon: Share2, badge: connectedPlatforms },
           { to: "/connectors", label: "Connettori", icon: Plug },
+          { to: "/wix", label: "Wix", icon: Globe },
           { to: "/tasks", label: "Task", icon: Users, badge: activeTasks },
         ],
       },

@@ -119,6 +119,24 @@ export const config = {
   telegramRedirectUri:
     (process.env.TELEGRAM_REDIRECT_URI ?? "https://platform.aethersy.online/api/auth/social/telegram/callback").replace(/\/$/, ""),
 
+  // --- Wix (MCP + REST) -----------------------------------------------------
+  // Server MCP ufficiale di Wix: espone le API del sito (e-commerce, blog,
+  // analytics, pagine, domini) come tool. Collegamento OAuth 2.1 con DCR+PKCE.
+  wixMcpUrl: (process.env.WIX_MCP_URL ?? "https://mcp.wix.com/mcp").replace(/\/$/, ""),
+  wixMcpAuthorizeUrl: (process.env.WIX_MCP_AUTHORIZE_URL ?? "https://mcp.wix.com/authorize").replace(/\/$/, ""),
+  wixMcpTokenUrl: (process.env.WIX_MCP_TOKEN_URL ?? "https://mcp.wix.com/token").replace(/\/$/, ""),
+  wixMcpRegisterUrl: (process.env.WIX_MCP_REGISTER_URL ?? "https://mcp.wix.com/register").replace(/\/$/, ""),
+  // Client MCP pre-registrato (opzionale): se assente la piattaforma registra
+  // un client dinamico al primo collegamento.
+  wixMcpClientId: process.env.WIX_MCP_CLIENT_ID ?? "",
+  wixMcpClientSecret: process.env.WIX_MCP_CLIENT_SECRET ?? "",
+  wixMcpScope: process.env.WIX_MCP_SCOPE ?? "offline_access",
+  // Token REST Wix (istanza/account) per le API REST dirette. Vive solo nel
+  // .env del VPS: nessun segreto nel repo.
+  wixApiToken: process.env.WIX_API_TOKEN ?? "",
+  wixSiteId: process.env.WIX_SITE_ID ?? "",
+  wixApiBase: (process.env.WIX_API_BASE ?? "https://www.wixapis.com").replace(/\/$/, ""),
+
   // Canale di notifica outbound (P0.6): webhook Slack a livello di stack.
   // Usato come fallback quando il tenant non ha un canale dedicato salvato in
   // `pipeline.integration_credential`. Se assente, le notifiche sono no-op.

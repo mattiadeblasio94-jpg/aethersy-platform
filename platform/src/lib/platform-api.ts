@@ -453,6 +453,31 @@ export interface IdeaPlan {
   site: { slug: string; url: string; pages: number } | null;
 }
 
+export interface WixTool {
+  name: string;
+  title?: string;
+  description?: string;
+  inputSchema?: unknown;
+}
+
+export interface WixStatus {
+  connected: boolean;
+  mcp: {
+    server: string;
+    scope: string;
+    redirectUri: string;
+    toolCount: number;
+    summary: { total: number; names: string[]; groups: { key: string; label: string; count: number }[] };
+    error: string | null;
+  };
+  rest: {
+    configured: boolean;
+    siteId: string | null;
+    checks: { name: string; path: string; status: number; detail: string }[];
+  };
+  hint: string | null;
+}
+
 export const platformApi = {
   // --- Sessione (auth cookie Console) --------------------------------------
   getSession: () => http.get<SessionUser>("/api/auth/session"),
@@ -557,6 +582,23 @@ export const platformApi = {
   /** Ritira un sito pubblicato. */
   unpublishSite: (slug: string) =>
     http.post<{ ok: boolean }>(`/api/platform/sites/${encodeURIComponent(slug)}/unpublish`, {}),
+
+  // --- Wix (server MCP + REST) ----------------------------------------------
+  /** Stato reale del collegamento Wix del tenant. */
+  getWixStatus: () => http.get<WixStatus>("/api/platform/wix"),
+  /** Catalogo dei tool esposti dal server MCP di Wix. */
+  listWixTools: () =>
+    http.get<{ tools: WixTool[]; summary: { total: number; groups: { key: string; label: string; count: number }[] } }>(
+      "/api/platform/wix/tools",
+    ),
+  /** Esegue un tool Wix con gli argomenti indicati. */
+  callWixTool: (name: string, args: Record<string, unknown>) =>
+    http.post<{ ok: boolean; tool: string; content: unknown; isError?: boolean }>(
+      `/api/platform/wix/tools/${encodeURIComponent(name)}`,
+      { arguments: args },
+    ),
+  /** Scollega l'account Wix (revoca la credenziale cifrata). */
+  disconnectWix: () => http.post<{ ok: boolean; connected: boolean }>("/api/platform/wix/disconnect", {}),
 
   // --- Libreria -------------------------------------------------------------
   getLibrary: () => http.get<LibraryData>("/api/platform/library"),

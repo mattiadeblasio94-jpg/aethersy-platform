@@ -1679,6 +1679,52 @@ canonical e link interni con prefisso `/s/` corretti.
 features e CTA, tema chiaro su brand chiaro con testo leggibile, layout
 mobile verificato (menu hamburger, colonne impilate, testo e CTA leggibili).
 
+### Fase 33 — Integrazione Wix: server MCP + API REST (12/11/2026)
+
+**Problema**: la piattaforma sapeva produrre siti e contenuti, ma non poteva
+usare il proprio store Wix (e-commerce, blog, analytics, domini) per vendere,
+misurare e scalare.
+
+**Modifiche**:
+- `console/server/src/platform/wix.ts` — client Wix in due accessi:
+  - **server MCP** (`https://mcp.wix.com/mcp`): registrazione dinamica del
+    client (DCR su `/register`), OAuth 2.1 con PKCE (`/authorize` -> `/token`),
+    sessione JSON-RPC (initialize, `tools/list`, `tools/call`) con supporto
+    risposta SSE e `mcp-session-id`, rinnovo del token, cifratura dei token
+    (AES-256-GCM) nel database del tenant;
+  - **API REST** (`https://www.wixapis.com`): token di istanza/account e site
+    id, con probe di availability per capire cosa e' abilitato.
+- `console/server/src/platform/wix-routes.ts` — `GET /api/platform/wix` (stato
+  reale: collegamento, tool per famiglia, probe REST), `GET
+  /api/platform/wix/connect` (DCR + redirect OAuth), `GET
+  /api/platform/wix/callback` (scambio del codice e salvataggio cifrato),
+  `GET /api/platform/wix/tools` (catalogo tool reali), `POST
+  /api/platform/wix/tools/:name` (esecuzione di un tool con argomenti reali),
+  `POST /api/platform/wix/disconnect`.
+- `console/server/src/config.ts`, `docker-compose.yml`,
+  `docker-compose-vps.yml`, `.env.example` — parametri `WIX_MCP_*`,
+  `WIX_API_TOKEN`, `WIX_SITE_ID` (nessun segreto nel repo: il token vive solo
+  nel `.env` del VPS).
+- `platform/src/pages/Wix.tsx` + `platform/src/lib/platform-api.ts` +
+  `platform/src/pages/routes.tsx` + `platform/src/components/layout/Drawer.tsx`
+  — pagina "Wix": stato del collegamento, catalogo dei tool con ricerca,
+  esecuzione con argomenti JSON e risultato reale, probe REST, rimozione.
+
+**Accertamenti sul token fornito**: il token e' un *instance site token* Wix
+(JWT firmato, `tenant.type=account`): le API REST rispondono 404 per le
+rotte non coperte e 403 quando manca lo scope del connettore, quindi non
+permette di elencare i siti o l'e-commerce dell'account. Il percorso completo
+(e-commerce, blog, analytics, pagine, domini) passa dal **server MCP**, che
+richiede l'autorizzazione OAuth del titolare dell'account: la piattaforma
+registra il client, l'utente autorizza una volta, i token restano cifrati.
+
+**Esito**: build OK; deploy console+platform healthy; live: `GET
+/api/platform/wix` 200 (collegamento non ancora autorizzato, probe REST con il
+token di istanza), `GET /api/platform/wix/connect` 302 verso
+`mcp.wix.com/authorize` con `client_id` registrato dinamicamente e PKCE
+S256, `/api/platform/wix/tools` 409 con messaggio esplicito quando l'account
+non e' collegato, pagina `/wix` 200.
+
 ### Verifica di regressione (11/11/2026)
 
 - API: `qa-all-services.mjs` -> **73/73 controlli superati, 0 falliti**

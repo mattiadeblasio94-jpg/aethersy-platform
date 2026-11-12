@@ -21,6 +21,7 @@ const SocialPlatformDetail = lazy(() => import("./SocialPlatformDetail"));
 const Tasks = lazy(() => import("./Tasks"));
 const Outreach = lazy(() => import("./Outreach"));
 const Website = lazy(() => import("./Website"));
+const Wix = lazy(() => import("./Wix"));
 const Ads = lazy(() => import("./Ads"));
 const Products = lazy(() => import("./Products"));
 const Analytics = lazy(() => import("./Analytics"));
@@ -163,6 +164,12 @@ export const APP_ROUTES: RouteSpec[] = [
     title: "Sito Web",
     description: "Editor delle pagine, landing e catalogo prodotto collegato al brand.",
     component: Website,
+  },
+  {
+    path: "wix",
+    title: "Wix",
+    description: "Collegamento al server MCP di Wix: e-commerce, blog, analytics e domini del sito.",
+    component: Wix,
   },
   {
     path: "ads",

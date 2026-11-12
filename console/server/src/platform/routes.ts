@@ -40,6 +40,10 @@ export async function registerPlatformRoutes(app: FastifyInstance): Promise<void
   const { registerPublicSiteRoutes } = await import("./public-site-routes.js");
   await registerPublicSiteRoutes(app);
 
+  // Integrazione Wix (MCP + REST): il tenant collega il proprio account Wix.
+  const { registerWixRoutes } = await import("./wix-routes.js");
+  await registerWixRoutes(app);
+
   // ---------------------------------------------------------- catalogo ----
   app.get("/api/platform/catalog", async (request, reply) => {
     const tenant = await requireMeteredTenant(request, reply);
