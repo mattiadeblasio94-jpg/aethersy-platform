@@ -15,19 +15,20 @@ FROM python:3.12-slim-bookworm AS base
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
     OPENJARVIS_HOME=/opt/openjarvis
 
-# Dipendenze di sistema: audio (sounddevice), compilazione dei pacchetti.
+# Dipendenze di sistema: audio (sounddevice), compilazione, git.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       build-essential curl libsndfile1 portaudio19-dev git \
+       build-essential curl git libsndfile1 portaudio19-dev \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /opt/openjarvis
+# uv: gestore ambienti Python usato anche da OpenJarvis.
+RUN pip install --no-cache-dir uv==0.5.11
 
-# Dipendenze Python: core OpenJarvis + extras desktop/speech (faster-whisper).
-COPY jarvis/requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt
+WORKDIR /opt/openjarvis
 
 # Codice di OpenJarvis: clone del fork al commit pinnato (nessun "latest").
 ARG OPENJARVIS_REPO=https://github.com/mattiadeblasio94-jpg/OpenJarvis.git
@@ -43,12 +44,19 @@ COPY jarvis/config/config.toml /opt/openjarvis/config.toml
 COPY jarvis/entrypoint.sh /usr/local/bin/jarvis-entrypoint
 RUN chmod +x /usr/local/bin/jarvis-entrypoint
 
+# Ambiente Python precompilato: le dipendenze si risolvono in build, non a runtime.
+#   --extra server  -> API FastAPI/uvicorn
+#   --extra desktop -> faster-whisper (STT) + sounddevice
+RUN uv sync --project /opt/openjarvis --extra server --extra desktop --no-dev \
+    && uv pip install --project /opt/openjarvis httpx==0.27.2
+
 ENV OPENJARVIS_CONFIG=/opt/openjarvis/config.toml \
-    OPENJARVIS_SKILLS_DIR=/opt/openjarvis/skills/aethersy-plugins
+    OPENJARVIS_SKILLS_DIR=/opt/openjarvis/skills/aethersy-plugins \
+    UV_PROJECT_ENVIRONMENT=/opt/openjarvis/.venv
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=180s --retries=3 \
   CMD curl -fsS http://127.0.0.1:8000/v1/speech/health || exit 1
 
 ENTRYPOINT ["/usr/local/bin/jarvis-entrypoint"]
