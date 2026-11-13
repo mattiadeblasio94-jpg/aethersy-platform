@@ -67,7 +67,7 @@ ssh "${HOST}" "cd '${REMOTE_DIR}' && docker compose -f jarvis/docker-compose.jar
 
 echo "==> Verifica health"
 ssh "${HOST}" "for i in \$(seq 1 60); do
-  if docker exec aethersy-jarvis curl -fsS http://127.0.0.1:8000/v1/speech/health >/dev/null 2>&1; then
+  if docker exec aethersy-jarvis sh -c 'curl -fsS -H "Authorization: Bearer ${OPENJARVIS_API_KEY:-}" http://127.0.0.1:8000/v1/speech/health' >/dev/null 2>&1; then
     echo 'jarvis: healthy'; exit 0
   fi
   sleep 5
