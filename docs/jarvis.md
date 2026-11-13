@@ -125,6 +125,12 @@ Dettagli dell'hardening del VPS dedicato:
 - swap 2 GB (`vm.swappiness=10`), `unattended-upgrades` attivo, log Docker
   ruotati (`json-file`, 10 MB x 3).
 
+Backup dello stato locale del server (volume `jarvis_state`: knowledge.db,
+tracce, config) con `scripts/backup-jarvis.sh`: cron giornaliero alle 03:17
+sul VPS dedicato, 7 copie in `/home/deploy/backups/jarvis/`. Il vault vero e
+proprio (memoria markdown del tenant) resta sulla piattaforma e ha il suo
+backup.
+
 ## 6. Sicurezza
 
 - Segreti solo in `.env` (mai nel repository, mai nell'immagine).

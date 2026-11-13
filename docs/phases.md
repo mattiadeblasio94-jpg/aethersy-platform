@@ -1947,7 +1947,12 @@ riutilizzato da zero per **solo Jarvis**; DNS locale ripulito dagli alias
 - QA UI `scripts/qa-jarvis-ui.mjs` -> **4/4** (badge "Jarvis online", invio
   reale, risposta renderizzata, conteggio del vault del chiamante corretto);
 - login del tool dentro il container -> 200; `aethersy_memory` -> `(200, [])`
-  per il tenant di servizio (il vault del chiamante e' iniettato dal BFF).
+  per il tenant di servizio (il vault del chiamante e' iniettato dal BFF);
+- alias SSH `aethersy-jarvis` (utente `deploy`) aggiunto a `~/.ssh/config`;
+- backup dello stato di Jarvis (`scripts/backup-jarvis.sh`) verificato e
+  schedulato alle 03:17 (7 copie in `/home/deploy/backups/jarvis/`);
+- password dell'account admin piattaforma riallineata a quella dichiarata:
+  il login `mattiadeblasio94@gmail.com` ora risponde 200.
 
 **Stato**: `DONE` — Jarvis in esercizio sul VPS dedicato con HTTPS pubblico;
 la piattaforma (Aruba) chiama il dominio pubblico.
