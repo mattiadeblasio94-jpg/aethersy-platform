@@ -59,11 +59,17 @@ RUN rm -f /opt/openjarvis/uv.lock \
 
 ENV OPENJARVIS_CONFIG=/opt/openjarvis/config.toml \
     OPENJARVIS_SKILLS_DIR=/opt/openjarvis/skills/aethersy-plugins \
+    OPENJARVIS_HOME=/var/lib/openjarvis \
     UV_PROJECT_ENVIRONMENT=/opt/openjarvis/.venv
+
+# Lo stato runtime (config, knowledge.db, tracce) vive FUORI dal sorgente:
+# OpenJarvis rifiuta di scrivere dentro il proprio albero.
+RUN mkdir -p /var/lib/openjarvis
 
 EXPOSE 8000
 
+# Il server OpenJarvis richiede il token (OPENJARVIS_API_KEY) anche sul health.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=180s --retries=3 \
-  CMD curl -fsS http://127.0.0.1:8000/v1/speech/health || exit 1
+  CMD curl -fsS -H "Authorization: Bearer ${OPENJARVIS_API_KEY:-}" http://127.0.0.1:8000/v1/speech/health || exit 1
 
 ENTRYPOINT ["/usr/local/bin/jarvis-entrypoint"]
