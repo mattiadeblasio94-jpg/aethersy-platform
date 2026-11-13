@@ -85,7 +85,7 @@ class AethersyMemoryTool(BaseTool):
                 path = "/api/platform/memory"
                 if query:
                     path += f"?search={str(query).strip()}"
-                status, payload = request(path)
+                status, payload = request(path, method="GET")
                 if status >= 400:
                     raise AethersyError(f"memoria non leggibile (HTTP {status}): {render(payload)}")
                 return ToolResult(
@@ -99,7 +99,7 @@ class AethersyMemoryTool(BaseTool):
                 memory_id = str(kwargs.get("id") or "").strip()
                 if not memory_id:
                     raise AethersyError("action 'get' richiede id")
-                status, payload = request("GET", "/api/platform/memory/graph")
+                status, payload = request("/api/platform/memory/graph", method="GET")
                 if status >= 400:
                     raise AethersyError(f"memoria non leggibile (HTTP {status}): {render(payload)}")
                 nodes = payload.get("nodes", []) if isinstance(payload, dict) else []
@@ -109,7 +109,7 @@ class AethersyMemoryTool(BaseTool):
                 return ToolResult(tool_name=self.tool_id, content=render(node), success=True)
 
             if action == "graph":
-                status, payload = request("GET", "/api/platform/memory/graph")
+                status, payload = request("/api/platform/memory/graph", method="GET")
                 if status >= 400:
                     raise AethersyError(f"memoria non leggibile (HTTP {status}): {render(payload)}")
                 nodes = payload.get("nodes", []) if isinstance(payload, dict) else []
@@ -131,7 +131,7 @@ class AethersyMemoryTool(BaseTool):
                 )
 
             if action == "vault":
-                status, payload = request("GET", "/api/platform/memory/vault")
+                status, payload = request("/api/platform/memory/vault", method="GET")
                 if status >= 400:
                     raise AethersyError(f"vault non leggibile (HTTP {status}): {render(payload)}")
                 files = payload.get("files", []) if isinstance(payload, dict) else []
