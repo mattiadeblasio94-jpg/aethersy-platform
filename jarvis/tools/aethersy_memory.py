@@ -28,6 +28,7 @@ class AethersyMemoryTool(BaseTool):
     tool_id = "aethersy_memory"
     is_local = False
 
+    @property
     def spec(self) -> ToolSpec:
         return ToolSpec(
             name=self.tool_id,
@@ -88,11 +89,20 @@ class AethersyMemoryTool(BaseTool):
                 status, payload = request(path, method="GET")
                 if status >= 400:
                     raise AethersyError(f"memoria non leggibile (HTTP {status}): {render(payload)}")
+                entries = payload if isinstance(payload, list) else []
+                lines = [
+                    "- [{kind}] {title} ({path})".format(
+                        kind=e.get("kind") or "note",
+                        title=e.get("title") or "(senza titolo)",
+                        path=e.get("path") or "",
+                    )
+                    for e in entries
+                ]
                 return ToolResult(
                     tool_name=self.tool_id,
-                    content=render(payload),
+                    content="\n".join(lines) or "Memoria vuota.",
                     success=True,
-                    metadata={"action": action, "count": len(payload) if isinstance(payload, list) else None},
+                    metadata={"action": action, "count": len(entries)},
                 )
 
             if action == "get":

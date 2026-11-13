@@ -162,6 +162,9 @@ export const config = {
   jarvisApiKey: process.env.JARVIS_API_KEY ?? "",
   // Timeout delle chiamate a Jarvis (il modello puo' ragionare a lungo).
   jarvisTimeoutMs: Number(process.env.JARVIS_TIMEOUT_MS ?? 120_000),
+  // Modello di Jarvis richiesto all'API OpenAI-compatibile. Deve essere un id
+  // che il server OpenJarvis conosce (non un alias libero come "jarvis").
+  jarvisModel: process.env.JARVIS_MODEL ?? "nvidia/nemotron-3.5-lightning-30b-a3b",
 
   // Versione e commit del deploy in corso: finiscono nella notifica di
   // deploy che il BFF registra all'avvio e inoltra ai canali configurati.

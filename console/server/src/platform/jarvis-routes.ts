@@ -91,7 +91,7 @@ export async function registerJarvisRoutes(app: FastifyInstance): Promise<void> 
         method: "POST",
         headers: jarvisHeaders(),
         body: JSON.stringify({
-          model: "jarvis",
+          model: config.jarvisModel,
           messages: [
             {
               role: "system",

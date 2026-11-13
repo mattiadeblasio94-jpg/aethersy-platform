@@ -162,6 +162,7 @@ services:
       - JARVIS_BASE_URL=${JARVIS_BASE_URL:-}
       - JARVIS_API_KEY=${JARVIS_API_KEY:-}
       - JARVIS_TIMEOUT_MS=${JARVIS_TIMEOUT_MS:-120000}
+      - JARVIS_MODEL=${JARVIS_MODEL:-nvidia/nemotron-3.5-lightning-30b-a3b}
       - CONSOLE_PUBLIC_URL=${CONSOLE_PUBLIC_URL:-https://console.aethersy.online}
       - CONSOLE_PGHOST=postgres
       - CONSOLE_PGPORT=5432
