@@ -1854,6 +1854,22 @@ fasi 35–40) e `docs/jarvis.md` (architettura, engine, tool/skill, deployment,
 sicurezza, stato). `.env.example` e compose aggiornati con `ADMIN_EMAILS`,
 `JARVIS_BASE_URL`, `JARVIS_API_KEY`, `JARVIS_TIMEOUT_MS`.
 
+
+**Verifiche live (13/11/2026)**:
+- QA API `scripts/qa-fase35.mjs` -> **23/23** (login, flag `isAdmin` nella
+  sessione, pannello admin con KPI/costi-per-utente/per-capacita', memoria con
+  `path` e wiki link estratti, grafo, export vault, update con link
+  ricalcolati, stato Jarvis, errore Wix con codice e hint);
+- QA UI `scripts/qa-fase35-ui.mjs` -> **13/13** (`/admin` con i 4 blocchi,
+  `/jarvis` con input e microfono, `/memoria`, 0 errori console, 0 richieste
+  fallite);
+- esenzione admin verificata sul DB: richiesta AI dell'utente admin ->
+  `usage_event.user_email` popolato, `credits = 0`, costo provider registrato;
+- schema migrato in-place e idempotente: `metering.usage_event.user_email`,
+  `business.memory.path`, `business.memory.links` (colonne verificate su VPS);
+- tenant dell'admin impostato con `plan = 'admin'` (esenzione anche senza lista
+  email).
+
 **Stato**: `DONE` lato piattaforma (build console e platform verificate,
 deploy console+platform eseguito). `BLOCKED` il deploy di Jarvis sul VPS
 dedicato `85.235.151.215`: mancano credenziali SSH (root/ubuntu/deploy con
