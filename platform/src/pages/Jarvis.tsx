@@ -35,7 +35,6 @@ export default function Jarvis() {
   const [recording, setRecording] = useState(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const bottomRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     platformApi
@@ -44,8 +43,13 @@ export default function Jarvis() {
       .catch(() => setStatus({ enabled: false, reachable: false }));
   }, []);
 
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    // Scorre solo il riquadro della conversazione: scrollIntoView sul documento
+    // sposterebbe anche la pagina, nascondendo l'intestazione.
+    const box = scrollRef.current;
+    if (box) box.scrollTop = box.scrollHeight;
   }, [turns, busy]);
 
   async function send(text: string) {
@@ -148,7 +152,7 @@ export default function Jarvis() {
       )}
 
       <Card className="flex min-h-[420px] flex-col gap-4 p-5">
-        <div className="flex-1 space-y-3 overflow-y-auto">
+        <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto">
           {turns.length === 0 && (
             <p className="text-sm text-text-secondary">
               Esempi: "quanti prodotti ci sono nel catalogo?", "aggiungi il prodotto X a 29 euro",
@@ -174,7 +178,6 @@ export default function Jarvis() {
               Jarvis sta lavorando...
             </div>
           )}
-          <div ref={bottomRef} />
         </div>
 
         <div className="flex items-end gap-2">
