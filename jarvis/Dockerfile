@@ -17,7 +17,7 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
-    OPENJARVIS_HOME=/opt/openjarvis
+    OPENJARVIS_HOME=/var/lib/openjarvis
 
 # Dipendenze di sistema: audio (sounddevice), compilazione, git.
 RUN apt-get update \

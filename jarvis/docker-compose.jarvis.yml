@@ -38,6 +38,8 @@ services:
     volumes:
       # Repository della piattaforma: serve al coding agent (aethersy_change).
       - ${AETHERSY_REPO:-/home/deploy/aethersy}:/opt/aethersy-infra
+      # Stato runtime di Jarvis (config, knowledge.db, tracce) persistito.
+      - jarvis_state:/var/lib/openjarvis
     # Nessuna porta pubblica: il traffico passa dalla rete Docker interna.
     expose:
       - "8000"
@@ -69,5 +71,6 @@ networks:
     name: ${PLATFORM_NETWORK:-aethersy_aethersy}
 
 volumes:
+  jarvis_state:
   caddy_data:
   caddy_config:

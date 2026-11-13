@@ -8,5 +8,7 @@ set -euo pipefail
 JARVIS_HOST="${JARVIS_HOST:-0.0.0.0}"
 JARVIS_PORT="${JARVIS_PORT:-8000}"
 
+mkdir -p "${OPENJARVIS_HOME:-/var/lib/openjarvis}"
+
 echo "[jarvis] avvio server su ${JARVIS_HOST}:${JARVIS_PORT}"
 exec uv run --project /opt/openjarvis --no-sync jarvis serve --host "${JARVIS_HOST}" --port "${JARVIS_PORT}"
