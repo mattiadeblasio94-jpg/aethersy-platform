@@ -50,6 +50,21 @@ async function jarvisContext(
   };
 }
 
+/**
+ * Memoria del tenant inserita nel prompt di sistema: Jarvis deve partire da
+ * quello che il tenant ha gia' scritto, senza dover interrogare un altro
+ * account per leggerla.
+ */
+function memoryPrompt(context: Record<string, unknown>): string {
+  const memory = Array.isArray(context.memory) ? (context.memory as { title?: string; path?: string; content?: string }[]) : [];
+  if (memory.length === 0) return "";
+  const lines = memory
+    .slice(0, 20)
+    .map((entry) => `### ${entry.title ?? "(senza titolo)"}${entry.path ? ` (${entry.path})` : ""}\n${(entry.content ?? "").slice(0, 600)}`)
+    .join("\n\n");
+  return `\n\nMemoria del tenant (vault Obsidian):\n${lines}`;
+}
+
 export async function registerJarvisRoutes(app: FastifyInstance): Promise<void> {
   app.get("/api/platform/jarvis/status", async (_request, reply) => {
     if (!config.jarvisBaseUrl) {
@@ -98,7 +113,8 @@ export async function registerJarvisRoutes(app: FastifyInstance): Promise<void> 
               content:
                 "Sei Jarvis, l'assistente della piattaforma Aethersy. Rispondi in italiano, in breve, " +
                 "usando i tool a disposizione per i dati reali (mai inventare numeri). " +
-                "Il contesto memoria del tenant e' la sua base di conoscenza.",
+                "Il contesto memoria del tenant e' la sua base di conoscenza." +
+                memoryPrompt(context),
             },
             ...(Array.isArray(body.history) ? body.history : []),
             { role: "user", content: message },
