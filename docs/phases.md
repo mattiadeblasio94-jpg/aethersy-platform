@@ -1870,10 +1870,36 @@ sicurezza, stato). `.env.example` e compose aggiornati con `ADMIN_EMAILS`,
 - tenant dell'admin impostato con `plan = 'admin'` (esenzione anche senza lista
   email).
 
+**Jarvis in esercizio sul VPS Aruba (13/11/2026)**:
+- container `aethersy-jarvis` costruito dal kit versionato e agganciato alla
+  rete Docker della piattaforma (`aethersy_aethersy`): nessuna porta pubblica,
+  nessun DNS aggiuntivo, console -> `http://aethersy-jarvis:8000`;
+- fix di build emersi sul campo: `uv pip` al posto di `uv sync` (lock del fork
+  incompatibile), `SETUPTOOLS_SCM_PRETEND_VERSION` (clone shallow senza tag),
+  `OPENJARVIS_HOME` fuori dal sorgente (OpenJarvis lo rifiuta), fine riga LF
+  negli script (CRLF rompevano l'entrypoint), health check con token
+  (401 anche su `/v1/speech/health`), rete esterna con il nome reale;
+- token condiviso `OPENJARVIS_API_KEY` (jarvis) = `JARVIS_API_KEY` (console);
+  `JARVIS_MODEL` configurabile (l'alias `jarvis` non e' un modello valido);
+- **verifica end-to-end**: `GET /api/platform/jarvis/status` -> `reachable:
+  true`, STT faster-whisper disponibile; `POST /api/platform/jarvis/chat` ->
+  200 con risposta del modello; QA UI `scripts/qa-jarvis-ui.mjs` -> **4/4**
+  (badge "Jarvis online", invio reale, risposta renderizzata);
+- tool `aethersy_memory` eseguito dentro il container -> `success: true`
+  (lettura della memoria del tenant via API);
+- memoria del tenant iniettata nel prompt di sistema (il BFF la passa a
+  Jarvis), cosi' la chat risponde sul vault del chiamante;
+- fix UI: la chat scorre solo il riquadro conversazione (prima
+  `scrollIntoView` spostava l'intera pagina e nascondeva l'input);
+- QA API `scripts/qa-fase35.mjs` -> **23/23**, QA UI
+  `scripts/qa-fase35-ui.mjs` -> **13/13**, QA Jarvis UI -> **4/4**.
+
 **Stato**: `DONE` lato piattaforma (build console e platform verificate,
-deploy console+platform eseguito). `BLOCKED` il deploy di Jarvis sul VPS
-dedicato `85.235.151.215`: mancano credenziali SSH (root/ubuntu/deploy con
-tutte le chiavi disponibili -> "Permission denied (publickey)").
+deploy console+platform eseguito, Jarvis operativo sul VPS Aruba).
+`BLOCKED` il deploy di Jarvis sul VPS dedicato `85.235.151.215`: mancano
+credenziali SSH (root/ubuntu/deploy con tutte le chiavi disponibili ->
+"Permission denied (publickey)"); resta da fare solo l'esposizione pubblica
+`jarvis.aethersy.online` (profilo `public` del compose).
 
 ### Verifica di regressione (11/11/2026)
 
