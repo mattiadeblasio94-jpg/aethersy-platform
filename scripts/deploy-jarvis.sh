@@ -13,7 +13,7 @@
 #   4. verifica /v1/speech/health dentro il container.
 #
 # Il servizio si aggancia alla rete Docker della piattaforma
-# (aethersy_default): la console lo raggiunge con http://aethersy-jarvis:8000
+# (aethersy_aethersy): la console lo raggiunge con http://aethersy-jarvis:8000
 # senza porte pubbliche. Per esporlo su dominio serve il profilo "public"
 # (jarvis/docker-compose.jarvis.yml -> servizio caddy).
 #
