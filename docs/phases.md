@@ -24,7 +24,7 @@
 | 12 | Piattaforma a consumo (P0) — pipeline + libreria asset + Console run/crediti | `IN CORSO` — metering/billing (P0.1/P0.2, `24c1d1f`), pipeline multi-stadio + orchestratore HITL + segreti (P0.3, `94f65a9`), **libreria asset con versioning e approvazione in Console** (P0.4), **Console run/crediti** (P0.5), **lead webhook + canale Slack + export pacchettizzato + UI lead** (P0.6), **QA E2E + backup off-site** (P0.7), **layer Anteprima `/preview`** (P0.8), **deploy Console+Platform** (P0.9), **modulo piattaforma Business Pulse + `pipeline.schedule`** (P0.10, 29/10/2026), **substrato aziendale multi-tenant: schema `business` (obiettivi/memoria/prodotti) + API + Console** (P1.1, 29/10/2026), **motore agenti P2.1 + piattaforma reale P2.2 (`platform.aethersy.online`)** (29/10/2026). QA E2E **65/65 OK**; metering 44/44; web+server build OK; deployato sul VPS |
 | 22 | Connettori reali con login ai provider | `DONE` — catalogo di **43 provider** (Google ×12 via app Google, GitHub, Slack/Notion/Figma/... via app OAuth dedicata, Telegram/Cloudflare/... via credenziale), login reale con `state` firmato + PKCE, token cifrati AES-256-GCM, pagina `/connectors` con verifica live; **connessioni placeholder eliminate**. Test `test:connectors` 23/23. Restano azioni utente: accreditare le app OAuth dei provider e creare quelle mancanti |
 | 23 | Collegamento ai provider con consenso del provider | `DONE` — **un solo accesso Google** attiva i 12 servizi Google (consenso unificato) e le **app OAuth dei provider si registrano dalla piattaforma** (tabella `pipeline.oauth_app`, secret cifrato): il pulsante porta alla pagina di login/consenso del provider e al rientro la connessione e' attiva. Test `test:connectors` 35/35, `test:social` 19/19. Restano azioni utente: consenso Google (eventuale utente di test) e creazione delle app dei provider |
-| 35 | Jarvis come prodotto: memoria vault, costi per utente, pannello di controllo | `DONE` lato piattaforma — esenzione admin e `user_email` nel ledger, `/api/platform/admin/overview` + pagina `/admin`, memoria markdown con `path`/`links` + API graph/vault, proxy Jarvis (`chat`/`transcribe`) e pagina `/jarvis`, kit `jarvis/` + `scripts/deploy-jarvis.sh`, fix regressione Wix. `BLOCKED` il deploy di Jarvis: mancano credenziali SSH per `85.235.151.215` |
+| 35 | Jarvis come prodotto: memoria vault, costi per utente, pannello di controllo | `DONE` lato piattaforma — esenzione admin e `user_email` nel ledger, `/api/platform/admin/overview` + pagina `/admin`, memoria markdown con `path`/`links` + API graph/vault, proxy Jarvis (`chat`/`transcribe`) e pagina `/jarvis`, kit `jarvis/` + `scripts/deploy-jarvis.sh`, fix regressione Wix. **VPS dedicato `85.235.151.215`**: reset dello stack clonato, riutilizzato per solo Jarvis (hardening, `deploy` con sudo NOPASSWD, root/password disabilitati), `https://jarvis.aethersy.online` con TLS valido, console spostata sul dominio pubblico, account di servizio `jarvis@aethersy.online`, QA UI 4/4 |
 
 ## Verifica §11 — nomi variabili, versioni, route
 
@@ -1900,6 +1900,57 @@ deploy console+platform eseguito, Jarvis operativo sul VPS Aruba).
 credenziali SSH (root/ubuntu/deploy con tutte le chiavi disponibili ->
 "Permission denied (publickey)"); resta da fare solo l'esposizione pubblica
 `jarvis.aethersy.online` (profilo `public` del compose).
+
+### Jarvis sul VPS dedicato `85.235.151.215` (13/11/2026)
+
+**Reset e riutilizzo del VPS**: il server ospitava una copia dello stack
+piattaforma (stessi container e volumi della Aruba). Stack rimosso
+(`docker compose down -v`, container, volumi, rete `aethersy_aethersy`), host
+riutilizzato da zero per **solo Jarvis**; DNS locale ripulito dagli alias
+`*.aethersy.online` che puntavano al vecchio clone.
+
+**Hardening (stesso modello del VPS Aruba)**:
+- accesso SSH solo con chiave: `PermitRootLogin no`, `PasswordAuthentication no`,
+  `KbdInteractiveAuthentication no`; utente `deploy` con sudo **NOPASSWD**
+  (`/etc/sudoers.d/deploy`); utente `ubuntu` mantenuto come accesso di
+  emergenza;
+- `ufw` default-deny con sole 22/80/443 (chiusa la 3000 ereditata dal clone);
+- `fail2ban` sulla jail `sshd` (`maxretry 5`, `findtime 10m`, `bantime 10m`,
+  IP Aruba in `ignoreip` per non auto-bannarsi durante i deploy);
+- swap 2 GB (`vm.swappiness=10`), `unattended-upgrades` attivo, log Docker
+  ruotati (`json-file` 10 MB x 3), Caddy di sistema disabilitato: le porte
+  80/443 sono del reverse proxy in container.
+
+**Jarvis in esercizio sul VPS dedicato**:
+- repo copiato in `/home/deploy/aethersy` (utente `deploy`), kit `jarvis/`
+  buildato lì: `aethersy-jarvis` healthy (`/v1/speech/health` -> 200,
+  faster-whisper disponibile);
+- `aethersy-jarvis-caddy` (profilo `public`) con TLS automatico:
+  `https://jarvis.aethersy.online` -> certificato Let's Encrypt valido
+  (record A `jarvis` -> `85.235.151.215` creato su GoDaddy);
+- **fix**: `ACME_EMAIL` non era passato al container Caddy -> errore di parsing
+  del Caddyfile (`email {$ACME_EMAIL}` vuoto): ora e' in `environment`;
+- **fix**: `scripts/deploy-jarvis.sh` normalizza i fine riga a LF, supporta
+  `JARVIS_PROFILE=public` (Caddy) e `JARVIS_REMOTE_DIR`;
+- **account di servizio dedicato** `jarvis@aethersy.online` creato sulla
+  piattaforma (ruolo `MEMBER`, tenant unico, bcrypt): i tool di Jarvis non
+  usano piu' l'account QA; la memoria del chiamante resta iniettata dal BFF
+  nel prompt;
+- **passaggio della console**: `JARVIS_BASE_URL=https://jarvis.aethersy.online`
+  (stesso token `JARVIS_API_KEY`/`OPENJARVIS_API_KEY` dei due lati), container
+  console riavviato; istanza duplicata su Aruba fermata (fallback: basta
+  rimettere `JARVIS_BASE_URL=http://aethersy-jarvis:8000` e riavviarla).
+
+**Verifica end-to-end (13/11/2026)**:
+- `GET /api/platform/jarvis/status` -> `reachable: true`, STT disponibile;
+- `POST /api/platform/jarvis/chat` -> 200 con risposta reale del modello;
+- QA UI `scripts/qa-jarvis-ui.mjs` -> **4/4** (badge "Jarvis online", invio
+  reale, risposta renderizzata, conteggio del vault del chiamante corretto);
+- login del tool dentro il container -> 200; `aethersy_memory` -> `(200, [])`
+  per il tenant di servizio (il vault del chiamante e' iniettato dal BFF).
+
+**Stato**: `DONE` — Jarvis in esercizio sul VPS dedicato con HTTPS pubblico;
+la piattaforma (Aruba) chiama il dominio pubblico.
 
 ### Verifica di regressione (11/11/2026)
 

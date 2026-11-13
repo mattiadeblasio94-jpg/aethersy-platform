@@ -56,6 +56,7 @@ services:
       - "443:443"
     environment:
       - JARVIS_DOMAIN=${JARVIS_DOMAIN:-jarvis.aethersy.online}
+      - ACME_EMAIL=${ACME_EMAIL:-}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

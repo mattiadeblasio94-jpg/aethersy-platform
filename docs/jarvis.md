@@ -7,14 +7,19 @@
 
 | Componente | Dove | Note |
 |---|---|---|
-| Server OpenJarvis (chat + STT) | **VPS Aruba `195.231.79.221`** (container `aethersy-jarvis`) | VPS dedicato `85.235.151.215` ancora senza accesso SSH: resta la destinazione per l'esposizione pubblica |
-| Reverse proxy / TLS | profilo `public` del compose (Caddy) | oggi non attivo: la console parla a Jarvis sulla rete Docker interna |
+| Server OpenJarvis (chat + STT) | **VPS dedicato `85.235.151.215`** (container `aethersy-jarvis`) | host dedicato, accesso SSH con chiave (`deploy` + sudo), root/password disabilitati |
+| Reverse proxy / TLS | VPS dedicato, container `aethersy-jarvis-caddy` (profilo `public`) | TLS automatico su `jarvis.aethersy.online` (record A → `85.235.151.215`) |
 | API piattaforma (BFF) | VPS Aruba `195.231.79.221` | `console/server` |
 | UI piattaforma | VPS Aruba | `platform` (pagina `/jarvis`) |
 | Tool e skill Jarvis | versionati in `jarvis/` di questo repository | copiati nel container |
+| Istanza di riserva | VPS Aruba, container `aethersy-jarvis` | Jarvis interno alla rete Docker della piattaforma (`http://aethersy-jarvis:8000`): resta il fallback se il dominio non e' raggiungibile |
 
 La piattaforma **non ospita** il modello: chiama Jarvis via API
 OpenAI-compatibile. Jarvis richiama la piattaforma con i suoi tool.
+
+I due VPS hanno ruoli distinti: Aruba ospita piattaforma, API e UI; il VPS
+dedicato ospita **solo** Jarvis (chat + STT + TLS), cosi' l'assistente non
+condivide il ciclo di vita della piattaforma.
 
 ## 2. Flusso di una richiesta
 
@@ -65,18 +70,26 @@ e' NVIDIA; OpenRouter resta come engine alternativo.
 
 ## 5. Deployment
 
-Il kit e' gia' in esercizio sul VPS Aruba, sulla stessa rete Docker della
-piattaforma: la console chiama `http://aethersy-jarvis:8000` (nessuna porta
-pubblica, nessun DNS aggiuntivo).
+Il kit e' in esercizio sul **VPS dedicato** (`85.235.151.215`): l'immagine
+OpenJarvis gira in `aethersy-jarvis`, Caddy in `aethersy-jarvis-caddy` espone
+`https://jarvis.aethersy.online` (record A → `85.235.151.215`).
 
 ```bash
-# VPS Aruba (alias SSH in ~/.ssh/config):
+# VPS dedicato (utente 'deploy' con sudo, alias SSH oppure utente@ip):
+JARVIS_PROFILE=public bash scripts/deploy-jarvis.sh deploy@85.235.151.215 "nota del deploy"
+```
+
+Sul VPS Aruba resta l'istanza interna (fallback, nessuna porta pubblica):
+
+```bash
 bash scripts/deploy-jarvis.sh aethersy-vps "nota del deploy"
 ```
 
-Lo script copia `jarvis/`, crea `jarvis/.env` dal modello **solo se assente**
-(importa le chiavi provider dal `.env` principale del VPS), ricostruisce
-l'immagine, rilancia il container e verifica `/v1/speech/health` con token.
+Lo script copia `jarvis/`, normalizza i fine riga a **LF**, crea
+`jarvis/.env` dal modello **solo se assente** (importa le chiavi provider dal
+`.env` principale del VPS), ricostruisce l'immagine, rilancia il container e
+verifica `/v1/speech/health` con token. Con `JARVIS_PROFILE=public` avvia
+anche Caddy.
 
 Variabili d'ambiente:
 
@@ -84,11 +97,12 @@ Variabili d'ambiente:
 |---|---|---|
 | `OPENJARVIS_API_KEY` | `jarvis/.env` (VPS) | token del server OpenJarvis (obbligatorio per `0.0.0.0`) |
 | `JARVIS_API_KEY` | `.env` (VPS, console) | stesso token: il BFF lo invia come `Authorization: Bearer` |
-| `JARVIS_BASE_URL` | `.env` (VPS, console) | `http://aethersy-jarvis:8000` (oppure `https://jarvis.aethersy.online` quando il dominio sara' attivo) |
+| `JARVIS_BASE_URL` | `.env` (VPS, console) | `https://jarvis.aethersy.online` (VPS dedicato) oppure `http://aethersy-jarvis:8000` (istanza interna su Aruba) |
 | `JARVIS_MODEL` | `.env` (VPS, console) | id modello reale del server (es. `nvidia/nemotron-3.5-lightning-30b-a3b`): un alias libero come `jarvis` viene rifiutato |
 | `JARVIS_TIMEOUT_MS` | `.env` (VPS, console) | timeout delle chiamate (default 120000) |
 | `NIM_API_KEY` | `jarvis/.env` (VPS) | chiave NVIDIA per l'engine `nim` |
 | `AETHERSY_API_BASE`, `AETHERSY_EMAIL`, `AETHERSY_PASSWORD` | `jarvis/.env` (VPS) | account con cui i tool di Jarvis leggono la piattaforma |
+| `ACME_EMAIL` | `jarvis/.env` (VPS) | contatto per i certificati Let's Encrypt: **obbligatorio**, altrimenti Caddy non parte (`email {$ACME_EMAIL}`) |
 | `ADMIN_EMAILS` | `.env` (VPS, console) | lista degli admin esenti dai costi |
 
 Dettagli tecnici della build (verificati in produzione):
@@ -102,14 +116,14 @@ Dettagli tecnici della build (verificati in produzione):
 - health check con header `Authorization: Bearer` (il server risponde 401
   anche su `/v1/speech/health`).
 
-Per l'esposizione pubblica (VPS dedicato):
+Dettagli dell'hardening del VPS dedicato:
 
-```bash
-bash scripts/deploy-jarvis.sh <host> "nota"      # build + avvio
-docker compose -f jarvis/docker-compose.jarvis.yml --profile public up -d caddy
-```
-
-e nel `.env` della piattaforma: `JARVIS_BASE_URL=https://jarvis.aethersy.online`.
+- accesso SSH solo con chiave: `PermitRootLogin no`, `PasswordAuthentication no`,
+  utente `deploy` con `sudo` **NOPASSWD**;
+- `ufw` default-deny con sole porte 22/80/443; `fail2ban` sulla jail `sshd`
+  (`maxretry 5`, `bantime 10m`, IP Aruba in `ignoreip`);
+- swap 2 GB (`vm.swappiness=10`), `unattended-upgrades` attivo, log Docker
+  ruotati (`json-file`, 10 MB x 3).
 
 ## 6. Sicurezza
 
@@ -123,21 +137,23 @@ e nel `.env` della piattaforma: `JARVIS_BASE_URL=https://jarvis.aethersy.online`
 
 ## 7. Stato
 
-- **In esercizio (VPS Aruba, 13/11/2026)**: container `aethersy-jarvis` sulla
-  rete `aethersy_aethersy`; `/v1/speech/health` risponde 200 (STT
-  faster-whisper disponibile); la piattaforma vede "Jarvis online" nella UI
-  `/jarvis`; chat reale verificata end-to-end (browser -> console -> Jarvis ->
-  NVIDIA NIM -> risposta), con la memoria del tenant iniettata nel prompt e il
-  tool `aethersy_memory` funzionante dentro il container.
+- **In esercizio (VPS dedicato `85.235.151.215`, 13/11/2026)**: stack clonato
+  rimosso e VPS riutilizzato da zero per Jarvis; container `aethersy-jarvis`
+  healthy (`/v1/speech/health` 200, faster-whisper disponibile), container
+  `aethersy-jarvis-caddy` con TLS automatico; accesso SSH con chiave e sudo
+  NOPASSWD per `deploy`, root e password disabilitati.
+- **Account di servizio**: `jarvis@aethersy.online` creato sulla piattaforma
+  (ruolo `MEMBER`, tenant unico): i tool di Jarvis leggono e scrivono la
+  memoria con quel tenant. La memoria del chiamante resta iniettata dal BFF
+  nel prompt.
+- **In esercizio (VPS Aruba, fallback)**: istanza interna del container
+  `aethersy-jarvis` sulla rete `aethersy_aethersy`; usata dalla console
+  finche' il dominio pubblico non e' operativo.
 - **Fatto**: tool e skill, config, Dockerfile, compose, Caddyfile, script di
   deploy, proxy BFF (`/api/platform/jarvis/*`), pagina `/jarvis`, esenzione
   admin e pannello di controllo.
-- **Limite noto**: i tool di Jarvis usano un **account di servizio**
-  (`AETHERSY_EMAIL`/`AETHERSY_PASSWORD`), quindi leggono la memoria di quel
-  tenant; la memoria del chiamante e' comunque iniettata dal BFF nel prompt.
-  Per un uso multi-tenant completo serve un account di servizio dedicato (o la
-  sessione del chiamante inoltrata a Jarvis).
-- **Bloccato**: deploy sul VPS dedicato `85.235.151.215` (mancano credenziali
-  SSH) e quindi l'esposizione pubblica `jarvis.aethersy.online`.
+- **Bloccato (azione utente)**: record DNS A `jarvis.aethersy.online` →
+  `85.235.151.215` su GoDaddy: senza il record Caddy non puo' emettere il
+  certificato e il passaggio della console al dominio pubblico resta sospeso.
 - **Verificato in locale**: trascrizione (faster-whisper) e tool-calling
   (NVIDIA) con risposta fedele agli errori reali della piattaforma.
