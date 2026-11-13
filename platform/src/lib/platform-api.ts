@@ -362,6 +362,15 @@ export interface JarvisTranscript {
   detail?: string;
 }
 
+/** Risposta della sintesi vocale (TTS) del BFF. */
+export interface JarvisSpeech {
+  capability?: string;
+  provider?: string;
+  audio?: string;
+  format?: string;
+  message?: string;
+}
+
 /** Vista admin: utenti, tenant, consumi e costi reali dei provider. */
 export interface AdminOverview {
   generatedAt: string;
@@ -850,6 +859,15 @@ export const platformApi = {
     http.post<JarvisChatResponse>("/api/platform/jarvis/chat", { message, history }),
   transcribeJarvis: (audio: Blob, contentType: string) =>
     http.postBinary<JarvisTranscript>("/api/platform/jarvis/transcribe", audio, contentType),
+  /** Sintesi vocale della risposta (TTS): restituisce l'URL dell'audio riproducibile. */
+  speakJarvis: (text: string, voice = "af_sky", language = "it") =>
+    http.post<JarvisSpeech>("/api/ai/generate", {
+      capability: "tts",
+      input: text,
+      voice,
+      language,
+      responseFormat: "mp3",
+    }),
 
   // --- Consumo --------------------------------------------------------------
   getUsage: (limit = 50) => http.get<UsageResponse>(`/api/ai/usage?limit=${limit}`),

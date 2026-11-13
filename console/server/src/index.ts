@@ -44,6 +44,26 @@ app.addContentTypeParser("application/json", { parseAs: "string" }, (request, bo
   }
 });
 
+// I file audio (registrazione del microfono dal browser: audio/webm, opus,
+// wav, ogg) arrivano come corpo binario: senza un parser dedicato Fastify
+// risponde 415 Unsupported Media Type e la trascrizione non parte mai.
+app.addContentTypeParser(
+  [
+    "audio/webm",
+    "audio/ogg",
+    "audio/wav",
+    "audio/x-wav",
+    "audio/mpeg",
+    "audio/mp4",
+    "audio/x-m4a",
+    "application/octet-stream",
+  ],
+  { parseAs: "buffer" },
+  (request, body, done) => {
+    done(null, body);
+  },
+);
+
 await app.register(cookie);
 await registerRoutes(app);
 

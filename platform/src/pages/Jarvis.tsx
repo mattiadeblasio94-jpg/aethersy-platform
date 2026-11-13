@@ -8,7 +8,7 @@
 // =============================================================================
 
 import { useEffect, useRef, useState } from "react";
-import { Loader2, Mic, MicOff, Send, Sparkles } from "lucide-react";
+import { Loader2, Mic, MicOff, Send, Sparkles, Volume2, VolumeX } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -33,8 +33,10 @@ export default function Jarvis() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [voice, setVoice] = useState(true);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     platformApi
@@ -52,6 +54,34 @@ export default function Jarvis() {
     if (box) box.scrollTop = box.scrollHeight;
   }, [turns, busy]);
 
+  /**
+   * Riproduce la risposta a voce (TTS del BFF -> mp3). Se la sintesi fallisce
+   * la chat resta comunque utilizzabile: si avvisa e si prosegue in testo.
+   */
+  async function speak(text: string) {
+    const clean = text.replace(/[*_`#]/g, " ").slice(0, 1200).trim();
+    if (!clean) return;
+    try {
+      const result = await platformApi.speakJarvis(clean);
+      if (!result.audio) throw new Error(result.message ?? "sintesi vocale vuota");
+      const bytes = Uint8Array.from(atob(result.audio), (char) => char.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], { type: `audio/${result.format ?? "mp3"}` }));
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        if (audioRef.current === audio) audioRef.current = null;
+      };
+      await audio.play();
+    } catch (err) {
+      toast({
+        kind: "warning",
+        title: "Voce non disponibile",
+        description: (err as Error).message,
+      });
+    }
+  }
+
   async function send(text: string) {
     const message = text.trim();
     if (!message || busy) return;
@@ -66,6 +96,7 @@ export default function Jarvis() {
         response.error?.message ??
         "Jarvis non ha restituito una risposta.";
       setTurns((prev) => [...prev, { role: "assistant", content: answer }]);
+      if (voice) void speak(answer);
     } catch (err) {
       const detail = (err as Error).message;
       setTurns((prev) => [...prev, { role: "assistant", content: `Errore: ${detail}` }]);
@@ -111,6 +142,7 @@ export default function Jarvis() {
             response.error?.message ??
             "Jarvis non ha restituito una risposta.";
           setTurns((prev) => [...prev, { role: "assistant", content: answer }]);
+          if (voice) void speak(answer);
         } catch (err) {
           toast({ kind: "error", title: "Trascrizione fallita", description: (err as Error).message });
         } finally {
@@ -170,6 +202,17 @@ export default function Jarvis() {
               )}
             >
               <p className="whitespace-pre-wrap">{turn.content}</p>
+              {turn.role === "assistant" && (
+                <button
+                  type="button"
+                  onClick={() => void speak(turn.content)}
+                  className="mt-2 inline-flex items-center gap-1 text-xs text-text-muted hover:text-text-primary"
+                  aria-label="Rileggi la risposta a voce"
+                >
+                  <Volume2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  Rileggi
+                </button>
+              )}
             </div>
           ))}
           {busy && (
@@ -181,6 +224,16 @@ export default function Jarvis() {
         </div>
 
         <div className="flex items-end gap-2">
+          <Button
+            variant={voice ? "primary" : "secondary"}
+            size="icon"
+            aria-label={voice ? "Voce attiva" : "Voce disattivata"}
+            title={voice ? "Jarvis risponde a voce" : "Jarvis risponde in testo"}
+            onClick={() => setVoice((prev) => !prev)}
+            disabled={disabled || busy}
+          >
+            {voice ? <Volume2 className="h-5 w-5" /> : <VolumeX className="h-5 w-5" />}
+          </Button>
           <Button
             variant={recording ? "danger" : "secondary"}
             size="icon"

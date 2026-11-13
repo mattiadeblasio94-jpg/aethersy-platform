@@ -1957,6 +1957,25 @@ riutilizzato da zero per **solo Jarvis**; DNS locale ripulito dagli alias
 **Stato**: `DONE` — Jarvis in esercizio sul VPS dedicato con HTTPS pubblico;
 la piattaforma (Aruba) chiama il dominio pubblico.
 
+### Chiusura voce end-to-end (13/11/2026)
+
+- **Parser audio nella console**: `console/server/src/index.ts` accetta i body
+  `audio/*` e `application/octet-stream` (prima Fastify rispondeva 415 e il
+  browser non poteva inviare l'audio).
+- **Inoltro multipart verso Jarvis**: `console/server/src/platform/jarvis-routes.ts`
+  invia `/v1/speech/transcribe` in `multipart/form-data` (campo `file`, nome
+  `audio.<estensione>`): il backend accetta solo file, non byte raw.
+- **Sintesi vocale**: `platform/src/lib/platform-api.ts` espone `speakJarvis()`
+  (`POST /api/ai/generate`, capability `tts`) e `platform/src/pages/Jarvis.tsx`
+  aggiunge il toggle voce, l'autoplay della risposta e il pulsante "Rileggi".
+- **STT piu' accurato**: modello faster-whisper `small` (prima `base`, che
+  scambiava vault/volt); container ricreato e healthy su `85.235.151.215`.
+- **Memoria reale per i tool**: l'account di servizio `jarvis@aethersy.online`
+  e' agganciato al tenant della piattaforma, quindi i tool leggono lo stesso
+  vault del titolare (verificato: 1 voce, "Note/tono-del-brand.md").
+- **QA voce**: `scripts/qa-jarvis-voice.mjs` -> **9/9 superati, 0 falliti**
+  (microfono, trascrizione, risposta, TTS 200, audio blob riprodotto).
+
 ### Verifica di regressione (11/11/2026)
 
 - API: `qa-all-services.mjs` -> **73/73 controlli superati, 0 falliti**

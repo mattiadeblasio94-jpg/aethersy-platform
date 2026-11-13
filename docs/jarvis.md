@@ -47,8 +47,13 @@ Configurazione in `jarvis/config/config.toml`:
 - disponibili anche `openrouter` e `zai` (stesse chiavi gia' configurate nella
   piattaforma);
 - **nessun Ollama**: non viene installato e non viene usato;
-- STT: `faster-whisper` locale (modello `base`, lingua `it`, CPU, int8);
-- TTS: la piattaforma (Venice/kokoro) via `aethersy_speak`.
+- STT: `faster-whisper` locale (modello `small`, lingua `it`, CPU, int8): il
+  modello `small` riconosce correttamente i termini di prodotto (vault,
+  business, obiettivi) rispetto a `base`;
+- TTS: la piattaforma via `POST /api/ai/generate` (capability `tts`, modello
+  `minimax/speech-02-turbo` su replicate): la console lo invoca e riproduce
+  l'audio base64 come blob (`new Audio`), con pulsante "Rileggi" su ogni
+  risposta.
 
 Nota sui modelli OpenRouter free: in precedenza hanno restituito tool-call con
 nome funzione vuoto (errore HTTP 400 del provider). Per questo il default
@@ -149,9 +154,19 @@ backup.
   `aethersy-jarvis-caddy` con TLS automatico; accesso SSH con chiave e sudo
   NOPASSWD per `deploy`, root e password disabilitati.
 - **Account di servizio**: `jarvis@aethersy.online` creato sulla piattaforma
-  (ruolo `MEMBER`, tenant unico): i tool di Jarvis leggono e scrivono la
-  memoria con quel tenant. La memoria del chiamante resta iniettata dal BFF
-  nel prompt.
+  (ruolo `MEMBER`) e agganciato al tenant della piattaforma: i tool di Jarvis
+  leggono e scrivono **la stessa memoria vault** del titolare (verificato:
+  "Nel vault Obsidian sono presenti 1 voce di memoria: Note/tono-del-brand.md").
+  La memoria personale del chiamante resta iniettata dal BFF nel prompt.
+- **Voce end-to-end verificata (13/11/2026)**: la pagina `/jarvis` registra
+  dal microfono, trascrive sul VPS dedicato, invia la chat e riproduce la
+  sintesi vocale. QA `scripts/qa-jarvis-voice.mjs` -> **9/9** (microfono
+  avviato/chiuso, trascrizione ricevuta, risposta ricevuta, TTS 200, nessun
+  4xx/5xx, pulsante "Rileggi", audio blob scaricato e riproducibile).
+  Correzioni applicate: parser Fastify per `audio/*` in
+  `console/server/src/index.ts` (prima rispondeva 415) e inoltro del file in
+  `multipart/form-data` (campo `file`) verso `/v1/speech/transcribe`, che
+  rifiuta i byte raw.
 - **In esercizio (VPS Aruba, fallback)**: istanza interna del container
   `aethersy-jarvis` sulla rete `aethersy_aethersy`; usata dalla console
   finche' il dominio pubblico non e' operativo.

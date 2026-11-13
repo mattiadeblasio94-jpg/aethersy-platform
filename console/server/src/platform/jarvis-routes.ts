@@ -65,6 +65,17 @@ function memoryPrompt(context: Record<string, unknown>): string {
   return `\n\nMemoria del tenant (vault Obsidian):\n${lines}`;
 }
 
+/** Estensione del file audio dal content-type del browser (webm/opus, wav, ogg...). */
+function audioExtension(contentType: string): string {
+  const type = contentType.split(";")[0].trim().toLowerCase();
+  if (type.includes("webm")) return "webm";
+  if (type.includes("ogg")) return "ogg";
+  if (type.includes("wav")) return "wav";
+  if (type.includes("mpeg") || type.includes("mp3")) return "mp3";
+  if (type.includes("mp4") || type.includes("m4a")) return "m4a";
+  return "webm";
+}
+
 export async function registerJarvisRoutes(app: FastifyInstance): Promise<void> {
   app.get("/api/platform/jarvis/status", async (_request, reply) => {
     if (!config.jarvisBaseUrl) {
@@ -154,14 +165,22 @@ export async function registerJarvisRoutes(app: FastifyInstance): Promise<void> 
       return reply.code(400).send({ code: "BAD_REQUEST", message: "Audio mancante." });
     }
     const contentType = String(request.headers["content-type"] ?? "audio/webm");
+    const extension = audioExtension(contentType);
     try {
+      // OpenJarvis accetta il comando come multipart/form-data con il campo
+      // "file": il corpo grezzo verrebbe rifiutato ("Missing 'file' field").
+      const form = new FormData();
+      form.append(
+        "file",
+        new Blob([new Uint8Array(body)], { type: contentType.split(";")[0].trim() }),
+        `audio.${extension}`,
+      );
       const res = await fetch(`${config.jarvisBaseUrl}/v1/speech/transcribe`, {
         method: "POST",
         headers: {
           ...(config.jarvisApiKey ? { authorization: `Bearer ${config.jarvisApiKey}` } : {}),
-          "content-type": contentType,
         },
-        body: new Uint8Array(body),
+        body: form,
         signal: AbortSignal.timeout(config.jarvisTimeoutMs),
       });
       const payload = await res.json().catch(() => null);

@@ -16,9 +16,11 @@ temperature = 0.2
 max_tokens = 4096
 
 [speech]
-# STT locale: faster-whisper su CPU, modello base, lingua italiana.
+# STT locale: faster-whisper su CPU, modello small, lingua italiana.
+# "small" riconosce correttamente i termini di prodotto (vault, business,
+# obiettivi): con "base" la trascrizione scambiava vault/volt.
 backend = "faster-whisper"
-model = "base"
+model = "small"
 language = "it"
 device = "cpu"
 compute_type = "int8"
