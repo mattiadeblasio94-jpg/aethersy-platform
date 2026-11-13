@@ -77,7 +77,7 @@ class AethersyMemoryTool(BaseTool):
             },
         )
 
-    def run(self, **kwargs: Any) -> ToolResult:
+    def execute(self, **kwargs: Any) -> ToolResult:
         action = str(kwargs.get("action") or "list").strip().lower()
         try:
             if action in {"list", "search"}:
