@@ -6,7 +6,7 @@
 #   caddy       -> TLS automatico per jarvis.aethersy.online (opzionale)
 #
 # Il servizio si aggancia alla rete esterna della piattaforma
-# (`aethersy_default`): cosi' la console puo' raggiungerlo con
+# (`aethersy_aethersy`): cosi' la console puo' raggiungerlo con
 # http://aethersy-jarvis:8000 senza esporre porte pubbliche.
 #
 # Le chiavi (NVIDIA, z.ai, OpenRouter, credenziali piattaforma) stanno nel
