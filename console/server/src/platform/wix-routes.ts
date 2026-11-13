@@ -299,12 +299,33 @@ export async function registerWixRoutes(app: FastifyInstance): Promise<void> {
           message: "Nessun sito Wix trovato per questo account: collega un account con almeno un sito.",
         });
       }
-      const snapshot = await wixBusinessSnapshot(token, resolution.siteId);
-      return { snapshot, sites: resolution.sites, source: resolution.source };
+      let siteId = resolution.siteId;
+      let warning = resolution.warning;
+      let snapshot: Awaited<ReturnType<typeof wixBusinessSnapshot>>;
+      try {
+        snapshot = await wixBusinessSnapshot(token, siteId);
+      } catch (err) {
+        // Il sito configurato non e' accessibile con l'account collegato:
+        // si ripiega sul sito scoperto, se c'e', e si segnala il motivo.
+        if (resolution.fallbackSiteId) {
+          try {
+            snapshot = await wixBusinessSnapshot(token, resolution.fallbackSiteId);
+            siteId = resolution.fallbackSiteId;
+            warning = `Il sito configurato non e' accessibile con l'account Wix collegato: dati letti dal sito ${siteId}. Ricollega l'account che gestisce il sito per leggere i dati corretti.`;
+          } catch {
+            throw err;
+          }
+        } else {
+          throw err;
+        }
+      }
+      return { snapshot, sites: resolution.sites, source: resolution.source, warning };
     } catch (err) {
       return reply.code(502).send({
         code: "WIX_BUSINESS_FAILED",
         message: (err as Error).message,
+        hint:
+          "Se il sito non e' raggiungibile, ricollega l'account Wix che gestisce il sito (quello con l'id configurato in WIX_SITE_ID).",
       });
     }
   });

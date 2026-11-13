@@ -31,6 +31,7 @@ import {
   Rocket,
   Search,
   BookOpen,
+  ShieldCheck,
 } from "lucide-react";
 import { useUiStore } from "@/store/ui";
 import { useAuthStore } from "@/store/auth";
@@ -69,6 +70,7 @@ export interface DrawerProps {
 export const Drawer = memo(function Drawer({ variant }: DrawerProps) {
   const closeDrawer = useUiStore((state) => state.closeDrawer);
   const user = useAuthStore((state) => state.user);
+  const isAdmin = useAuthStore((state) => state.isAdmin);
   const logout = useAuthStore((state) => state.logout);
   const navigate = useNavigate();
   const reduceMotion = useReducedMotion();
@@ -92,6 +94,7 @@ export const Drawer = memo(function Drawer({ variant }: DrawerProps) {
           { to: "/dashboard", label: "Home", icon: Home },
           { to: "/guida", label: "Guida", icon: BookOpen },
           { to: "/overview", label: "Panoramica", icon: LayoutDashboard },
+          { to: "/jarvis", label: "Jarvis", icon: Bot },
           { to: "/studio", label: "Studio", icon: Zap },
           { to: "/idea", label: "Realizza l'idea", icon: Rocket },
           { to: "/research", label: "Ricerca", icon: Search },
@@ -119,6 +122,9 @@ export const Drawer = memo(function Drawer({ variant }: DrawerProps) {
           { to: "/payouts", label: "Pagamenti", icon: Coins },
           { to: "/memory", label: "Memoria", icon: Brain },
           { to: "/account", label: "Account", icon: Wallet },
+          ...(isAdmin
+            ? [{ to: "/admin", label: "Pannello", icon: ShieldCheck }]
+            : []),
         ],
       },
       {
@@ -131,7 +137,7 @@ export const Drawer = memo(function Drawer({ variant }: DrawerProps) {
         ],
       },
     ];
-  }, [overview.data, platforms.data, roster.data]);
+  }, [overview.data, platforms.data, roster.data, isAdmin]);
 
   const secondaryItems: NavItem[] = [
     { to: "/console/pulse", label: "Console operativa", icon: LayoutDashboard },

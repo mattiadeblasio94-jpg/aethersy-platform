@@ -12,6 +12,7 @@ import {
   reserveCredits,
   tenantFromApiKey,
   tenantFromEmail,
+  tenantIsAdmin,
   type TenantContext,
 } from "./repo.js";
 import type { Capability, Unit } from "./price.js";
@@ -40,6 +41,8 @@ export interface MeterContext {
   preferFree: boolean;
   degraded: boolean;
   availableBefore: number;
+  /** true = tenant admin: consumo registrato ma non addebitato. */
+  exempt: boolean;
 }
 
 export interface AiPlan {
@@ -161,6 +164,9 @@ export async function authorizeAi(
 
   const requestId = String(request.headers["x-aethersy-request-id"] ?? crypto.randomUUID());
   const bucket = tenant.apiKeyId ?? tenant.tenantId;
+  // Esenzione admin: niente blocchi per quota/saldo e nessuna prenotazione di
+  // credito. Il consumo resta tracciato (recordUsage addebita 0 crediti).
+  const exempt = tenantIsAdmin(tenant);
 
   const rl = await rateLimit(bucket);
   if (!rl.ok) {
@@ -172,7 +178,7 @@ export async function authorizeAi(
   }
 
   const quota = await quotaState(tenant.tenantId);
-  if (quota && quota.limitCredits > 0) {
+  if (quota && quota.limitCredits > 0 && !exempt) {
     const usedPct = (quota.consumed / quota.limitCredits) * 100;
     if (usedPct >= 100) {
       reply.code(402).send({
@@ -188,7 +194,7 @@ export async function authorizeAi(
   }
 
   const available = await availableCredits(tenant.tenantId);
-  if (available <= 0 && tenant.hardStopOnEmpty) {
+  if (available <= 0 && tenant.hardStopOnEmpty && !exempt) {
     reply.code(402).send({
       code: "INSUFFICIENT_CREDITS",
       message: "Crediti esauriti: ricarica per continuare",
@@ -200,7 +206,7 @@ export async function authorizeAi(
   // Degradazione: sotto il 10% della quota (o sotto 10 crediti senza quota)
   // si forza il modello gratuito, cosi' il cliente continua a lavorare a costo ~0.
   const threshold = quota && quota.limitCredits > 0 ? quota.limitCredits * 0.1 : 10;
-  const degraded = available <= threshold;
+  const degraded = !exempt && available <= threshold;
 
   const estimate = await estimateCredits(tenant, {
     capability: plan.capability,
@@ -211,7 +217,7 @@ export async function authorizeAi(
   });
 
   // La prenotazione non supera mai il disponibile (poi il settle addebita il reale).
-  const reservation = Math.max(0, Math.min(estimate, available));
+  const reservation = exempt ? 0 : Math.max(0, Math.min(estimate, available));
   const res = await reserveCredits(tenant.tenantId, requestId, reservation);
   if (!res.ok) {
     reply.code(402).send({
@@ -231,6 +237,7 @@ export async function authorizeAi(
       preferFree: degraded,
       degraded,
       availableBefore: available,
+      exempt,
     },
   };
 }

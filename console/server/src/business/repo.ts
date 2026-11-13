@@ -1,4 +1,5 @@
 import { withTx } from "../metering/db.js";
+import { extractWikiLinks, vaultPath } from "./vault.js";
 import {
   isGoalStatus,
   isGoalPriority,
@@ -177,6 +178,10 @@ export interface MemoryRow {
   tags: string[];
   pinned: boolean;
   meta: unknown;
+  /** Percorso del file nel vault markdown (stile Obsidian). */
+  path: string;
+  /** Titoli dei collegamenti wiki `[[...]]` estratti dal contenuto. */
+  links: string[];
   created_at: Date;
   updated_at: Date;
 }
@@ -190,28 +195,35 @@ export interface CreateMemoryInput {
   tags?: string[];
   pinned?: boolean;
   meta?: unknown;
+  /** Percorso desiderato nel vault; se assente viene derivato dal titolo. */
+  path?: string;
 }
 
 export async function createMemory(input: CreateMemoryInput): Promise<MemoryRow> {
   const kind = input.kind ?? "note";
   if (!isMemoryKind(kind)) throw new Error(`kind non valido: ${kind}`);
   if (!input.content.trim()) throw new Error("content richiesto");
+  const title = input.title?.trim() ?? "";
+  const path = vaultPath(input.path, title);
+  const links = extractWikiLinks(input.content);
 
   const { rows } = await withTx((client) =>
     client.query<MemoryRow>(
       `INSERT INTO business.memory
-         (tenant_id, kind, title, content, source, tags, pinned, meta)
-       VALUES ($1, $2, $3, $4, $5, $6::text[], $7, $8::jsonb)
+         (tenant_id, kind, title, content, source, tags, pinned, meta, path, links)
+       VALUES ($1, $2, $3, $4, $5, $6::text[], $7, $8::jsonb, $9, $10::text[])
        RETURNING *`,
       [
         input.tenantId,
         kind,
-        input.title ?? "",
+        title,
         input.content.trim(),
         input.source ?? "",
         input.tags ?? [],
         input.pinned ?? false,
         JSON.stringify(input.meta ?? {}),
+        path,
+        links,
       ],
     ),
   );
@@ -261,6 +273,7 @@ export async function updateMemory(
     tags?: string[];
     pinned?: boolean;
     meta?: unknown;
+    path?: string;
   },
 ): Promise<MemoryRow | null> {
   const current = await getMemory(tenantId, id);
@@ -268,6 +281,13 @@ export async function updateMemory(
 
   if (patch.kind !== undefined && !isMemoryKind(patch.kind)) throw new Error("kind non valido");
   if (patch.content !== undefined && !patch.content.trim()) throw new Error("content vuoto");
+
+  // Percorso e collegamenti wiki sono derivati: se il contenuto o il titolo
+  // cambiano, i link vengono ricalcolati (il path solo se non e' esplicito).
+  const nextTitle = patch.title?.trim() ?? current.title;
+  const nextContent = patch.content?.trim() ?? current.content;
+  const nextPath = patch.path !== undefined ? vaultPath(patch.path, nextTitle) : current.path;
+  const nextLinks = patch.content !== undefined ? extractWikiLinks(nextContent) : current.links;
 
   const { rows } = await withTx((client) =>
     client.query<MemoryRow>(
@@ -279,6 +299,8 @@ export async function updateMemory(
          tags    = COALESCE($7::text[], tags),
          pinned  = COALESCE($8, pinned),
          meta    = COALESCE($9::jsonb, meta),
+         path    = $10,
+         links   = $11::text[],
          updated_at = now()
        WHERE id = $1 AND tenant_id = $2
        RETURNING *`,
@@ -292,10 +314,88 @@ export async function updateMemory(
         patch.tags ?? null,
         patch.pinned ?? null,
         patch.meta === undefined ? null : JSON.stringify(patch.meta),
+        nextPath,
+        nextLinks,
       ],
     ),
   );
   return rows[0] ?? null;
+}
+
+/**
+ * Grafo del vault: nodi (file markdown) + archi (collegamenti wiki risolti
+ * per titolo) + note orfane (nessun link entrante). Serve al pannello di
+ * controllo per mostrare come la memoria cresce ed e' connessa.
+ */
+export interface MemoryGraph {
+  nodes: Array<{
+    id: string;
+    title: string;
+    path: string;
+    kind: string;
+    tags: string[];
+    pinned: boolean;
+    links: string[];
+    updated_at: Date;
+  }>;
+  edges: Array<{ from: string; to: string; label: string }>;
+  orphans: string[];
+}
+
+export async function memoryGraph(tenantId: string): Promise<MemoryGraph> {
+  const { rows } = await withTx((client) =>
+    client.query<MemoryRow>(
+      `SELECT * FROM business.memory
+        WHERE tenant_id = $1
+        ORDER BY pinned DESC, updated_at DESC`,
+      [tenantId],
+    ),
+  );
+  const byTitle = new Map<string, string>();
+  for (const row of rows) {
+    const key = (row.title || row.path).trim().toLowerCase();
+    if (key && !byTitle.has(key)) byTitle.set(key, row.id);
+  }
+  const edges: MemoryGraph["edges"] = [];
+  const incoming = new Set<string>();
+  for (const row of rows) {
+    for (const label of row.links ?? []) {
+      const target = byTitle.get(label.trim().toLowerCase());
+      if (!target || target === row.id) continue;
+      edges.push({ from: row.id, to: target, label });
+      incoming.add(target);
+    }
+  }
+  return {
+    nodes: rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      path: row.path,
+      kind: row.kind,
+      tags: row.tags ?? [],
+      pinned: row.pinned,
+      links: row.links ?? [],
+      updated_at: row.updated_at,
+    })),
+    edges,
+    orphans: rows.filter((row) => !incoming.has(row.id)).map((row) => row.id),
+  };
+}
+
+/** Export del vault: file markdown pronti per l'uso (path + contenuto). */
+export async function memoryVault(tenantId: string): Promise<
+  Array<{ path: string; title: string; kind: string; content: string; updated_at: Date }>
+> {
+  const { rows } = await withTx((client) =>
+    client.query<{ path: string; title: string; kind: string; content: string; updated_at: Date }>(
+      `SELECT path, title, kind, content, updated_at
+         FROM business.memory
+        WHERE tenant_id = $1
+        ORDER BY path ASC`,
+      [tenantId],
+    ),
+  );
+  return rows;
 }
 
 export async function deleteMemory(tenantId: string, id: string): Promise<boolean> {

@@ -3,6 +3,7 @@ import type pg from "pg";
 import { computePrice, type Capability, type Unit, type PriceBreakdown } from "./price.js";
 import { withTx } from "./db.js";
 import { patternScore } from "./pattern.js";
+import { config } from "../config.js";
 
 /**
  * `metering.usage_event.request_id` e' di tipo `uuid`, ma gli orchestratori
@@ -82,6 +83,20 @@ function toTenantContext(
 /** sha256 esadecimale della chiave API in chiaro (mai salvata sul DB). */
 export function hashApiKey(rawKey: string): string {
   return crypto.createHash("sha256").update(rawKey).digest("hex");
+}
+
+/**
+ * Vero se il tenant e' amministrativo: il consumo viene registrato (cosi' il
+ * pannello di controllo mostra il costo reale dei provider) ma non viene
+ * addebitato all'utente. Due criteri, in ordine:
+ *   1. `plan = 'admin'` sul tenant (impostazione esplicita nel DB);
+ *   2. l'email del tenant e' in `ADMIN_EMAILS`.
+ * Nessun valore di default: senza configurazione non c'e' esenzione.
+ */
+export function tenantIsAdmin(tenant: TenantContext): boolean {
+  if (tenant.plan === "admin") return true;
+  if (!tenant.email) return false;
+  return config.adminEmails.includes(tenant.email.toLowerCase());
 }
 
 /** Risolve il tenant da una chiave API (console / worker / mcp / integration). */
@@ -515,6 +530,8 @@ export interface UsageEventInput {
   status?: string;
   latencyMs?: number | null;
   source?: string;
+  /** Email dell'utente che ha generato la richiesta (sessione console). */
+  userEmail?: string | null;
 }
 
 export interface SettleResult {
@@ -540,9 +557,9 @@ async function settleUsageTx(
        capability, provider, model, unit, billable_units,
        input_tokens, output_tokens, cached_tokens,
        provider_cost_usd, provider_fee_usd, price_eur, markup_bps, credits,
-       status, latency_ms, source
+       status, latency_ms, source, user_email
      ) VALUES (
-       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21
+       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22
      )
      ON CONFLICT (request_id, attempt_no) DO NOTHING
      RETURNING id`,
@@ -551,7 +568,7 @@ async function settleUsageTx(
       u.capability, u.provider, u.model, u.unit, u.billableUnits,
       u.inputTokens ?? null, u.outputTokens ?? null, u.cachedTokens ?? null,
       u.providerCostUsd, u.providerFeeUsd ?? 0, u.priceEur, u.markupBps, u.credits,
-      u.status ?? "success", u.latencyMs ?? null, u.source ?? "console",
+      u.status ?? "success", u.latencyMs ?? null, u.source ?? "console", u.userEmail ?? null,
     ],
   );
 
@@ -670,8 +687,12 @@ export async function recordUsage(input: RecordUsageInput): Promise<RecordUsageR
     });
     const breakdown = priceRequest(resolution, input.tenant, input.units);
     const markupBps = resolution.lines[0]?.markupBps ?? input.tenant.markupBps;
-    const billableUnits = Object.values(input.units).reduce((s, n) => s + (n ?? 0), 0);
+    const billableUnits = Object.values(input.units).reduce((s, n) => (s + (n ?? 0)), 0);
     const unit = (Object.keys(input.units)[0] ?? "request") as string;
+    // Esenzione admin: il costo provider resta registrato (visibile nel
+    // pannello di controllo) ma i crediti addebitati all'utente sono zero.
+    const adminExempt = tenantIsAdmin(input.tenant);
+    const credits = adminExempt ? 0 : breakdown.credits;
 
     const settled = await settleUsageTx(
       client,
@@ -692,10 +713,11 @@ export async function recordUsage(input: RecordUsageInput): Promise<RecordUsageR
         providerCostUsd: breakdown.providerCostUsd,
         priceEur: breakdown.priceEur,
         markupBps,
-        credits: breakdown.credits,
+        credits,
         status: input.status ?? "success",
         latencyMs: input.latencyMs ?? null,
         source: input.source ?? input.tenant.sourceTag,
+        userEmail: input.tenant.email ?? null,
       },
       input.reservation,
     );

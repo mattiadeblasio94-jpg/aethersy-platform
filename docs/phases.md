@@ -3,7 +3,7 @@
 > Aggiornare dopo **ogni** fase con: data/ora, esito, comandi di verifica, note.
 > Stati ammessi: `DONE`, `BLOCKED: input #N`, `NOTE`.
 >
-> Ultima revisione: 2026-11-12 (fasi 0–12 `DONE`; **fasi 13–22** implementate e deployate: CI, IA nel platform, **platform a dati reali senza mock + UI cyber + agenti builder eseguibili + sito pubblicabile dal run pipeline**, **login sociale reale Google/GitHub**, **connettori reali con login ai provider (43 provider, niente connessioni finte)**; **fasi 30–32**: specialisti eseguibili, sito professionale pubblicato multi-pagina, flusso "Realizza la tua idea" che produce deliverable e sito online; **fasi 33–34**: integrazione Wix via server MCP (collegamento OAuth reale, 32 tool) con **business reale** (ordini, ricavi, catalogo, contatti) e **creazione prodotti in catalogo**, piu' **guida passo-passo** in UI e docs; QA 73/73 API, 11/11 UI, 16/16 business Wix, 14/14 guida); restano azioni utente per la rotazione credenziali, Stripe e le app OAuth dei provider)
+> Ultima revisione: 2026-11-13 (fasi 0–12 `DONE`; **fasi 13–22** implementate e deployate: CI, IA nel platform, **platform a dati reali senza mock + UI cyber + agenti builder eseguibili + sito pubblicabile dal run pipeline**, **login sociale reale Google/GitHub**, **connettori reali con login ai provider (43 provider, niente connessioni finte)**; **fasi 30–32**: specialisti eseguibili, sito professionale pubblicato multi-pagina, flusso "Realizza la tua idea" che produce deliverable e sito online; **fasi 33–34**: integrazione Wix via server MCP (collegamento OAuth reale, 32 tool) con **business reale** (ordini, ricavi, catalogo, contatti) e **creazione prodotti in catalogo**, piu' **guida passo-passo** in UI e docs; QA 73/73 API, 11/11 UI, 16/16 business Wix, 14/14 guida); **fase 35**: Jarvis come prodotto (chat vocale nella piattaforma via proxy al VPS dedicato, tool/skill versionati in `jarvis/`), **memoria costruttiva in stile Obsidian** (vault markdown con path e wiki link), **contabilita' per utente con esenzione admin** e **pannello di controllo** `/admin`, piu' fix della regressione Wix; restano azioni utente per la rotazione credenziali, Stripe, le app OAuth dei provider e l'accesso SSH al VPS di Jarvis)
 
 ## Stato sintetico
 
@@ -24,6 +24,7 @@
 | 12 | Piattaforma a consumo (P0) — pipeline + libreria asset + Console run/crediti | `IN CORSO` — metering/billing (P0.1/P0.2, `24c1d1f`), pipeline multi-stadio + orchestratore HITL + segreti (P0.3, `94f65a9`), **libreria asset con versioning e approvazione in Console** (P0.4), **Console run/crediti** (P0.5), **lead webhook + canale Slack + export pacchettizzato + UI lead** (P0.6), **QA E2E + backup off-site** (P0.7), **layer Anteprima `/preview`** (P0.8), **deploy Console+Platform** (P0.9), **modulo piattaforma Business Pulse + `pipeline.schedule`** (P0.10, 29/10/2026), **substrato aziendale multi-tenant: schema `business` (obiettivi/memoria/prodotti) + API + Console** (P1.1, 29/10/2026), **motore agenti P2.1 + piattaforma reale P2.2 (`platform.aethersy.online`)** (29/10/2026). QA E2E **65/65 OK**; metering 44/44; web+server build OK; deployato sul VPS |
 | 22 | Connettori reali con login ai provider | `DONE` — catalogo di **43 provider** (Google ×12 via app Google, GitHub, Slack/Notion/Figma/... via app OAuth dedicata, Telegram/Cloudflare/... via credenziale), login reale con `state` firmato + PKCE, token cifrati AES-256-GCM, pagina `/connectors` con verifica live; **connessioni placeholder eliminate**. Test `test:connectors` 23/23. Restano azioni utente: accreditare le app OAuth dei provider e creare quelle mancanti |
 | 23 | Collegamento ai provider con consenso del provider | `DONE` — **un solo accesso Google** attiva i 12 servizi Google (consenso unificato) e le **app OAuth dei provider si registrano dalla piattaforma** (tabella `pipeline.oauth_app`, secret cifrato): il pulsante porta alla pagina di login/consenso del provider e al rientro la connessione e' attiva. Test `test:connectors` 35/35, `test:social` 19/19. Restano azioni utente: consenso Google (eventuale utente di test) e creazione delle app dei provider |
+| 35 | Jarvis come prodotto: memoria vault, costi per utente, pannello di controllo | `DONE` lato piattaforma — esenzione admin e `user_email` nel ledger, `/api/platform/admin/overview` + pagina `/admin`, memoria markdown con `path`/`links` + API graph/vault, proxy Jarvis (`chat`/`transcribe`) e pagina `/jarvis`, kit `jarvis/` + `scripts/deploy-jarvis.sh`, fix regressione Wix. `BLOCKED` il deploy di Jarvis: mancano credenziali SSH per `85.235.151.215` |
 
 ## Verifica §11 — nomi variabili, versioni, route
 
@@ -1792,6 +1793,71 @@ rapida e troubleshooting tabellare).
   "Realizza la tua idea"), 0 errori console, 0 richieste fallite.
 
 **Stato**: `DONE`.
+
+### Fase 35 — Jarvis come prodotto: memoria vault, costi per utente, pannello di controllo (13/11/2026)
+
+**Obiettivo**: trasformare Aethersy in una piattaforma assistita da Jarvis
+(chat vocale come punto d'ingresso), con memoria costruttiva in stile Obsidian,
+contabilita' dei costi per utente (admin esente) e un pannello di controllo
+per l'amministratore. Riferimenti: `docs/product-vision.md` (visione),
+`docs/jarvis.md` (architettura e deployment).
+
+**1. Esenzione admin e costi per utente** (`console/server/src/metering/`):
+- `metering.usage_event.user_email` (colonna aggiunta in modo idempotente):
+  ogni consumo e' attribuito all'utente che lo ha generato (sessione console);
+- `tenantIsAdmin()` (`repo.ts`): esente se `plan = 'admin'` oppure se l'email
+  del tenant e' in `ADMIN_EMAILS` (nuova variabile, `config.ts`, `.env.example`,
+  compose);
+- `recordUsage()` addebita **0 crediti** per gli admin ma registra comunque il
+  costo provider (il consumo resta visibile nel pannello);
+- `authorizeAi()` (guard) per gli admin salta i blocchi di quota e saldo e non
+  prenota crediti; il rate limit resta attivo.
+
+**2. Pannello di controllo** (`console/server/src/platform/admin-routes.ts` +
+`platform/src/pages/Admin.tsx`): `GET /api/platform/admin/overview` (admin
+only: `ADMIN_EMAILS` o ruolo Activepieces `owner`) con totali (tenant, utenti,
+richieste 30gg, ricavo, costo provider, crediti in circolazione, richieste non
+addebitate), consumi per provider e per capacita', costi per utente, tabella
+tenant (attivita', ricavo, saldo) e ultimi 25 eventi di consumo. La pagina
+`/admin` e' nel menu solo per gli admin (`isAdmin` nella sessione).
+
+**3. Memoria costruttiva (vault markdown, stile Obsidian)**:
+- `business.memory` guadagna `path` (percorso del file) e `links` (wiki link
+  `[[Titolo]]` estratti dal contenuto) — `console/server/src/business/vault.ts`;
+- nuove API: `GET /api/platform/memory/graph` (nodi, archi, orfani) e
+  `GET /api/platform/memory/vault` (export dei file markdown);
+- UI: percorso nel vault nel form di creazione, path e collegamenti in elenco.
+
+**4. Jarvis dentro la piattaforma**:
+- `console/server/src/platform/jarvis-routes.ts`: `GET /api/platform/jarvis/status`,
+  `POST /api/platform/jarvis/chat` (invia a Jarvis il contesto del tenant: memoria
+  in evidenza, id tenant, email) e `POST /api/platform/jarvis/transcribe`
+  (audio -> faster-whisper sul VPS di Jarvis);
+- `platform/src/pages/Jarvis.tsx`: chat con microfono (MediaRecorder) e invio;
+  il menu porta direttamente a Jarvis;
+- kit versionato in `jarvis/`: Dockerfile, `docker-compose.jarvis.yml`, Caddyfile,
+  `config/config.toml`, tool (`aethersy_control`, `aethersy_memory` nuovo,
+  `aethersy_change`, `aethersy_speak`) e skill (`aethersy`, `self-hosted-backend`);
+- `scripts/deploy-jarvis.sh`: deploy sul VPS dedicato (copia, `.env` mai
+  sovrascritto, build, up, health check).
+
+**5. Fix regressione Wix**: `resolveWixSite()` ora prova **sempre prima** il
+sito configurato (anche se `ListWixSites` non lo elenca: era la causa del
+fallimento 428 "Stores app is not installed" quando il tenant aveva
+ricollegato un account diverso), tiene il sito scoperto come ripiego e
+comunica un avviso esplicito ("ricollega l'account Wix che gestisce il
+sito"); `GET /api/platform/wix/business` restituisce anche `warning` e un
+`hint` sul collegamento.
+
+**6. Documentazione**: `docs/product-vision.md` (visione di prodotto e roadmap
+fasi 35–40) e `docs/jarvis.md` (architettura, engine, tool/skill, deployment,
+sicurezza, stato). `.env.example` e compose aggiornati con `ADMIN_EMAILS`,
+`JARVIS_BASE_URL`, `JARVIS_API_KEY`, `JARVIS_TIMEOUT_MS`.
+
+**Stato**: `DONE` lato piattaforma (build console e platform verificate,
+deploy console+platform eseguito). `BLOCKED` il deploy di Jarvis sul VPS
+dedicato `85.235.151.215`: mancano credenziali SSH (root/ubuntu/deploy con
+tutte le chiavi disponibili -> "Permission denied (publickey)").
 
 ### Verifica di regressione (11/11/2026)
 

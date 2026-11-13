@@ -44,6 +44,14 @@ export async function registerPlatformRoutes(app: FastifyInstance): Promise<void
   const { registerWixRoutes } = await import("./wix-routes.js");
   await registerWixRoutes(app);
 
+  // Pannello di controllo (Fase 35): vista admin su utenti, consumi e costi.
+  const { registerAdminRoutes } = await import("./admin-routes.js");
+  await registerAdminRoutes(app);
+
+  // Jarvis (Fase 35): punto d'ingresso vocale verso l'assistente sul VPS.
+  const { registerJarvisRoutes } = await import("./jarvis-routes.js");
+  await registerJarvisRoutes(app);
+
   // ---------------------------------------------------------- catalogo ----
   app.get("/api/platform/catalog", async (request, reply) => {
     const tenant = await requireMeteredTenant(request, reply);

@@ -48,6 +48,8 @@ const Research = lazy(() => import("./Research"));
 const Specialists = lazy(() => import("./Specialists"));
 const Idea = lazy(() => import("./Idea"));
 const Guida = lazy(() => import("./Guida"));
+const Admin = lazy(() => import("./Admin"));
+const Jarvis = lazy(() => import("./Jarvis"));
 
 export interface RouteSpec {
   path: string;
@@ -190,6 +192,18 @@ export const APP_ROUTES: RouteSpec[] = [
     title: "Prodotti",
     description: "Catalogo prodotti con prezzi, disponibilita' e stato di pubblicazione.",
     component: Products,
+  },
+  {
+    path: "jarvis",
+    title: "Jarvis",
+    description: "L'assistente vocale della piattaforma: parla, e Jarvis agisce sui tuoi servizi.",
+    component: Jarvis,
+  },
+  {
+    path: "admin",
+    title: "Pannello di controllo",
+    description: "Andamento della piattaforma: utenti, consumi, costi provider e ricavi.",
+    component: Admin,
   },
   {
     path: "analytics",

@@ -174,7 +174,13 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   app.get("/api/auth/session", async (request, reply) => {
     const session = requireSession(request, reply);
     if (!session) return;
-    return session.user;
+    // `isAdmin` permette alla UI di mostrare il pannello di controllo solo a
+    // chi ne ha diritto (stessa regola del BFF: ADMIN_EMAILS o ruolo owner).
+    const { isAdminIdentity } = await import("./platform/admin-routes.js");
+    return {
+      ...session.user,
+      isAdmin: isAdminIdentity(session.user.email, session.user.platformRole),
+    };
   });
 
   // ------------------------------------------------- Activepieces proxy ----

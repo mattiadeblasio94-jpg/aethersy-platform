@@ -94,6 +94,24 @@ export const http = {
   get: <T>(path: string, query?: RequestOptions["query"], signal?: AbortSignal) =>
     request<T>(path, { method: "GET", query, signal }),
   post: <T>(path: string, body?: unknown) => request<T>(path, { method: "POST", body }),
+  postBinary: <T>(path: string, body: Blob | ArrayBuffer, contentType: string) =>
+    fetch(buildUrl(path), {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": contentType },
+      body,
+    }).then(async (res) => {
+      const text = await res.text();
+      const payload = safeJson(text);
+      if (!res.ok) {
+        throw new HttpError(
+          res.status,
+          payload?.message ?? payload?.detail ?? `Errore ${res.status}`,
+          payload?.code,
+        );
+      }
+      return payload as T;
+    }),
   patch: <T>(path: string, body?: unknown) => request<T>(path, { method: "PATCH", body }),
   delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
 };

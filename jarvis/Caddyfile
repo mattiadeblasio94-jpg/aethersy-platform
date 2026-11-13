@@ -1,0 +1,10 @@
+# Jarvis — reverse proxy con TLS automatico.
+# Il server OpenJarvis ascolta solo sulla rete Docker interna (porta 8000).
+{
+	email {$ACME_EMAIL}
+}
+
+{$JARVIS_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy jarvis:8000
+}

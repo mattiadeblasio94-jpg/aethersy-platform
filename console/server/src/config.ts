@@ -93,6 +93,17 @@ export const config = {
   // Credito di benvenuto assegnato al provisioning del primo accesso (0 = nessuno).
   signupCredits: Number(process.env.METERING_SIGNUP_CREDITS ?? 0),
 
+  // --- Amministrazione --------------------------------------------------------
+  // Email dei amministratori della piattaforma. Gli utenti in questa lista
+  // consumano provider senza essere addebitati (esenzione admin): il costo
+  // provider resta registrato e visibile nel pannello di controllo, ma i
+  // crediti non vengono scalati e i blocchi per saldo/quota non si applicano.
+  // Separati da virgola. Vuoto = nessuna esenzione (nessun admin di default).
+  adminEmails: (process.env.ADMIN_EMAILS ?? "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean),
+
   // --- OAuth social login ----------------------------------------------------
   // URL pubblici dei due frontend: servono al redirect finale del login social
   // (allowlist chiusa: platform | console, mai un URL fornito dal client).
@@ -139,6 +150,18 @@ export const config = {
   // Usato come fallback quando il tenant non ha un canale dedicato salvato in
   // `pipeline.integration_credential`. Se assente, le notifiche sono no-op.
   slackWebhookUrl: process.env.SLACK_WEBHOOK_URL ?? "",
+
+  // --- Jarvis (Fase 35) ------------------------------------------------------
+  // Jarvis e' l'assistente vocale della piattaforma: vive su un VPS dedicato
+  // e parla OpenAI-compatibile. La piattaforma non lo ospita, lo usa:
+  //   - il BFF inoltra chat e trascrizione a Jarvis (proxy autenticato);
+  //   - Jarvis usa a sua volta le API della piattaforma (tool aethersy_*).
+  // Se `JARVIS_BASE_URL` e' vuoto, la sezione Jarvis della UI resta disattivata.
+  jarvisBaseUrl: (process.env.JARVIS_BASE_URL ?? "").replace(/\/$/, ""),
+  // Token opzionale per le chiamate server-to-server verso Jarvis.
+  jarvisApiKey: process.env.JARVIS_API_KEY ?? "",
+  // Timeout delle chiamate a Jarvis (il modello puo' ragionare a lungo).
+  jarvisTimeoutMs: Number(process.env.JARVIS_TIMEOUT_MS ?? 120_000),
 
   // Versione e commit del deploy in corso: finiscono nella notifica di
   // deploy che il BFF registra all'avvio e inoltra ai canali configurati.

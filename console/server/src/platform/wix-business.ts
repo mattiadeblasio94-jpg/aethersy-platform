@@ -173,12 +173,23 @@ export interface WixSiteResolution {
   siteId: string | null;
   sites: WixSite[];
   source: "configured" | "discovered";
+  /** Sito scoperto da usare se il sito configurato non e' accessibile. */
+  fallbackSiteId: string | null;
+  /** Avviso leggibile quando sito configurato e account collegato non coincidono. */
+  warning: string | null;
 }
 
 /**
- * Individua il sito su cui operare: preferisce l'id configurato, ma solo se
- * corrisponde a un sito dell'account; altrimenti usa il primo sito restituito
- * da `ListWixSites` (il collegamento OAuth e' la fonte di verita').
+ * Individua il sito su cui operare.
+ *
+ * Ordine di fiducia:
+ *   1. il sito configurato (`WIX_SITE_ID`) se e' fra i siti dell'account;
+ *   2. il sito configurato anche se NON e' fra i siti dell'account: puo' succedere
+ *      che `ListWixSites` non restituisca tutti i siti, e soprattutto che il
+ *      tenant abbia ricollegato un account diverso da quello che gestisce il
+ *      sito. In questo caso il sito configurato resta il primo tentativo e il
+ *      chiamante puo' ripiegare su `fallbackSiteId` ricevendo un avviso.
+ *   3. il primo sito scoperto, se non c'e' alcun sito configurato.
  */
 export async function resolveWixSite(
   accessToken: string,
@@ -191,11 +202,34 @@ export async function resolveWixSite(
     sites = [];
   }
   const candidate = (preferred ?? config.wixSiteId ?? "").trim();
-  if (candidate && (!sites.length || sites.some((site) => site.id === candidate))) {
-    return { siteId: candidate, sites, source: "configured" };
+  if (candidate) {
+    const known = sites.some((site) => site.id === candidate);
+    const fallback = sites.find((site) => site.id !== candidate) ?? null;
+    const warning = known
+      ? null
+      : sites.length
+        ? `Il sito configurato (${candidate}) non compare fra i siti dell'account Wix collegato (${sites
+            .map((site) => site.name || site.id)
+            .join(", ")}). Se non e' accessibile, ricollega l'account che gestisce il sito.`
+        : `Il sito configurato (${candidate}) non e' stato verificato: l'account Wix collegato non ha restituito siti.`;
+    return {
+      siteId: candidate,
+      sites,
+      source: "configured",
+      fallbackSiteId: fallback?.id ?? null,
+      warning,
+    };
   }
-  if (sites.length) return { siteId: sites[0].id, sites, source: "discovered" };
-  return { siteId: candidate || null, sites, source: "configured" };
+  if (sites.length) {
+    return {
+      siteId: sites[0].id,
+      sites,
+      source: "discovered",
+      fallbackSiteId: sites[1]?.id ?? null,
+      warning: null,
+    };
+  }
+  return { siteId: null, sites, source: "configured", fallbackSiteId: null, warning: null };
 }
 
 function businessScript(siteId: string): string {

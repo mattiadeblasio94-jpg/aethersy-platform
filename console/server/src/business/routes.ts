@@ -167,6 +167,7 @@ export async function registerBusinessRoutes(app: FastifyInstance): Promise<void
       tags?: string[];
       pinned?: boolean;
       meta?: unknown;
+      path?: string;
     };
     if (!body.content?.trim()) {
       return reply.code(400).send({ code: "BAD_REQUEST", message: "content richiesto" });
@@ -182,11 +183,29 @@ export async function registerBusinessRoutes(app: FastifyInstance): Promise<void
         tags: body.tags,
         pinned: body.pinned,
         meta: body.meta,
+        path: body.path,
       });
       return reply.code(201).send(created);
     } catch (err) {
       return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
     }
+  });
+
+  // Grafo della memoria (stile Obsidian): nodi = file, archi = wiki link.
+  app.get("/api/platform/memory/graph", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+    const { memoryGraph } = await import("./repo.js");
+    return memoryGraph(tenant.tenantId);
+  });
+
+  // Export del vault: file markdown pronti da leggere/copiare altrove.
+  app.get("/api/platform/memory/vault", async (request, reply) => {
+    const tenant = await requireMeteredTenant(request, reply);
+    if (!tenant) return;
+    const { memoryVault } = await import("./repo.js");
+    const files = await memoryVault(tenant.tenantId);
+    return { tenantId: tenant.tenantId, count: files.length, files };
   });
 
   app.patch("/api/platform/memory/:id", async (request, reply) => {
@@ -201,6 +220,7 @@ export async function registerBusinessRoutes(app: FastifyInstance): Promise<void
       tags?: string[];
       pinned?: boolean;
       meta?: unknown;
+      path?: string;
     };
     const { updateMemory } = await import("./repo.js");
     try {
@@ -212,6 +232,7 @@ export async function registerBusinessRoutes(app: FastifyInstance): Promise<void
         tags: body.tags,
         pinned: body.pinned,
         meta: body.meta,
+        path: body.path,
       });
       if (!updated) return reply.code(404).send({ code: "NOT_FOUND", message: "Voce inesistente" });
       return updated;

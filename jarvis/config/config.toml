@@ -1,0 +1,45 @@
+# =============================================================================
+# Configurazione di Jarvis (template). Non contiene segreti: le chiavi stanno
+# nell'ambiente del container (file .env sul VPS).
+#
+# Engine: "nim" = NVIDIA integrate API (tool-calling verificato). Sono
+# supportati anche "openrouter" e "zai"; OpenJarvis non usa Ollama.
+# =============================================================================
+
+[engine]
+default = "nim"
+
+[intelligence]
+default_model = "nvidia/nemotron-3.5-lightning-30b-a3b"
+provider = "local"
+temperature = 0.2
+max_tokens = 4096
+
+[speech]
+# STT locale: faster-whisper su CPU, modello base, lingua italiana.
+backend = "faster-whisper"
+model = "base"
+language = "it"
+device = "cpu"
+compute_type = "int8"
+
+[tools]
+enabled = [
+  "aethersy_control",
+  "aethersy_memory",
+  "aethersy_change",
+  "aethersy_speak",
+  "think",
+  "calculator",
+]
+
+[skills]
+skills_dir = "/opt/openjarvis/skills/aethersy-plugins"
+
+[agent]
+orchestrator = "default"
+max_turns = 12
+
+[server]
+host = "0.0.0.0"
+port = 8000

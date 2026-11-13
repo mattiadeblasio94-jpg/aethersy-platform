@@ -5,7 +5,7 @@
 // =============================================================================
 
 import { useMemo, useState } from "react";
-import { Brain, Pin, PinOff, Search, Trash2 } from "lucide-react";
+import { Brain, FileText, Link2, Pin, PinOff, Search, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -37,7 +37,13 @@ export default function Memory() {
   const [kind, setKind] = useState("all");
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ kind: "fact", title: "", content: "", source: "" });
+  const [form, setForm] = useState({
+    kind: "fact",
+    title: "",
+    content: "",
+    source: "",
+    path: "",
+  });
 
   const memory = useMemory({
     ...(kind === "all" ? {} : { kind }),
@@ -70,13 +76,14 @@ export default function Memory() {
         kind: form.kind,
         title: form.title.trim(),
         content: form.content.trim(),
+        ...(form.path.trim() ? { path: form.path.trim() } : {}),
         source: form.source.trim() || "manuale",
       },
       {
         onSuccess: () => {
           toast({ kind: "success", title: "Nota salvata", description: form.title });
           setOpen(false);
-          setForm({ kind: "fact", title: "", content: "", source: "" });
+          setForm({ kind: "fact", title: "", content: "", source: "", path: "" });
         },
         onError: (error) =>
           toast({ kind: "error", title: "Salvataggio fallito", description: error.message }),
@@ -184,6 +191,22 @@ export default function Memory() {
                 {entry.content && (
                   <p className="text-sm text-text-secondary">{entry.content}</p>
                 )}
+                {(entry.path || (entry.links ?? []).length > 0) && (
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-text-muted">
+                    {entry.path && (
+                      <span className="inline-flex items-center gap-1">
+                        <FileText className="h-3 w-3" aria-hidden="true" />
+                        {entry.path}
+                      </span>
+                    )}
+                    {(entry.links ?? []).map((link) => (
+                      <span key={link} className="inline-flex items-center gap-1">
+                        <Link2 className="h-3 w-3" aria-hidden="true" />
+                        {link}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <div className="flex flex-wrap items-center gap-3 text-xs text-text-muted">
                   <span>Fonte: {entry.source || "—"}</span>
                   <span aria-hidden="true">·</span>
@@ -266,13 +289,19 @@ export default function Memory() {
             onChange={(event) => setForm({ ...form, title: event.target.value })}
             placeholder="Es. tono di voce del brand"
           />
+          <Input
+            label="Percorso nel vault (opzionale)"
+            value={form.path}
+            onChange={(event) => setForm({ ...form, path: event.target.value })}
+            placeholder="Es. Progetti/Aethersy/launch.md"
+          />
           <label className="flex flex-col gap-1 text-sm text-text-secondary">
-            Contenuto
+            Contenuto (markdown)
             <textarea
               value={form.content}
               onChange={(event) => setForm({ ...form, content: event.target.value })}
               rows={4}
-              placeholder="Il dettaglio che gli agenti devono ricordare"
+              placeholder="Il dettaglio che gli agenti devono ricordare. Usa i collegamenti [[Titolo]] per collegare altre note."
               className="w-full rounded-lg border border-secondary/20 bg-primary/60 px-3 py-2 text-sm text-text-primary focus:border-secondary focus:outline-none focus:ring-1 focus:ring-secondary"
             />
           </label>

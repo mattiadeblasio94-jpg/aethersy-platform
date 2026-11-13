@@ -44,6 +44,8 @@ export const realKeys = {
   builderTasks: ["real", "builder-tasks"] as const,
   builderProjects: ["real", "builder-projects"] as const,
   builderArtifacts: ["real", "builder-artifacts"] as const,
+  memoryGraph: ["real", "memory-graph"] as const,
+  adminOverview: ["real", "admin-overview"] as const,
 };
 
 export function useBalance() {
@@ -397,6 +399,21 @@ export function useMemory(query?: { kind?: string; search?: string; pinned?: str
   });
 }
 
+export function useMemoryGraph() {
+  return useQuery({
+    queryKey: realKeys.memoryGraph,
+    queryFn: () => platformApi.getMemoryGraph(),
+  });
+}
+
+export function useAdminOverview() {
+  return useQuery({
+    queryKey: realKeys.adminOverview,
+    queryFn: () => platformApi.getAdminOverview(),
+    refetchInterval: 30_000,
+  });
+}
+
 export function useCreateMemory() {
   const qc = useQueryClient();
   return useMutation({
@@ -407,6 +424,7 @@ export function useCreateMemory() {
       source?: string;
       tags?: string[];
       pinned?: boolean;
+      path?: string;
     }) => platformApi.createMemory(body),
     onSuccess: () => qc.invalidateQueries({ queryKey: realKeys.memory }),
   });
@@ -424,6 +442,7 @@ export function useUpdateMemory() {
         source?: string;
         tags?: string[];
         pinned?: boolean;
+        path?: string;
       };
     }) => platformApi.updateMemory(input.id, input.body),
     onSuccess: () => qc.invalidateQueries({ queryKey: realKeys.memory }),

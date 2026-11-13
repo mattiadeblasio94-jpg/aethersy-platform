@@ -21,6 +21,8 @@ export interface SessionUser {
   platformRole?: string;
   verified?: boolean;
   projectId?: string | null;
+  /** true = amministratore della piattaforma (pannello di controllo). */
+  isAdmin?: boolean;
 }
 
 export interface Balance {
@@ -319,8 +321,110 @@ export interface MemoryEntry {
   tags: string[];
   pinned: boolean;
   meta: unknown;
+  /** Percorso del file nel vault markdown (stile Obsidian). */
+  path: string;
+  /** Collegamenti wiki `[[...]]` estratti dal contenuto. */
+  links: string[];
   created_at: string;
   updated_at: string;
+}
+
+export interface MemoryGraph {
+  nodes: Array<{
+    id: string;
+    title: string;
+    path: string;
+    kind: string;
+    tags: string[];
+    pinned: boolean;
+    links: string[];
+    updated_at: string;
+  }>;
+  edges: Array<{ from: string; to: string; label: string }>;
+  orphans: string[];
+}
+
+export interface JarvisMessage {
+  role: "user" | "assistant" | "system";
+  content: string;
+}
+
+export interface JarvisChatResponse {
+  choices?: Array<{ message?: { role?: string; content?: string } }>;
+  error?: { message?: string };
+}
+
+export interface JarvisTranscript {
+  text?: string;
+  language?: string;
+  duration?: number;
+  confidence?: number;
+  detail?: string;
+}
+
+/** Vista admin: utenti, tenant, consumi e costi reali dei provider. */
+export interface AdminOverview {
+  generatedAt: string;
+  totals: {
+    tenants: number;
+    users: number;
+    activeTenants30d: number;
+    requests30d: number;
+    revenueEur: number;
+    providerCostUsd: number;
+    outstandingCredits: number;
+    exemptedRequests30d: number;
+  };
+  byProvider: Array<{
+    provider: string;
+    requests: number;
+    priceEur: number;
+    providerCostUsd: number;
+    credits: number;
+  }>;
+  byCapability: Array<{
+    capability: string;
+    requests: number;
+    priceEur: number;
+    providerCostUsd: number;
+  }>;
+  topTenants: Array<{
+    tenantId: string;
+    tenantName: string;
+    plan: string;
+    users: number;
+    requests30d: number;
+    priceEur: number;
+    providerCostUsd: number;
+    balanceCredits: number;
+  }>;
+  topUsers: Array<{
+    email: string;
+    requests30d: number;
+    priceEur: number;
+    providerCostUsd: number;
+    credits: number;
+  }>;
+  daily: Array<{
+    day: string;
+    requests: number;
+    priceEur: number;
+    providerCostUsd: number;
+  }>;
+  recent: Array<{
+    id: string;
+    createdAt: string;
+    tenantName: string;
+    userEmail: string | null;
+    capability: string;
+    provider: string;
+    model: string;
+    priceEur: number;
+    providerCostUsd: number;
+    credits: number;
+    status: string;
+    source: string;
+  }>;
 }
 
 export interface BusinessCatalog {
@@ -710,6 +814,7 @@ export const platformApi = {
   // --- Memoria (business.memory) --------------------------------------------
   getMemory: (query?: { kind?: string; search?: string; pinned?: string; limit?: string }) =>
     http.get<MemoryEntry[]>("/api/platform/memory", query),
+  getMemoryGraph: () => http.get<MemoryGraph>("/api/platform/memory/graph"),
   createMemory: (body: {
     kind: string;
     title: string;
@@ -717,6 +822,7 @@ export const platformApi = {
     source?: string;
     tags?: string[];
     pinned?: boolean;
+    path?: string;
   }) => http.post<MemoryEntry>("/api/platform/memory", body),
   updateMemory: (
     id: string,
@@ -727,11 +833,23 @@ export const platformApi = {
       source?: string;
       tags?: string[];
       pinned?: boolean;
+      path?: string;
     },
   ) => http.patch<MemoryEntry>(`/api/platform/memory/${encodeURIComponent(id)}`, body),
   deleteMemory: (id: string) =>
     http.delete<{ ok: boolean }>(`/api/platform/memory/${encodeURIComponent(id)}`),
   getBusinessCatalog: () => http.get<BusinessCatalog>("/api/platform/business/catalog"),
+
+  // --- Pannello di controllo (admin) -----------------------------------------
+  getAdminOverview: () => http.get<AdminOverview>("/api/platform/admin/overview"),
+
+  // --- Jarvis (assistente vocale) --------------------------------------------
+  getJarvisStatus: () =>
+    http.get<{ enabled: boolean; reachable: boolean; message?: string }>("/api/platform/jarvis/status"),
+  askJarvis: (message: string, history: JarvisMessage[]) =>
+    http.post<JarvisChatResponse>("/api/platform/jarvis/chat", { message, history }),
+  transcribeJarvis: (audio: Blob, contentType: string) =>
+    http.postBinary<JarvisTranscript>("/api/platform/jarvis/transcribe", audio, contentType),
 
   // --- Consumo --------------------------------------------------------------
   getUsage: (limit = 50) => http.get<UsageResponse>(`/api/ai/usage?limit=${limit}`),

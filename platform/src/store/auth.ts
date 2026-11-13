@@ -11,13 +11,14 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { platformApi, type SessionUser } from "@/lib/platform-api";
-import { HttpError } from "@/lib/http";
 import type { User } from "@/lib/types";
 
 type AuthStatus = "idle" | "loading" | "authenticated" | "anonymous";
 
 interface AuthState {
   user: User | null;
+  /** true = l'utente e' amministratore (pannello di controllo visibile). */
+  isAdmin: boolean;
   status: AuthStatus;
   /** Comodita' per la guardia di rotta: true quando c'e' un profilo valido. */
   isAuthenticated: boolean;
@@ -48,6 +49,7 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       status: "idle",
       isAuthenticated: false,
+      isAdmin: false,
 
       bootstrap: async () => {
         if (inflight) return inflight;
@@ -55,7 +57,12 @@ export const useAuthStore = create<AuthState>()(
           set({ status: "loading" });
           try {
             const session = await platformApi.getSession();
-            set({ user: toUser(session), status: "authenticated", isAuthenticated: true });
+            set({
+              user: toUser(session),
+              status: "authenticated",
+              isAuthenticated: true,
+              isAdmin: Boolean(session.isAdmin),
+            });
             // Il saldo crediti non fa parte della sessione: lo leggiamo a parte.
             platformApi
               .getBalance()
@@ -63,11 +70,7 @@ export const useAuthStore = create<AuthState>()(
               .catch(() => {});
           } catch (err) {
             // 401 = nessuna sessione valida: utente anonimo, non un errore fatale.
-            if (err instanceof HttpError && err.status === 401) {
-              set({ user: null, status: "anonymous", isAuthenticated: false });
-            } else {
-              set({ user: null, status: "anonymous", isAuthenticated: false });
-            }
+            set({ user: null, status: "anonymous", isAuthenticated: false, isAdmin: false });
           } finally {
             inflight = null;
           }
@@ -77,7 +80,12 @@ export const useAuthStore = create<AuthState>()(
 
       login: async (email, password) => {
         const session = await platformApi.login(email, password);
-        set({ user: toUser(session), status: "authenticated", isAuthenticated: true });
+        set({
+          user: toUser(session),
+          status: "authenticated",
+          isAuthenticated: true,
+          isAdmin: Boolean(session.isAdmin),
+        });
         platformApi
           .getBalance()
           .then((b) => get().setCredits(b.available))
@@ -93,7 +101,7 @@ export const useAuthStore = create<AuthState>()(
         try {
           await platformApi.logout();
         } finally {
-          set({ user: null, status: "anonymous", isAuthenticated: false });
+          set({ user: null, status: "anonymous", isAuthenticated: false, isAdmin: false });
         }
       },
 

@@ -1,0 +1,65 @@
+# =============================================================================
+# Jarvis — stack sul VPS dedicato (Fase 35).
+#
+# Servizi:
+#   jarvis       -> server OpenJarvis (chat + STT), immagine costruita dal repo
+#   caddy       -> TLS automatico per jarvis.aethersy.online
+#
+# Le chiavi (NVIDIA, z.ai, OpenRouter, credenziali piattaforma) stanno nel
+# file .env del VPS: nessun segreto in questo file.
+# =============================================================================
+
+services:
+  jarvis:
+    build:
+      context: ..
+      dockerfile: jarvis/Dockerfile
+      args:
+        OPENJARVIS_REPO: ${OPENJARVIS_REPO:-https://github.com/mattiadeblasio94-jpg/OpenJarvis.git}
+        OPENJARVIS_REF: ${OPENJARVIS_REF:-main}
+    image: aethersy-jarvis:${JARVIS_VERSION:-0.1.0}
+    container_name: aethersy-jarvis
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - JARVIS_HOST=0.0.0.0
+      - JARVIS_PORT=8000
+      - OPENJARVIS_CONFIG=/opt/openjarvis/config.toml
+      - OPENJARVIS_SKILLS_DIR=/opt/openjarvis/skills/aethersy-plugins
+      - AETHERSY_API_BASE=${AETHERSY_API_BASE:-https://platform.aethersy.online}
+      - AETHERSY_REPO=${AETHERSY_REPO:-/opt/aethersy-infra}
+    volumes:
+      # Repository della piattaforma: serve al coding agent (aethersy_change).
+      - ${AETHERSY_REPO:-/opt/aethersy-infra}:/opt/aethersy-infra
+    # Nessuna porta pubblica: il traffico passa da Caddy (rete interna).
+    expose:
+      - "8000"
+    networks:
+      - jarvis_net
+
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: aethersy-jarvis-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - JARVIS_DOMAIN=${JARVIS_DOMAIN:-jarvis.aethersy.online}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - jarvis
+    networks:
+      - jarvis_net
+
+networks:
+  jarvis_net:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:
