@@ -98,9 +98,11 @@ let bubbles = [];
 let userTurns = [];
 let assistantTurns = [];
 let eventTurns = [];
+let allTurns = [];
 const readTurns = async () => {
   const raw = String(await evalJs(`JSON.stringify([...document.querySelectorAll('[data-turn]')].map(e => ({ role: e.getAttribute('data-turn'), text: (e.querySelector('p.whitespace-pre-wrap') || {}).textContent || '' })))`));
   const all = JSON.parse(raw);
+  allTurns = all;
   userTurns = all.filter((t) => t.role === "user").map((t) => t.text);
   assistantTurns = all.filter((t) => t.role === "assistant").map((t) => t.text);
   eventTurns = all.filter((t) => t.role === "event").map((t) => t.text);
@@ -125,6 +127,8 @@ check(
 // Una risposta in modalita' degradata (quota provider esaurita) non vale come
 // risposta: il turno deve contenere una risposta vera del modello.
 const degradedTurn = assistantTurns.find((t) => /ripristinando il collegamento/i.test(t));
+const nonEmptyTranscripts = transcriptBodies.filter((b) => /"text":"[^"]+"/.test(b)).length;
+console.log("DIAG turni DOM:", allTurns.length, "| trascrizioni non vuote:", nonEmptyTranscripts, "| totale:", transcriptBodies.length);
 check(
   "risposta del modello (non degradata)",
   assistantTurns.length >= 1 && !degradedTurn,

@@ -89,6 +89,9 @@ export default function Jarvis() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const turnsRef = useRef<Turn[]>([]);
   const busyRef = useRef(false);
+  // Messaggio in attesa: se l'utente parla mentre Jarvis sta rispondendo,
+  // l'ultima frase non viene persa: viene girata al modello appena libero.
+  const pendingRef = useRef<string | null>(null);
   const voiceRef = useRef(true);
   const wakeWordRef = useRef(false);
   const alwaysOnRef = useRef(false);
@@ -169,7 +172,12 @@ export default function Jarvis() {
   const ask = useCallback(
     async (text: string) => {
       const message = text.trim();
-      if (!message || busyRef.current) return;
+      if (!message) return;
+      if (busyRef.current) {
+        // Jarvis sta rispondendo: si tiene l'ultima frase e la si gira dopo.
+        pendingRef.current = message;
+        return;
+      }
       busyRef.current = true;
       setBusy(true);
       setVoiceState("thinking");
@@ -193,6 +201,11 @@ export default function Jarvis() {
         busyRef.current = false;
         setBusy(false);
         setVoiceState("idle");
+        const pending = pendingRef.current;
+        if (pending) {
+          pendingRef.current = null;
+          void ask(pending);
+        }
       }
     },
     [pushTurn, speak, toast],
