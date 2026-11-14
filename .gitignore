@@ -42,3 +42,6 @@ Thumbs.db
 .idea/
 .vscode/
 go.mod
+
+# Screenshot di QA locali (non tracciati)
+shots-*/
