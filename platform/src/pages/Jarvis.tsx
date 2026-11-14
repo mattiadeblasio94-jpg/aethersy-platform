@@ -141,7 +141,7 @@ export default function Jarvis() {
       // riascolto manuale usa il modello di massima fedelta'.
       const result = await platformApi.speakJarvis(
         clean,
-        "af_sky",
+        "",
         "it",
         highFidelity ? "elevenlabs/eleven_multilingual_v2" : undefined,
       );
@@ -150,10 +150,22 @@ export default function Jarvis() {
       const url = URL.createObjectURL(new Blob([bytes], { type: `audio/${result.format ?? "mp3"}` }));
       const audio = new Audio(url);
       audioRef.current = audio;
+      // Il browser puo' non riprodurre l'audio (nessun dispositivo di uscita,
+      // scheda sospesa): senza un tetto massimo la promise non finirebbe
+      // mai e bloccherebbe il ciclo di ascolto.
+      const maxPlaybackMs = Math.min(120_000, Math.max(8_000, (bytes.length / 16_000) * 1000 + 5_000));
       await new Promise<void>((resolve) => {
-        audio.onended = () => resolve();
-        audio.onerror = () => resolve();
-        audio.play().catch(() => resolve());
+        let settled = false;
+        const done = () => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timer);
+          resolve();
+        };
+        const timer = window.setTimeout(done, maxPlaybackMs);
+        audio.onended = done;
+        audio.onerror = done;
+        audio.play().catch(done);
       });
       URL.revokeObjectURL(url);
       if (audioRef.current === audio) audioRef.current = null;
@@ -192,7 +204,9 @@ export default function Jarvis() {
           response.error?.message ??
           "Jarvis non ha restituito una risposta.";
         pushTurn({ role: "assistant", content: answer });
-        if (voiceRef.current) await speak(answer);
+        // La riproduzione non deve bloccare il ciclo: il turno si chiude
+        // subito e l'audio va avanti in parallelo.
+        if (voiceRef.current) void speak(answer);
       } catch (err) {
         const detail = (err as Error).message;
         pushTurn({ role: "assistant", content: `Errore: ${detail}` });

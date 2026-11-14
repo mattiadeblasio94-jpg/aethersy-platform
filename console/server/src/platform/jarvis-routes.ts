@@ -152,7 +152,13 @@ async function askJarvis(
   messages: unknown[],
   metadata: Record<string, unknown>,
 ): Promise<{ payload: unknown; model: string; fallbackFrom?: string }> {
-  const models = [config.jarvisModel, config.jarvisModelFallback].filter(
+  // La catena puo' contenere piu' riserve: JARVIS_MODEL_FALLBACK e' una lista
+  // separata da virgole (es. "nvidia/modello-b,gemini-3.6-flash").
+  const fallbacks = config.jarvisModelFallback
+    .split(",")
+    .map((model) => model.trim())
+    .filter(Boolean);
+  const models = [config.jarvisModel, ...fallbacks].filter(
     (model, index, all) => model && all.indexOf(model) === index,
   );
   let lastError: unknown = null;
@@ -264,7 +270,10 @@ export async function registerJarvisRoutes(app: FastifyInstance): Promise<void> 
         ],
         aethersy_degraded: {
           reason: (err as Error).message,
-          models: [config.jarvisModel, config.jarvisModelFallback].filter(Boolean),
+          models: [
+            config.jarvisModel,
+            ...config.jarvisModelFallback.split(",").map((m) => m.trim()),
+          ].filter(Boolean),
         },
       });
     }
@@ -357,7 +366,10 @@ export async function registerJarvisRoutes(app: FastifyInstance): Promise<void> 
         ],
         aethersy_degraded: {
           reason: (err as Error).message,
-          models: [config.jarvisModel, config.jarvisModelFallback].filter(Boolean),
+          models: [
+            config.jarvisModel,
+            ...config.jarvisModelFallback.split(",").map((m) => m.trim()),
+          ].filter(Boolean),
         },
       });
     }

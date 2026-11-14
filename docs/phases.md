@@ -2018,9 +2018,17 @@ proattivi dalla piattaforma e tool reali (vault, business, codice).
   importa esplicitamente: `/v1/tools` passa da 81 a 85 tool e Jarvis legge il
   vault ("Ci sono 1 voce di memoria nel vault").
 - **Catena dei modelli**: primario `nvidia/nemotron-3.5-lightning-30b-a3b`
-  (NVIDIA NIM, 1-3 s), riserva `gemini-3.6-flash`; se tutti i provider sono
-  saturi la chat risponde in modalita' degradata con una frase parlabile
-  invece di far cadere la conversazione.
+  (NVIDIA NIM, 1-3 s), prima riserva `nvidia/nemotron-3.5-bolt-e4b` (stessa
+  chiave NIM, <1 s, tool-calling verificato), seconda riserva
+  `gemini-3.6-flash` (quota giornaliera free). `JARVIS_MODEL_FALLBACK` accetta
+  una lista separata da virgole; se tutti i provider sono saturi la chat
+  risponde in modalita' degradata con una frase parlabile invece di far
+  cadere la conversazione.
+- **Ciclo di ascolto non bloccato**: la riproduzione dell'audio non blocca
+  piu' il turno (era `await speak(...)`: senza un dispositivo di uscita la
+  promise `audio.onended` non arrivava e Jarvis smetteva di rispondere). Il
+  playback ha un tetto massimo e la frase pronunciata mentre il modello
+  risponde viene conservata e girata al modello appena libero.
 - **QA live**: `scripts/qa-jarvis-live.mjs` -> **12/12 superati, 0 falliti**
   (ascolto continuo, 2+ turni automatici dal microfono simulato, STT
   ElevenLabs, risposta del modello con dato reale, TTS, evento proattivo

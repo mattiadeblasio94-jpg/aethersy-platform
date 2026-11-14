@@ -14,8 +14,10 @@ default = "nim"
 # aziendale, quindi regge la conversazione in tempo reale. Gemini (engine
 # "google") resta il modello di riserva quando la quota giornaliera e' libera.
 default_model = "nvidia/nemotron-3.5-lightning-30b-a3b"
-# Modello di riserva quando il primario e' saturo (quota o rate limit).
-fallback_model = "gemini-3.6-flash"
+# Modello di riserva quando il primario e' saturo (quota o rate limit):
+# Nemotron Bolt sulla stessa chiave NIM (risposta in meno di un secondo),
+# poi Gemini quando la quota giornaliera e' libera.
+fallback_model = "nvidia/nemotron-3.5-bolt-e4b"
 provider = "local"
 temperature = 0.2
 # 1024 token bastano per una risposta parlabile e non esauriscono la quota

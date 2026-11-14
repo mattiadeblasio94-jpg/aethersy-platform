@@ -167,7 +167,8 @@ export const config = {
   jarvisModel: process.env.JARVIS_MODEL ?? "nvidia/nemotron-3.5-lightning-30b-a3b",
   // Modello di riserva: se il primario non risponde (o e' troppo lento per una
   // conversazione in tempo reale), il BFF ritenta con questo.
-  jarvisModelFallback: process.env.JARVIS_MODEL_FALLBACK ?? "nvidia/nemotron-3.5-lightning-30b-a3b",
+  jarvisModelFallback:
+    process.env.JARVIS_MODEL_FALLBACK ?? "nvidia/nemotron-3.5-bolt-e4b,gemini-3.6-flash",
   // Budget di attesa del modello primario (ms). Superato, si passa al
   // fallback senza aspettare oltre.
   jarvisPrimaryTimeoutMs: Number(process.env.JARVIS_PRIMARY_TIMEOUT_MS ?? 20_000),

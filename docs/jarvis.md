@@ -201,8 +201,12 @@ backup.
   `aethersy_speak`, `aethersy_change` sono registrati in OpenJarvis (import
   esplicito nel Dockerfile) e il modello li usa per i dati di piattaforma.
 - **Catena modelli**: `nvidia/nemotron-3.5-lightning-30b-a3b` (NIM, 1-3 s) ->
-  `gemini-3.6-flash` (riserva). Se i provider sono saturi la chat risponde in
-  modalita' degradata ("Sto ancora ripristinando il collegamento...") invece di
+  `nvidia/nemotron-3.5-bolt-e4b` (NIM, <1 s) -> `gemini-3.6-flash` (riserva con
+  quota giornaliera). Se i provider sono saturi la chat risponde in modalita'
+  degradata ("Sto ancora ripristinando il collegamento...") invece di
   interrompere la conversazione.
+- **Non bloccante**: l'audio della risposta non blocca il ciclo (playback con
+  tetto massimo) e la frase pronunciata durante la risposta del modello viene
+  girata al modello appena libero.
 - **QA**: `scripts/qa-jarvis-live.mjs` -> 12/12 (ascolto continuo, due turni
   automatici, STT, risposta con dato reale, TTS, evento SSE).
