@@ -178,3 +178,31 @@ backup.
   certificato e il passaggio della console al dominio pubblico resta sospeso.
 - **Verificato in locale**: trascrizione (faster-whisper) e tool-calling
   (NVIDIA) con risposta fedele agli errori reali della piattaforma.
+
+### 7.1 Modalita' sempre sveglio (14/11/2026)
+
+- **Ascolto continuo**: `MediaRecorder` + VAD sul RMS (soglia 0.035, silenzio
+  750 ms, parlato minimo 350 ms). Ogni turno di parlato viene chiuso come
+  segmento: il primo chunk (header webm) viene riattaccato, cosi' il file
+  inviato e' sempre decodificabile. Con noise suppression ed echo
+  cancellation del browser.
+- **Barge-in**: se l'utente parla mentre Jarvis parla, l'audio si ferma.
+- **Wake word**: opzionale ("Jarvis" per attivare); default: a voce libera.
+- **TTS a bassa latenza**: ElevenLabs `eleven_flash_v2_5`, output mp3 64 kbps;
+  il pulsante "Rileggi" usa `eleven_multilingual_v2` (massima fedelta').
+- **STT**: ElevenLabs Scribe (primo provider, `language_code=it`), con
+  faster-whisper `small` sul VPS come fallback. I segmenti parziali usano
+  solo il provider cloud (un file incompleto non e' decodificabile da
+  whisper).
+- **Proattivita'**: il watcher sul VPS invia eventi al BFF
+  (`POST /api/platform/jarvis/events`, header `x-jarvis-token`); la pagina li
+  riceve in streaming (SSE) e li annuncia anche a voce.
+- **Tool reali**: i tool `aethersy_control`, `aethersy_memory`,
+  `aethersy_speak`, `aethersy_change` sono registrati in OpenJarvis (import
+  esplicito nel Dockerfile) e il modello li usa per i dati di piattaforma.
+- **Catena modelli**: `nvidia/nemotron-3.5-lightning-30b-a3b` (NIM, 1-3 s) ->
+  `gemini-3.6-flash` (riserva). Se i provider sono saturi la chat risponde in
+  modalita' degradata ("Sto ancora ripristinando il collegamento...") invece di
+  interrompere la conversazione.
+- **QA**: `scripts/qa-jarvis-live.mjs` -> 12/12 (ascolto continuo, due turni
+  automatici, STT, risposta con dato reale, TTS, evento SSE).

@@ -165,6 +165,40 @@ export const config = {
   // Modello di Jarvis richiesto all'API OpenAI-compatibile. Deve essere un id
   // che il server OpenJarvis conosce (non un alias libero come "jarvis").
   jarvisModel: process.env.JARVIS_MODEL ?? "nvidia/nemotron-3.5-lightning-30b-a3b",
+  // Modello di riserva: se il primario non risponde (o e' troppo lento per una
+  // conversazione in tempo reale), il BFF ritenta con questo.
+  jarvisModelFallback: process.env.JARVIS_MODEL_FALLBACK ?? "nvidia/nemotron-3.5-lightning-30b-a3b",
+  // Budget di attesa del modello primario (ms). Superato, si passa al
+  // fallback senza aspettare oltre.
+  jarvisPrimaryTimeoutMs: Number(process.env.JARVIS_PRIMARY_TIMEOUT_MS ?? 20_000),
+
+  // Token condiviso con il watcher di Jarvis (VPS dedicato): il watcher
+  // invia gli eventi proattivi al BFF con questo token. Se assente, la
+  // rotta di ingest e' disabilitata (nessun accesso esterno al BFF).
+  jarvisEventsToken: process.env.JARVIS_EVENTS_TOKEN ?? "",
+  // Tenant che riceve gli eventi proattivi di Jarvis (default: il tenant
+  // "piattaforma"). Se assente, gli eventi vengono attribuiti al tenant
+  // dell'utente che ha eseguito l'ultimo deploy.
+  jarvisEventsTenantId: process.env.JARVIS_EVENTS_TENANT_ID ?? "",
+
+  // --- ElevenLabs (Fase 35) -------------------------------------------------
+  // Voce naturale (TTS multilingue, ottima in italiano) e comprensione
+  // italiana dello STT (Scribe). Entrambe opzionali: senza chiave il BFF
+  // continua con Venice/Replicate e faster-whisper su Jarvis.
+  elevenLabsKey: process.env.ELEVENLABS_API_KEY ?? "",
+  elevenLabsBase: (process.env.ELEVENLABS_BASE_URL ?? "https://api.elevenlabs.io/v1").replace(/\/$/, ""),
+  elevenLabsVoiceId: process.env.ELEVENLABS_VOICE_ID ?? "nPczCjzI2devNBz1zQrb",
+  elevenLabsModel: process.env.ELEVENLABS_MODEL ?? "eleven_flash_v2_5",
+  elevenLabsScribeModel: process.env.ELEVENLABS_SCRIBE_MODEL ?? "scribe_v1",
+  // Se "false", lo STT ElevenLabs non viene usato (si resta su whisper).
+  elevenLabsSttEnabled: (process.env.ELEVENLABS_STT_ENABLED ?? "true") === "true",
+
+  // --- Meta (Llama API) -----------------------------------------------------
+  // API OpenAI-compatibile di Meta (api.meta.ai). Usata come provider
+  // secondario del BFF quando configurata.
+  metaKey: process.env.META_API_KEY ?? "",
+  metaBase: (process.env.META_BASE_URL ?? "https://api.meta.ai/v1").replace(/\/$/, ""),
+  metaModel: process.env.META_MODEL ?? "",
 
   // Versione e commit del deploy in corso: finiscono nella notifica di
   // deploy che il BFF registra all'avvio e inoltra ai canali configurati.

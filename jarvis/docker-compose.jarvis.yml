@@ -46,6 +46,31 @@ services:
     networks:
       - platform_net
 
+  # Watcher: il processo che tiene Jarvis VIGILE. Osserva la piattaforma e
+  # segnala al BFF tutto quello che merita attenzione (lead, ordini, run
+  # falliti, saldi in esaurimento, servizi non sani). La pagina /jarvis li
+  # riceve in streaming e li annuncia anche a voce.
+  watcher:
+    image: python:3.12-slim
+    container_name: aethersy-jarvis-watcher
+    restart: unless-stopped
+    command: ["python", "-u", "/opt/watcher/watch.py"]
+    env_file:
+      - .env
+    environment:
+      - AETHERSY_API_BASE=${AETHERSY_API_BASE:-https://platform.aethersy.online}
+      - JARVIS_EVENTS_URL=${JARVIS_EVENTS_URL:-https://platform.aethersy.online/api/platform/jarvis/events}
+      - JARVIS_EVENTS_TOKEN=${JARVIS_EVENTS_TOKEN:-}
+      - WATCH_INTERVAL_SEC=${WATCH_INTERVAL_SEC:-120}
+      - WATCH_DIGEST_EVERY=${WATCH_DIGEST_EVERY:-30}
+      - WATCH_LOW_BALANCE=${WATCH_LOW_BALANCE:-10}
+      - WATCH_STATE_FILE=/state/watcher-state.json
+    volumes:
+      - ./watcher:/opt/watcher:ro
+      - watcher_state:/state
+    networks:
+      - platform_net
+
   caddy:
     image: caddy:2.8-alpine
     container_name: aethersy-jarvis-caddy
@@ -75,3 +100,4 @@ volumes:
   jarvis_state:
   caddy_data:
   caddy_config:
+  watcher_state:

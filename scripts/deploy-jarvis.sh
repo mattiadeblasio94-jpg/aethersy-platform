@@ -58,7 +58,7 @@ ssh "${HOST}" "set -euo pipefail
     chmod 600 jarvis/.env
   fi
   # Le chiavi provider arrivano dal .env principale del VPS (mai dal repo).
-  for key in NVIDIA_API_KEY NIM_API_KEY ZAI_API_KEY OPENROUTER_API_KEY AETHERSY_EMAIL AETHERSY_PASSWORD AETHERSY_API_KEY; do
+  for key in NVIDIA_API_KEY NIM_API_KEY ZAI_API_KEY OPENROUTER_API_KEY GEMINI_API_KEY ELEVENLABS_API_KEY ELEVENLABS_VOICE_ID ELEVENLABS_MODEL JARVIS_EVENTS_TOKEN AETHERSY_EMAIL AETHERSY_PASSWORD AETHERSY_API_KEY; do
     value=\"\$(grep -m1 -E \"^\\\${key}=\" .env 2>/dev/null | cut -d= -f2- || true)\"
     if [ -n \"\$value\" ] && ! grep -q -E \"^\\\${key}=\" jarvis/.env; then
       printf '%s=%s\n' \"\$key\" \"\$value\" >> jarvis/.env
@@ -72,7 +72,7 @@ echo "==> Build immagine (puo' richiedere diversi minuti: dipendenze Python)"
 ssh "${HOST}" "cd '${REMOTE_DIR}' && ${COMPOSE} build jarvis"
 
 echo "==> Avvio servizio"
-ssh "${HOST}" "cd '${REMOTE_DIR}' && ${COMPOSE} up -d jarvis && ${COMPOSE} ps"
+ssh "${HOST}" "cd '${REMOTE_DIR}' && ${COMPOSE} up -d jarvis watcher && ${COMPOSE} ps"
 
 if [ -n "${PROFILE}" ]; then
   echo "==> Avvio reverse proxy (profilo ${PROFILE})"

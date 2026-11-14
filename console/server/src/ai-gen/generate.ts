@@ -15,6 +15,11 @@ import {
   synthesizeSpeech as replicateSynthesizeSpeech,
 } from "./replicate.js";
 import { falGenerateImage } from "./fal.js";
+import {
+  elevenLabsConfigured,
+  synthesizeSpeech as elevenSynthesizeSpeech,
+} from "./elevenlabs.js";
+import { config } from "../config.js";
 
 // =============================================================================
 // Dispatch della GENERAZIONE (img_out / tts / vid_out) verso Venice, con
@@ -68,7 +73,7 @@ async function billGen(
   model: string,
   billableUnits: number,
   latencyMs: number,
-  provider: "venice" | "replicate" | "fal",
+  provider: "venice" | "replicate" | "fal" | "elevenlabs",
 ): Promise<GenBilling> {
   const unit = UNIT_BY_CAPABILITY[capability];
   const res = await recordUsage({
@@ -151,6 +156,49 @@ export interface SynthesizeInput extends Omit<TtsParams, "model"> {
 
 export async function synthesizeSpeechMetered(input: SynthesizeInput) {
   const { meter, ...params } = input;
+
+  // ElevenLabs diretto: voce naturale in italiano (priorita' quando la chiave
+  // e' presente). In caso di errore si prosegue con Venice -> Replicate.
+  // Un model esplicito "elevenlabs/<id>" sceglie la voce: il default e' il
+  // modello rapido (latenza minima per il dialogo), "Rileggi" puo' chiedere
+  // il modello di massima fedelta'.
+  const elevenModel = meter.model?.startsWith("elevenlabs/")
+    ? meter.model.slice("elevenlabs/".length)
+    : undefined;
+  if (elevenLabsConfigured() && (!meter.model || elevenModel)) {
+    try {
+      const started = Date.now();
+      const audio = await elevenSynthesizeSpeech({
+        text: params.input,
+        voiceId: params.voice,
+        model: elevenModel,
+        speed: params.speed,
+        outputFormat: params.responseFormat === "wav" ? "pcm_44100" : "mp3_44100_64",
+      });
+      const billing = await billGen(
+        meter,
+        "tts",
+        `elevenlabs/${elevenModel ?? config.elevenLabsModel}`,
+        params.input.length,
+        Date.now() - started,
+        "elevenlabs",
+      );
+      return {
+        capability: "tts" as const,
+        provider: "elevenlabs",
+        model: `elevenlabs/${elevenModel ?? config.elevenLabsModel}`,
+        voice: params.voice ?? config.elevenLabsVoiceId,
+        audio: audio.toString("base64"),
+        format: params.responseFormat === "wav" ? "wav" : "mp3",
+        billableUnits: params.input.length,
+        latencyMs: Date.now() - started,
+        billing,
+      };
+    } catch {
+      // ElevenLabs non raggiungibile: si continua con la catena gia' presente.
+    }
+  }
+
   const chosen = await selectGenModel("tts", { requested: meter.model });
 
   try {

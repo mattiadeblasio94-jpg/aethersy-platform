@@ -371,6 +371,18 @@ export interface JarvisSpeech {
   message?: string;
 }
 
+/** Evento proattivo generato dal watcher di Jarvis. */
+export interface JarvisEvent {
+  id: string;
+  kind: "notice" | "alert" | "task" | "insight" | "system";
+  severity: "info" | "warning" | "critical";
+  title: string;
+  message: string;
+  source: string;
+  meta?: Record<string, unknown>;
+  created_at: string;
+}
+
 /** Vista admin: utenti, tenant, consumi e costi reali dei provider. */
 export interface AdminOverview {
   generatedAt: string;
@@ -857,17 +869,30 @@ export const platformApi = {
     http.get<{ enabled: boolean; reachable: boolean; message?: string }>("/api/platform/jarvis/status"),
   askJarvis: (message: string, history: JarvisMessage[]) =>
     http.post<JarvisChatResponse>("/api/platform/jarvis/chat", { message, history }),
-  transcribeJarvis: (audio: Blob, contentType: string) =>
-    http.postBinary<JarvisTranscript>("/api/platform/jarvis/transcribe", audio, contentType),
+  /**
+   * Trascrizione di un segmento audio. `partial` = true per i segmenti ancora
+   * in registrazione: in quel caso si usa solo il provider cloud ( ElevenLabs
+   * Scribe), che tollera file incompleti, e gli errori non bloccano il turno.
+   */
+  transcribeJarvis: (audio: Blob, contentType: string, partial = false) =>
+    http.postBinary<JarvisTranscript>(
+      `/api/platform/jarvis/transcribe${partial ? "?partial=1" : ""}`,
+      audio,
+      contentType,
+    ),
   /** Sintesi vocale della risposta (TTS): restituisce l'URL dell'audio riproducibile. */
-  speakJarvis: (text: string, voice = "af_sky", language = "it") =>
+  speakJarvis: (text: string, voice = "af_sky", language = "it", model?: string) =>
     http.post<JarvisSpeech>("/api/ai/generate", {
       capability: "tts",
       input: text,
       voice,
       language,
+      ...(model ? { model } : {}),
       responseFormat: "mp3",
     }),
+  /** Eventi proattivi di Jarvis (arrivano anche in streaming via SSE). */
+  getJarvisEvents: (limit = 20) =>
+    http.get<{ events: JarvisEvent[] }>(`/api/platform/jarvis/events?limit=${limit}`),
 
   // --- Consumo --------------------------------------------------------------
   getUsage: (limit = 50) => http.get<UsageResponse>(`/api/ai/usage?limit=${limit}`),

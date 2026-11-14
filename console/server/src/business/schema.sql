@@ -82,6 +82,31 @@ CREATE INDEX IF NOT EXISTS product_tenant_status
 CREATE UNIQUE INDEX IF NOT EXISTS product_tenant_sku_uniq
   ON business.product(tenant_id, sku) WHERE sku <> '';
 
+-- Eventi proattivi di Jarvis (Fase 35) -----------------------------------------
+-- Jarvis non aspetta istruzioni: il watcher sul VPS dedicato osserva la
+-- piattaforma e segnala qui tutto quello che merita attenzione (ordini, lead,
+-- run falliti, obiettivi, saldi). La pagina /jarvis li riceve in streaming
+-- (SSE) e li annuncia anche a voce.
+CREATE TABLE IF NOT EXISTS business.jarvis_event (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id  uuid NOT NULL REFERENCES metering.tenant(id) ON DELETE CASCADE,
+  kind       text NOT NULL DEFAULT 'notice',
+  severity   text NOT NULL DEFAULT 'info',
+  title      text NOT NULL,
+  message    text NOT NULL DEFAULT '',
+  source     text NOT NULL DEFAULT 'jarvis',
+  meta       jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT jarvis_event_kind CHECK (
+    kind IN ('notice', 'alert', 'task', 'insight', 'system')
+  ),
+  CONSTRAINT jarvis_event_severity CHECK (
+    severity IN ('info', 'warning', 'critical')
+  )
+);
+CREATE INDEX IF NOT EXISTS jarvis_event_tenant_time
+  ON business.jarvis_event(tenant_id, created_at DESC);
+
 -- Conversazioni (P1.3) --------------------------------------------------------
 -- Il canale centrale: l'utente scrive in linguaggio naturale e l'orchestratore
 -- decide se rispondere o accodare lavoro agli specialisti (pipeline_run). Ogni

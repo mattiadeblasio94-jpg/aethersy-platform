@@ -10,10 +10,17 @@
 default = "nim"
 
 [intelligence]
+# Nemotron 3.5 Lightning su NVIDIA NIM: risposta in 1-3 secondi e quota
+# aziendale, quindi regge la conversazione in tempo reale. Gemini (engine
+# "google") resta il modello di riserva quando la quota giornaliera e' libera.
 default_model = "nvidia/nemotron-3.5-lightning-30b-a3b"
+# Modello di riserva quando il primario e' saturo (quota o rate limit).
+fallback_model = "gemini-3.6-flash"
 provider = "local"
 temperature = 0.2
-max_tokens = 4096
+# 1024 token bastano per una risposta parlabile e non esauriscono la quota
+# del provider su una singola richiesta.
+max_tokens = 1024
 
 [speech]
 # STT locale: faster-whisper su CPU, modello small, lingua italiana.

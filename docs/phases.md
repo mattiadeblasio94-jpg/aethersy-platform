@@ -1984,3 +1984,48 @@ la piattaforma (Aruba) chiama il dominio pubblico.
   consumo misurato, connettori, area operativa unificata).
 - UI: `qa-ui-full.mjs` -> **11/11 passati, 0 falliti** (0 errori console,
   0 richieste fallite, anteprima PDF e download, login Telegram presente).
+
+### Fase 35 — Jarvis sempre sveglio (14/11/2026)
+
+**Obiettivo**: trasformare `/jarvis` in un agente vocale sempre attivo: ascolto
+continuo, barge-in, wake word opzionale, risposta a bassa latenza, eventi
+proattivi dalla piattaforma e tool reali (vault, business, codice).
+
+- **Eventi proattivi**: tabella `business.jarvis_event`, rotte
+  `POST/GET /api/platform/jarvis/events` e `GET /api/platform/jarvis/stream`
+  (SSE) nel BFF; watcher sempre attivo sul VPS dedicato
+  (`jarvis/watcher/watch.py`, servizio `watcher` nel compose) che osserva la
+  piattaforma e segnala lead, ordini, run falliti, obiettivi e saldi.
+- **Voce ElevenLabs**: nuovo provider `console/server/src/ai-gen/elevenlabs.ts`
+  (TTS + Scribe STT). TTS con `eleven_flash_v2_5` (latenza minima) e voce
+  pubblica "Brian"; "Rileggi" usa `eleven_multilingual_v2` (massima
+  fedelta'). STT Scribe e' il primo provider, faster-whisper resta il
+  fallback. La voce si risolve per **ID**: il nome (`marco`) non e' valido e
+  faceva fallire in silenzio il provider (poi' Venice/Replicate -> 429).
+- **Segmenti audio validi**: il browser mandava chunk webm concatenati, file
+  non decodificabili ("Invalid data found when processing input"). Ora il
+  primo chunk (header webm) viene conservato e riattaccato a ogni turno, e i
+  segmenti parziali usano solo ElevenLabs (`?partial=1`) senza whisper.
+- **Frequenza STT**: al massimo un turno al secondo e 12 al minuto, per non
+  consumare la quota del provider col rumore ambientale.
+- **Personalita' e intento**: `detectIntent()` classifica il turno (query,
+  command, monitor, status) e il prompt di sistema di Jarvis viene riscritto
+  per la voce: frasi brevi, niente markdown, dati reali via tool, proposte
+  d'azione per gli eventi proattivi.
+- **Tool Aethersy registrati**: i moduli `openjarvis.tools.aethersy_*` erano
+  copiati nel package ma non importati, quindi il modello non li vedeva
+  ("il tool aethersy_memory non e' disponibile"). Il Dockerfile ora li
+  importa esplicitamente: `/v1/tools` passa da 81 a 85 tool e Jarvis legge il
+  vault ("Ci sono 1 voce di memoria nel vault").
+- **Catena dei modelli**: primario `nvidia/nemotron-3.5-lightning-30b-a3b`
+  (NVIDIA NIM, 1-3 s), riserva `gemini-3.6-flash`; se tutti i provider sono
+  saturi la chat risponde in modalita' degradata con una frase parlabile
+  invece di far cadere la conversazione.
+- **QA live**: `scripts/qa-jarvis-live.mjs` -> **12/12 superati, 0 falliti**
+  (ascolto continuo, 2+ turni automatici dal microfono simulato, STT
+  ElevenLabs, risposta del modello con dato reale, TTS, evento proattivo
+  ricevuto in streaming).
+- **Nota di quota**: al momento del test Gemini (free tier, 20 richieste/giorno)
+  e OpenRouter ($10 consumati) erano esauriti e NIM rispondeva 429: il
+  funzionamento e' stato verificato con NIM. Per un uso continuativo serve
+  credito su un provider.

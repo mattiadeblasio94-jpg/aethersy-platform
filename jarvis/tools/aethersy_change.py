@@ -12,7 +12,8 @@ from openjarvis.core.registry import ToolRegistry
 from openjarvis.core.types import ToolResult
 from openjarvis.tools._stubs import BaseTool, ToolSpec
 
-DEFAULT_REPO = r"C:\Users\PC\aethersy-infra"
+# Repository della piattaforma: sul VPS e' il mount /opt/aethersy-infra.
+DEFAULT_REPO = "/opt/aethersy-infra"
 MAX_OUTPUT_CHARS = 4000
 DEFAULT_TIMEOUT = 1800
 

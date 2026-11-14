@@ -44,9 +44,14 @@ COPY jarvis/config/config.toml /opt/openjarvis/config.toml
 COPY jarvis/entrypoint.sh /usr/local/bin/jarvis-entrypoint
 RUN chmod +x /usr/local/bin/jarvis-entrypoint
 
+# I tool Aethersy sono moduli del package "openjarvis.tools": senza
+# l'import esplicito non vengono registrati e il modello non li vede.
+RUN printf '# Tool Aethersy (registrati via ToolRegistry)\nimport openjarvis.tools.aethersy_control  # noqa: F401,E402\nimport openjarvis.tools.aethersy_memory  # noqa: F401,E402\nimport openjarvis.tools.aethersy_speak  # noqa: F401,E402\nimport openjarvis.tools.aethersy_change  # noqa: F401,E402\n' >> /opt/openjarvis/src/openjarvis/tools/__init__.py
+
 # Ambiente Python precompilato: le dipendenze si risolvono in build, non a runtime.
 #   --extra server  -> API FastAPI/uvicorn
 #   --extra desktop -> faster-whisper (STT) + sounddevice
+#   --extra inference-google -> engine Gemini (modelli "gemini-*")
 # L'installazione usa `uv pip` (non `uv sync`): il lock del fork puo' usare un
 # formato piu' recente di uv, mentre il pyproject resta la fonte dei vincoli.
 # SETUPTOOLS_SCM_PRETEND_VERSION: il clone e' shallow e senza tag, quindi la
@@ -55,7 +60,7 @@ RUN rm -f /opt/openjarvis/uv.lock \
     && uv venv --python 3.12 /opt/openjarvis/.venv \
     && SETUPTOOLS_SCM_PRETEND_VERSION=0.3.0 HATCH_VCS_PRETEND_VERSION=0.3.0 \
        uv pip install --python /opt/openjarvis/.venv \
-         -e "/opt/openjarvis[server,desktop]" "httpx==0.27.2"
+         -e "/opt/openjarvis[server,desktop,inference-google]" "httpx==0.27.2"
 
 ENV OPENJARVIS_CONFIG=/opt/openjarvis/config.toml \
     OPENJARVIS_SKILLS_DIR=/opt/openjarvis/skills/aethersy-plugins \
